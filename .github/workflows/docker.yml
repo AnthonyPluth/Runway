@@ -74,12 +74,12 @@ jobs:
           # Which Vitest tests to run: only those whose imports reach a changed file under frontend/src/ (`vitest related`),
           # unless the change could reach every test: anything else in frontend/ (package.json, the lockfile, Vite's or
           # TypeScript's settings), the workflows or anything else not known to be outside the tests' reach (the tests
-          # only import from frontend/src/), the tests' shared setup (src/test/), or a file deleted or renamed (whose
+          # only import from frontend/src/), the tests' shared setup (src/test/), anything under extension/ (whose tests read its scripts), or a file deleted or renamed (whose
           # importers no longer import it, so `related` wouldn't find them). Every push to main runs them all.
           web_tests=$(grep -E '^frontend/src/' <<< "$files" | sed 's|^frontend/||' || true)
           beyond_tests='^(frontend/src/|runway/|tests/|extension/|docs/|[^/]+\.md$|pyproject\.toml$|poetry\.lock$)'
           if [ "$files" = "(too many to list)" ] || grep -qvE "$beyond_tests" <<< "$files" \
-             || grep -qE '^frontend/src/test/' <<< "$files" \
+             || grep -qE '^(frontend/src/test/|extension/)' <<< "$files" \
              || awk -F'\t' '$1 == "removed" || $1 == "renamed"' <<< "$listing" | cut -f2,3 | grep -q 'frontend/'; then
             web_tests=all
           fi

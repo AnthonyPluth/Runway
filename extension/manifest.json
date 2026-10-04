@@ -29,6 +29,14 @@
     "service_worker": "background.js",
     "scripts": [
       "page.js",
+      "util.js",
+      "runway.js",
+      "stores.js",
+      "frames.js",
+      "amazon.js",
+      "target.js",
+      "costco.js",
+      "carta.js",
       "background.js"
     ]
   },

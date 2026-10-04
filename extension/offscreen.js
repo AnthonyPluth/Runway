@@ -1,6 +1,6 @@
 // Chrome's hidden page for the extension: it holds the store frames the extension reads in, so no tab or window
 // opens. (Firefox's extension background is a page already, and holds them itself.)
-// The same addresses as storeUrl in background.js (which can't be imported here): https on a store's own host.
+// The same addresses as storeUrl in stores.js (which can't be imported here): https on a store's own host.
 const STORE_HOSTS = ["amazon.com", "target.com", "carta.com", "costco.com"];
 function storeFrame(url) {
   try {
