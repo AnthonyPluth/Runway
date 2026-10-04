@@ -7,6 +7,8 @@
   import type { Category } from "$lib/types";
   import { cn } from "$lib/utils";
   import { act } from "$lib/act";
+  import { isPhone } from "$lib/phone.svelte";
+  import { flushSync } from "svelte";
 
   // A category's emoji: click the icon, then search by name ("coffee", "car"), type or paste any emoji (the phone's emoji
   // keyboard, or the computer's emoji panel), or pick one of the grid's. A web page can't open the device's own emoji
@@ -16,6 +18,12 @@
   let open = $state(false);
   let root = $state<HTMLElement>();
   let trigger = $state<HTMLButtonElement>();
+  // On a phone the picker is just a field for the emoji keyboard, no grid and no search. "Phone" is the app's phone layout
+  // (isPhone) that is also touch-driven, since that's what has an on-screen keyboard with an emoji key: a narrow desktop
+  // window passes the first but has no such keyboard and keeps the full picker. A tablet (768 px and up) isn't a phone
+  // anywhere else in the app either, and keeps the full picker too. Decided as the picker opens, so it can't change under you.
+  let compact = $state(false);
+  const touch = () => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   // Escape and Done put the focus back on the icon; a click elsewhere leaves it where you clicked.
   function close(refocus = true) {
     open = false;
@@ -31,15 +39,29 @@
   const pickIcon = (icon: string) => save(icon, c.custom_color);
   let typed = $state("");
   let box = $state<HTMLInputElement>();
-  $effect(() => { if (open) box?.focus(); });
+  $effect(() => { if (open && !compact) box?.focus(); });
+  // iOS raises the keyboard only for a focus() made inside the tap itself, and an $effect runs after it. So the compact
+  // field is rendered and focused right here: flushSync puts the input in the DOM synchronously, and the focus follows in
+  // the same click handler. (Keeping a hidden input rendered would also work, but one per category row, kept off-screen
+  // and out of the accessibility tree by tricks, is more fragile than this.)
+  function toggle() {
+    if (open) return close();
+    compact = isPhone() && touch();
+    open = true;
+    if (compact) { flushSync(); box?.focus(); }
+  }
   // Words search the emoji by name; an emoji typed or pasted is saved as it is.
   const found = $derived(searchEmoji(typed));
   const searching = $derived(typed.trim() !== "");
   function onType() {
     const e = lastEmoji(typed);
-    if (!e) return;       // letters and the like: a search, nothing to save
+    if (!e) {             // letters and the like: a search, nothing to save
+      if (compact) typed = "";   // and on a phone there's no search to show them in
+      return;
+    }
     typed = "";
     pickIcon(e);
+    if (compact) { box?.blur(); close(false); }   // the emoji key's job is done: put the keyboard away
   }
   function onKey(e: KeyboardEvent) {
     if (e.key === "Enter" && found.length) { e.preventDefault(); pickIcon(found[0]); typed = ""; }
@@ -54,10 +76,20 @@
 
 <span class="relative inline-flex" bind:this={root}>
   <button type="button" bind:this={trigger} class="flex cursor-pointer items-center justify-center rounded-full phone:size-10 ring-offset-2 ring-offset-card hover:ring-2 hover:ring-ring/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-    title="Change the emoji" aria-label={`Emoji for ${c.name}`} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? close() : (open = true))}>
+    title="Change the emoji" aria-label={`Emoji for ${c.name}`} aria-haspopup="dialog" aria-expanded={open} onclick={toggle}>
     <CatIcon name={c.name} size={28} />
   </button>
-  {#if open}
+  {#if open && compact}
+    <div data-editor role="dialog" aria-label={`Emoji for ${c.name}`}
+      class="absolute top-11 left-0 z-20 w-[16rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg">
+      <input bind:this={box} bind:value={typed} oninput={onType} type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+        class="h-10 w-full rounded-md border bg-background px-2 text-base" placeholder="Type an emoji"
+        aria-label={`Type an emoji for ${c.name}`} />
+      <div class="mt-1 flex justify-start">
+        <Button variant="link" size="sm" class="px-0" disabled={!c.custom_icon && !c.custom_color} onclick={() => save(null, null)}>Reset to default</Button>
+      </div>
+    </div>
+  {:else if open}
     <div data-editor role="dialog" aria-label={`Emoji for ${c.name}`}
       class="absolute top-9 left-0 z-20 w-[20.5rem] max-w-[calc(100vw-2rem)] rounded-lg phone:top-11 border bg-popover p-3 text-popover-foreground shadow-lg">
       <div class="mb-1.5 text-xs font-medium text-muted-foreground">Emoji</div>
