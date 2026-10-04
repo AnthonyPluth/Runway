@@ -604,7 +604,7 @@ class SyncTests(DbCase):
         out = plaid.sync_all(self.c)
         self.assertEqual(out["items"], 0)
         self.assertIn("credentials have changed", out["errors"][0])
-        self.assertEqual(self.c.execute(select(PlaidItem.error)).fetchone()[0], "ITEM_LOGIN_REQUIRED")
+        self.assertEqual(self.c.execute(select(PlaidItem.inv_error)).fetchone()[0], "ITEM_LOGIN_REQUIRED")
         plaid.remove_item(self.c, item)
         for model in (PlaidItem, InvAccount, Holding, InvTransaction):
             self.assertEqual(self.c.execute(select(func.count()).select_from(model)).fetchone()[0], 0, model.__table__.name)

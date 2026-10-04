@@ -280,6 +280,8 @@ class PlaidItem(Base):
     error: Mapped[str | None]
     products: Mapped[str | None]
     cursor: Mapped[str | None]
+    inv_last_sync: Mapped[str | None]
+    inv_error: Mapped[str | None]
 
     accounts: Mapped[list[PlaidAccount]] = _rel("PlaidAccount", "foreign(PlaidAccount.item_id) == PlaidItem.item_id")
 

@@ -454,6 +454,37 @@ class MigrationTests(unittest.TestCase):
                              {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
             self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
 
+    def test_0037_gives_each_side_of_a_plaid_connection_its_own_error_and_time(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0036")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("inv_error", {x["name"] for x in sa.inspect(c).get_columns("plaid_items")})
+            c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, products, last_sync, error) VALUES "
+                              "('inv', 't', 'investments', '2026-09-01 10:00:00', 'ITEM_LOGIN_REQUIRED'), "
+                              "('old', 't', NULL, '2026-09-02 10:00:00', NULL), "
+                              "('bank', 't', 'liabilities,transactions', '2026-09-03 10:00:00', 'X'), "
+                              "('cards', 't', 'liabilities', NULL, 'Y'), "
+                              "('mix', 't', 'investments,transactions', '2026-09-04 10:00:00', 'Z')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        cols = "item_id, last_sync, error, inv_last_sync, inv_error"
+        with db.engine(self.path).begin() as c:
+            got = {r[0]: tuple(r[1:]) for r in c.exec_driver_sql(f"SELECT {cols} FROM plaid_items")}
+        self.assertEqual(got, {"inv": (None, None, "2026-09-01 10:00:00", "ITEM_LOGIN_REQUIRED"),
+                               "old": (None, None, "2026-09-02 10:00:00", None),
+                               "bank": ("2026-09-03 10:00:00", "X", None, None),
+                               "cards": (None, "Y", None, None),
+                               "mix": ("2026-09-04 10:00:00", "Z", None, None)})   # only ever synced as a bank one
+        with db.engine(self.path).begin() as c:   # and back down: each gets the side it was synced as
+            c.exec_driver_sql("UPDATE plaid_items SET inv_error = 'W', inv_last_sync = '2026-09-05 10:00:00' WHERE item_id = 'mix'")
+            command.downgrade(db.alembic_config(c), "0036")
+            got = {r[0]: tuple(r[1:]) for r in c.exec_driver_sql("SELECT item_id, last_sync, error FROM plaid_items")}
+        self.assertEqual(got, {"inv": ("2026-09-01 10:00:00", "ITEM_LOGIN_REQUIRED"), "old": ("2026-09-02 10:00:00", None),
+                               "bank": ("2026-09-03 10:00:00", "X"), "cards": (None, "Y"), "mix": ("2026-09-04 10:00:00", "Z")})
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating

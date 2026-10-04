@@ -34,6 +34,8 @@ class BrandTests(unittest.TestCase):
         self.assertIs(brands.institution_match(("Chase", None, "Card"), ("JPMorgan Chase", None, "Freedom")), True)
         self.assertIs(brands.institution_match((None, None, "Sapphire Reserve"), ("Citibank", None, "Card")), False)
         self.assertIs(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings")), True)
+        self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings"), by_name=False))
+        self.assertIs(brands.institution_match(("Chase", None, "Card"), ("Citibank", None, "Card"), by_name=False), False)
         self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Wealthfront", None, "Cash")))
 
     def test_accounts_get_logo_dev_s_logo_by_institution(self):

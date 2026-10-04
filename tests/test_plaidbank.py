@@ -264,15 +264,21 @@ class PlaidBankTests(DbCase):
         self.assertEqual({r[0] for r in self.c.execute(select(Account.balance_date).where(Account.provider == "plaid"))},
                          {TODAY.isoformat()})
 
-    def test_an_unbranded_bank_is_the_same_institution_by_its_name(self):
-        """No known brand on either side: the institution names agreeing count, as they do for a known one."""
+    def test_matching_counts_the_institution_only_by_a_known_brand(self):
+        """No known brand on either side: names alike ("Ally Bank", "Ally") add nothing, so a close balance alone isn't
+        enough to link an account; the same balance at a known brand's is."""
         c = self.c
         c.execute(delete(Account))
         c.execute(insert(Account).values(id="sav", name="Savings", org="Ally Bank", kind="savings", balance=1010))
         c.execute(insert(PlaidItem).values(item_id="al", access_token="t", institution_name="Ally", products="transactions"))
         c.execute(insert(PlaidAccount).values(plaid_account_id="pa", item_id="al", name="Online Savings", type="depository",
                                               subtype="savings", current=1000))
-        self.assertEqual(plaidbank.auto_match(c, "al"), ["Savings"])   # a close balance at the same institution
+        self.assertEqual(plaidbank._score({"official_name": None, "name": "Online Savings", "current": 1000},
+                                          {"name": "Savings", "org": "Ally Bank", "balance": 1010}, "Ally"), 15)   # balance only
+        self.assertEqual(plaidbank.auto_match(c, "al"), [])
+        c.execute(update(Account).where(Account.id == "sav").values(org="Chase"))
+        c.execute(update(PlaidItem).where(PlaidItem.item_id == "al").values(institution_name="JPMorgan Chase"))
+        self.assertEqual(plaidbank.auto_match(c, "al"), ["Savings"])   # the same brand: +20
 
     def test_a_pending_charge_you_renamed_keeps_its_name_when_it_posts(self):
         self.link()
@@ -638,7 +644,9 @@ class PlaidBankTests(DbCase):
         self.assertEqual([it["item_id"] for it in s["items"]], ["item-b", "inv"])
         bank, inv = s["items"]
         self.assertEqual(list(bank), ["item_id", "institution_name", "env", "created_at", "last_sync", "error", "products",
-                                      "bank", "duplicates", "accounts"])
+                                      "sides", "bank", "duplicates", "accounts"])
+        self.assertEqual(list(bank["sides"]), ["bank"])
+        self.assertEqual(bank["sides"]["bank"], {"last_sync": bank["last_sync"], "error": None})
         self.assertEqual((bank["bank"], bank["products"], bank["duplicates"]), (True, ["liabilities", "transactions"], []))
         self.assertEqual(bank["accounts"], [   # by type, then name
             {"id": "p-new", "name": "Freedom", "official_name": None, "subtype": "credit card", "type": "credit", "mask": "9999",
@@ -751,10 +759,11 @@ class PlaidBankTests(DbCase):
             out = plaid.sync_item(self.c, "inv", TODAY)
         self.assertEqual(out, {"accounts": 2, "holdings": 1, "transactions": 3})
         self.assertEqual([o for _, o in seen], [None, {"count": 500, "offset": 0}, {"count": 500, "offset": 2}])
-        item = self.c.execute(select(PlaidItem.institution_name, PlaidItem.error, PlaidItem.last_sync)
+        item = self.c.execute(select(PlaidItem.institution_name, PlaidItem.inv_last_sync, PlaidItem.last_sync)
                               .where(PlaidItem.item_id == "inv")).fetchone()
         self.assertEqual(item["institution_name"], "Wealthfront")
-        self.assertTrue(item["last_sync"])
+        self.assertTrue(item["inv_last_sync"])
+        self.assertIsNone(item["last_sync"])   # the bank side's: it has none
         secs = {r["id"]: dict(r) for r in self.c.execute(select(Security))}
         self.assertEqual((secs["s1"]["name"], secs["s1"]["close_price"], secs["s1"]["close_as_of"], secs["s1"]["sector"]),
                          ("Vanguard Total", 200.0, "2026-09-01", "Mixed"))
@@ -787,7 +796,7 @@ class PlaidBankTests(DbCase):
         with mock.patch.object(plaid, "call", side_effect=plaid.PlaidError("login", "ITEM_LOGIN_REQUIRED")), \
                 self.assertRaises(plaid.PlaidError):
             plaid.sync_item(self.c, "inv", TODAY)
-        self.assertEqual(self.c.execute(select(PlaidItem.error)
+        self.assertEqual(self.c.execute(select(PlaidItem.inv_error)
                                         .where(PlaidItem.item_id == "inv")).fetchone()[0], "ITEM_LOGIN_REQUIRED")
         with mock.patch.object(plaid, "call", side_effect=call):
             self.assertEqual(plaid.sync_all(self.c), {"items": 1, "errors": []})
@@ -798,7 +807,7 @@ class PlaidBankTests(DbCase):
         """The holdings are saved, the activity isn't all there: the connection shows the problem (not an older one, or
         none), and isn't marked as synced, so the next sync reads the whole history again."""
         from unittest import mock
-        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", products="investments", error="OLD"))
+        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", products="investments", inv_error="OLD"))
         holdings = {"accounts": [{"account_id": "w1", "name": "Roth IRA", "type": "investment", "balances": {"current": 10.0}}],
                     "securities": [{"security_id": "s1", "ticker_symbol": "VTI", "type": "etf"}],
                     "holdings": [{"account_id": "w1", "security_id": "s1", "quantity": 1, "institution_value": 10}]}
@@ -812,8 +821,8 @@ class PlaidBankTests(DbCase):
                 plaid.sync_item(self.c, "inv", TODAY)
             self.assertEqual(plaid.sync_all(self.c, TODAY)["errors"], ["Connection: Plaid is down"])
         self.c.rollback()   # what the failed sync committed is what's left
-        item = self.c.execute(select(PlaidItem.error, PlaidItem.last_sync).where(PlaidItem.item_id == "inv")).fetchone()
-        self.assertEqual((item["error"], item["last_sync"]), ("INTERNAL_SERVER_ERROR", None))
+        item = self.c.execute(select(PlaidItem.inv_error, PlaidItem.inv_last_sync).where(PlaidItem.item_id == "inv")).fetchone()
+        self.assertEqual((item["inv_error"], item["inv_last_sync"]), ("INTERNAL_SERVER_ERROR", None))
         self.assertEqual(self.c.execute(select(Holding.value)).scalar(), 10.0)
 
     def test_a_connection_with_both_kinds_is_read_by_both_syncs_once_each(self):
@@ -838,9 +847,75 @@ class PlaidBankTests(DbCase):
             plaidbank.sync_all(self.c, TODAY)
             self.assertEqual(sorted(c.args[1] for c in bank.call_args_list), ["bank", "mix"])
             paths.clear(); bank.reset_mock()
-            plaid.sync_item(self.c, "mix", TODAY)         # its Sync button: the bank side, as before
+            out = plaid.sync_item(self.c, "mix", TODAY)   # its Sync button (and a new link): both sides
             bank.assert_called_once()
-            self.assertEqual(paths, [])
+            self.assertEqual(paths, ["/investments/holdings/get", "/investments/transactions/get"])
+            self.assertEqual(out, {"new": [], "investments": {"accounts": 0, "holdings": 0, "transactions": 0}})
+
+    def test_each_side_of_a_connection_keeps_its_own_problem(self):
+        """A connection with both kinds: one side failing doesn't stop the other, and one side going fine doesn't clear
+        the other's problem. Settings shows either problem, and the older of the two sync times."""
+        from unittest import mock
+
+        from runway import server
+        self.link()
+        self.c.execute(update(PlaidItem).where(PlaidItem.item_id == "item-b").values(products="investments,transactions"))
+        self.c.commit()
+        holdings = {"accounts": [], "holdings": []}
+
+        def down(_conn, path, _body):
+            raise plaid.PlaidError("Plaid is down", "INTERNAL_SERVER_ERROR")
+
+        def up(_conn, path, _body):
+            return holdings if path == "/investments/holdings/get" else {"total_investment_transactions": 0, "investment_transactions": []}
+        with mock.patch.object(plaid, "call", side_effect=down):
+            out = plaid.sync_item(self.c, "item-b", TODAY)          # the bank side goes fine
+        self.assertEqual(out["error"], "investments: Plaid is down")
+        self.c.commit()
+        row = lambda: tuple(self.c.execute(select(PlaidItem.error, PlaidItem.last_sync, PlaidItem.inv_error,
+                                                  PlaidItem.inv_last_sync).where(PlaidItem.item_id == "item-b")).fetchone())
+        err, _, inv_err, inv_time = row()
+        self.assertEqual((err, inv_err, inv_time), (None, "INTERNAL_SERVER_ERROR", None))
+        status = next(it for it in server.api_plaid_status(self.c, {}, {})["items"] if it["item_id"] == "item-b")
+        self.assertEqual((status["error"], status["last_sync"]), ("INTERNAL_SERVER_ERROR", None))   # investments never synced
+        self.assertEqual(status["sides"]["investments"], {"last_sync": None, "error": "INTERNAL_SERVER_ERROR"})
+        # The bank sync on its own going fine leaves the investments' problem.
+        plaidbank.sync_all(self.c, TODAY)
+        self.assertEqual(row()[2], "INTERNAL_SERVER_ERROR")
+        # Now the bank side fails and the investments don't: each keeps its own.
+        MockBank.fail = {"/accounts/get": (400, {"error_code": "ITEM_LOGIN_REQUIRED", "error_message": "log in again"})}
+        with mock.patch.object(plaid, "call", side_effect=up):
+            out = plaid.sync_item(self.c, "item-b", TODAY)
+            self.assertRegex(out["error"], "^transactions and balances: .*log in again")
+            self.assertEqual(out["investments"], {"accounts": 0, "holdings": 0, "transactions": 0})
+            self.assertEqual(plaid.sync_all(self.c, TODAY), {"items": 1, "errors": []})
+        err, _, inv_err, inv_time = row()
+        self.assertEqual((err, inv_err, bool(inv_time)), ("ITEM_LOGIN_REQUIRED", None, True))
+        status = next(it for it in server.api_plaid_status(self.c, {}, {})["items"] if it["item_id"] == "item-b")
+        self.assertEqual(status["error"], "ITEM_LOGIN_REQUIRED")
+        # Both failing: the bank side's error is raised, and each side has its own.
+        with mock.patch.object(plaid, "call", side_effect=down), self.assertRaisesRegex(plaid.PlaidError, "log in again"):
+            plaid.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual((row()[0], row()[2]), ("ITEM_LOGIN_REQUIRED", "INTERNAL_SERVER_ERROR"))
+
+    def test_a_connection_with_both_kinds_holds_both_sync_locks(self):
+        from runway.server import sync as server_sync
+        from runway.server.api import connections
+        self.c.execute(insert(PlaidItem), [{"item_id": "mix", "access_token": "tok", "products": "investments,transactions"},
+                                           {"item_id": "inv", "access_token": "tok", "products": "investments"}])
+        mix = connections._item_lock(self.c, "mix")
+        self.assertEqual(mix.locks, [server_sync._sync_lock, server_sync._inv_lock])
+        self.assertEqual(connections._item_lock(self.c, "inv").locks, [server_sync._inv_lock])
+        self.assertTrue(server_sync._inv_lock.acquire(blocking=False))   # the investment sync is running
+        try:
+            self.assertFalse(mix.acquire(blocking=False))
+            self.assertFalse(server_sync._sync_lock.locked())   # what it took is let go
+        finally:
+            server_sync._inv_lock.release()
+        self.assertTrue(mix.acquire(blocking=False))
+        self.assertTrue(server_sync._sync_lock.locked() and server_sync._inv_lock.locked())
+        mix.release()
+        self.assertFalse(server_sync._sync_lock.locked() or server_sync._inv_lock.locked())
 
     def test_removing_an_investment_connection_removes_its_data(self):
         self.c.execute(insert(PlaidItem), [{"item_id": "inv", "access_token": "tok", "products": "investments"},

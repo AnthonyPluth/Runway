@@ -34,8 +34,17 @@ def api_connect(conn, _q, body):
 def api_plaid_status(conn, _q, _b):
     items = db.rows(conn.execute(
         select(PlaidItem.item_id, PlaidItem.institution_name, PlaidItem.env, PlaidItem.created_at, PlaidItem.last_sync,
-               PlaidItem.error, PlaidItem.products).order_by(PlaidItem.institution_name)))
+               PlaidItem.error, PlaidItem.products, PlaidItem.inv_last_sync, PlaidItem.inv_error)
+        .order_by(PlaidItem.institution_name)))
     for it in items:
+        # Each sync that reads the connection keeps its own error and time ("sides"); the connection's own error is
+        # either one's (the bank side's first), and its last sync the older one's (none until both have synced).
+        mine = {"bank": (it["last_sync"], it["error"]), "investments": (it.pop("inv_last_sync"), it.pop("inv_error"))}
+        sides = {s: {"last_sync": mine[s][0], "error": mine[s][1]} for s in ("bank", "investments") if s in plaidbank.syncs(it)}
+        times = [v["last_sync"] for v in sides.values()]
+        it["last_sync"] = None if None in times else min(times)
+        it["error"] = next((v["error"] for v in sides.values() if v["error"]), None)
+        it["sides"] = sides
         it["bank"] = plaidbank.is_bank_item(it)
         it["products"] = sorted(plaidbank.products(it))
         it["duplicates"] = plaid.duplicates(conn, it["item_id"])
@@ -115,10 +124,34 @@ def api_plaid_oauth_resume(conn, _q, _b):
 LINK_SYNC_WAIT = 120   # seconds a new connection waits for a running sync before its first one
 
 
-def _item_lock(conn, item_id: str) -> threading.Lock:
-    """The sync lock a connection's own sync must hold: the bank sync's, or the investment sync's."""
-    item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
-    return _sync_lock if item and plaidbank.is_bank_item(item) else _inv_lock
+class _ItemLock:
+    """The sync locks a connection's own sync must hold: the bank sync's and/or the investment sync's, one for each side
+    it has (plaidbank.syncs), so neither side is read twice at once. Taken in the same order as everywhere else that
+    takes both (bank first), so two of them can't wait on each other."""
+
+    def __init__(self, conn, item_id: str):
+        item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
+        sides = plaidbank.syncs(item) if item else {"investments"}
+        self.locks = [lock for side, lock in (("bank", _sync_lock), ("investments", _inv_lock)) if side in sides]
+        self.held: list[threading.Lock] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        deadline = time.monotonic() + timeout if timeout >= 0 else None
+        for lock in self.locks:
+            left = -1 if deadline is None else max(0.0, deadline - time.monotonic())
+            if not (lock.acquire(timeout=left) if blocking else lock.acquire(blocking=False)):
+                self.release()
+                return False
+            self.held.append(lock)
+        return True
+
+    def release(self) -> None:
+        while self.held:
+            self.held.pop().release()
+
+
+def _item_lock(conn, item_id: str) -> _ItemLock:
+    return _ItemLock(conn, item_id)
 
 
 def api_plaid_exchange(conn, _q, body):
@@ -156,6 +189,8 @@ def _sync_new_item(conn, item_id: str, body: dict) -> dict:
         item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
         if plaidbank.is_bank_item(item):
             n = len(res.pop("new", []))
+            if "investments" in res:   # investments too: their prices, as below
+                res["prices"] = refresh_prices(conn)
             return {"ok": True, "item_id": item_id, "bank": True, "new_transactions": n, **res}
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
@@ -173,6 +208,8 @@ def api_plaid_item_sync(conn, _q, _b, item_id):
             res["new_transactions"] = len(res["new"])
             categorize.categorize(conn, res.pop("new"))
             recurring.auto_match(conn)
+            if "investments" in res:   # investments too: their prices, as below
+                res["prices"] = refresh_prices(conn)
             return {"ok": True, "bank": True, **res}
         res["prices"] = refresh_prices(conn)
         return {"ok": True, **res}

@@ -99,8 +99,8 @@ def _score(pa: dict, acct: dict, institution: str | None) -> int:
         diff = abs(abs(acct["balance"] or 0) - abs(pa["current"]))
         score += 40 if diff < 0.01 else 15 if diff <= max(25.0, 0.05 * abs(pa["current"])) else 0
     same = brands.institution_match((acct.get("org"), acct.get("display_name"), acct["name"]),
-                                    (institution, pa.get("official_name"), pa.get("name")))
-    if same is not None:
+                                    (institution, pa.get("official_name"), pa.get("name")), by_name=False)
+    if same is not None:   # known brands only: names alike aren't enough evidence to link a bank account on their own
         score = score + 20 if same else -1000   # never a Chase card for a Citi one
     return score
 

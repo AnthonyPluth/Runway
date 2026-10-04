@@ -84,7 +84,7 @@ def exchange(conn, public_token: str, institution: dict | None = None, kind: str
     db.upsert(conn, PlaidItem, {"item_id": item_id, "access_token": secretbox.encrypt(token),
                                 "institution_id": institution.get("institution_id"), "institution_name": institution.get("name"),
                                 "env": db.get_setting(conn, sk.PLAID_ENV, "production"), "products": ",".join(fallback)},
-              key=["item_id"], update=lambda ex: {"access_token": ex.access_token, "error": null()})
+              key=["item_id"], update=lambda ex: {"access_token": ex.access_token, "error": null(), "inv_error": null()})
     conn.commit()
     try:   # which products this connection has (investments, or transactions and/or liabilities)
         info = call(conn, "/item/get", {"access_token": token}).get("item") or {}
@@ -243,33 +243,53 @@ def _security_update(ex) -> dict:
 
 
 def sync_item(conn, item_id: str, today: date | None = None) -> dict:
-    """One connection, now (its Sync button, or just linked): with the bank sync when it's a bank or card connection,
-    else with the investment sync (plaidbank.syncs). One with both reads its investments with the investment sync
-    (sync_all)."""
+    """One connection, now (its Sync button, or just linked): each side it has (plaidbank.syncs), the bank side with
+    plaidbank and its investments here. A connection with both gets the bank sync's reply, with the investments' under
+    "investments"; when one side fails and the other doesn't, what went wrong is in its "error" (and on the connection,
+    for that side), and both failing raises the bank side's error."""
     today = today or date.today()
     item = conn.execute(select(PlaidItem).where(PlaidItem.item_id == item_id)).fetchone()
     if not item:
         raise PlaidError("Connection not found")
-    if "bank" in plaidbank.syncs(item):
+    sides = plaidbank.syncs(item)
+    if "investments" not in sides:
         return plaidbank.sync_item(conn, item_id, today)
-    return sync_investments(conn, item, today)
+    if "bank" not in sides:
+        return sync_investments(conn, item, today)
+    failed: PlaidError | None = None
+    try:
+        out = plaidbank.sync_item(conn, item_id, today)
+        conn.commit()
+    except PlaidError as e:   # kept on the connection (error); its investments are still read
+        failed, out = e, {"accounts": 0, "matched": [], "new": [], "statements": 0}
+    try:
+        out["investments"] = sync_investments(conn, conn.execute(select(PlaidItem).where(PlaidItem.item_id == item_id)).fetchone(), today)
+    except PlaidError as e:   # kept on the connection (inv_error)
+        if failed:
+            raise failed from None
+        out["error"] = "; ".join([*([out["error"]] if out.get("error") else []), f"investments: {e}"])
+        return out
+    if failed:
+        out["error"] = f"transactions and balances: {failed}"
+    return out
 
 
-def _set_error(conn, item_id: str, e: PlaidError) -> None:
-    """A sync that stopped part way: the connection says so (and keeps the time of its last full one)."""
-    conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(error=e.code or str(e)))
+def _set_inv_error(conn, item_id: str, e: PlaidError) -> None:
+    """An investment sync that stopped part way: the connection says so (and keeps the time of its last full one)."""
+    conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(inv_error=e.code or str(e)))
     conn.commit()
 
 
 def sync_investments(conn, item, today: date) -> dict:
-    """A connection's investment accounts, holdings and activity."""
+    """A connection's investment accounts, holdings and activity. Its own error and last sync time are inv_error and
+    inv_last_sync (a connection's bank side has error and last_sync)."""
     item_id = item["item_id"]
     token = item["access_token"]
     conn.commit()
     try:
         h = call(conn, "/investments/holdings/get", {"access_token": token})
     except PlaidError as e:
-        _set_error(conn, item_id, e)
+        _set_inv_error(conn, item_id, e)
         raise
     if not item["institution_name"] and (h.get("item") or {}).get("institution_name"):
         conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(institution_name=h["item"]["institution_name"]))
@@ -301,7 +321,7 @@ def sync_investments(conn, item, today: date) -> dict:
     conn.commit()
 
     # Activity: everything Plaid has on the first sync, then a rolling window.
-    first = item["last_sync"] is None
+    first = item["inv_last_sync"] is None
     start = today - timedelta(days=HISTORY_DAYS if first else REFRESH_DAYS)
     offset, total, fetched = 0, None, 0
     while total is None or offset < total:
@@ -311,7 +331,7 @@ def sync_investments(conn, item, today: date) -> dict:
                 "options": {"count": PAGE, "offset": offset},
             })
         except PlaidError as e:   # the holdings are saved, but not all the activity: not a sync that went fine
-            _set_error(conn, item_id, e)
+            _set_inv_error(conn, item_id, e)
             raise
         _store_securities(conn, res.get("securities", []))
         txs = res.get("investment_transactions", [])
@@ -330,7 +350,7 @@ def sync_investments(conn, item, today: date) -> dict:
         if not txs:
             break
     conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
-                 .values(last_sync=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), error=None))
+                 .values(inv_last_sync=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), inv_error=None))
     conn.commit()
     return {"accounts": len(account_ids), "holdings": len(held), "transactions": fetched}
 
