@@ -68,7 +68,8 @@ def keep_bank_name(conn, brand: str, keep: bool) -> None:
     db.set_setting(conn, sk.BRAND_NAMES_OFF, json.dumps(sorted(names)))
 
 
-def _key(s: str | None) -> str:
+def text_key(s: str | None) -> str:
+    """Text as names are compared: lower-cased, its whitespace collapsed."""
     return " ".join((s or "").lower().split())
 
 
@@ -80,10 +81,10 @@ def brand_choice(tx: dict) -> dict | None:
         return None
     bank = bank_payee(tx["description"])
     brand = brands.merchant_name(bank)
-    if not brand or _key(brand) == _key(bank):
+    if not brand or text_key(brand) == text_key(bank):
         return None
-    payee = _key(tx.get("payee"))
-    using = "brand" if payee == _key(brand) else "bank" if payee == _key(bank) else None
+    payee = text_key(tx.get("payee"))
+    using = "brand" if payee == text_key(brand) else "bank" if payee == text_key(bank) else None
     return {"brand": brand, "bank_name": bank, "using": using} if using else None
 
 

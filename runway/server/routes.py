@@ -35,7 +35,7 @@ from .api.equity import (
 from .api.investments import (
     api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
 )
-from .api.mcp import api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
+from .api.mcp import api_mcp_all, api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
     api_holding_logo, api_holding_logo_options, api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo,
     api_merchant_logo_options
@@ -61,7 +61,7 @@ from .api.retail import (
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
 from .api.transactions import (
     api_ai_apply, api_ai_log, api_ai_suggest, api_recategorize, api_transactions, api_tx_accept, api_tx_bulk,
-    api_tx_brand_name, api_tx_category, api_tx_create, api_tx_delete, api_tx_split, api_tx_update
+    api_tx_brand_name, api_tx_category, api_tx_create, api_tx_delete, api_tx_import, api_tx_split, api_tx_update
 )
 
 
@@ -82,6 +82,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/transactions", api_transactions),
     ("POST", "/api/transactions", api_tx_create),
     ("POST", "/api/transactions/bulk", api_tx_bulk),
+    ("POST", "/api/transactions/import", api_tx_import),
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
     ("POST", "/api/transactions/{id}/split", api_tx_split),
@@ -213,6 +214,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/mcp-settings", api_mcp_settings),
     ("POST", "/api/mcp-settings/writes", api_mcp_writes),
     ("POST", "/api/mcp-settings/categorize", api_mcp_categorize),
+    ("POST", "/api/mcp-settings/all", api_mcp_all),
     ("POST", "/api/mcp-settings/connections/{id}/revoke", api_mcp_revoke),
     ("POST", "/api/retail/token", api_retail_token),
     ("POST", "/api/retail/token/remove", api_retail_token_remove),

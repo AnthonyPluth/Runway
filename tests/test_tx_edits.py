@@ -227,5 +227,63 @@ class AddTests(Ledger):
         self.assertIsNone(self.conn.execute(select(RetailCharge.tx_id).where(RetailCharge.id == "c1")).scalar())
 
 
+class ImportTests(Ledger):
+    """Many at once, as from a statement (api_tx_import)."""
+
+    def imp(self, rows, account="chk"):
+        return tx.api_tx_import(self.conn, {}, {"account": account, "transactions": rows})
+
+    def test_rows_are_checked_one_by_one_and_the_good_ones_added(self):
+        r = self.imp([{"posted": "2026-09-14", "payee": "  Farmers   Market ", "amount": "-23.40", "category": "Groceries", "notes": "cash"},
+                      {"posted": "soon", "payee": "X", "amount": -1},
+                      {"posted": "2026-09-14", "payee": "", "amount": -1},
+                      {"posted": "2026-09-14", "payee": "X", "amount": ""},
+                      {"posted": "2026-09-14", "payee": "X", "amount": "lots"},
+                      {"posted": "2026-09-14", "payee": "X", "amount": -1, "category": "Not a category"},
+                      "not a row",
+                      {"posted": "2026-09-15", "payee": "Refund", "amount": 7}])
+        self.assertEqual((r["ok"], r["added"], r["skipped"]), (True, 2, 6))
+        self.assertEqual([x["status"] for x in r["rows"]], ["added"] + ["error"] * 6 + ["added"])
+        self.assertEqual([x["i"] for x in r["rows"]], list(range(8)))
+        self.assertEqual(r["rows"][1]["error"], "Enter a date like 2026-09-30")
+        self.assertIn("Unknown category", r["rows"][5]["error"])
+        first, refund = self.row(r["rows"][0]["id"]), self.row(r["rows"][7]["id"])
+        self.assertTrue(first["id"].startswith("chk|manual:"))   # deletable later, like one added by hand
+        self.assertEqual((first["payee"], first["amount"], first["category"], first["category_source"], first["needs_review"], first["notes"]),
+                         ("Farmers Market", -23.4, "Groceries", "manual", 0, "cash"))
+        self.assertEqual((refund["amount"], refund["category"], refund["needs_review"]), (7.0, None, 1))   # nothing knew it: Review
+        tx.api_tx_delete(self.conn, {}, {}, refund["id"])
+
+    def test_duplicates_of_what_is_there_and_within_the_batch_are_skipped(self):
+        r = self.imp([{"posted": "2026-09-05", "payee": "green  GROCER", "amount": "-59.28"},   # chk|2, synced
+                      {"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.27},      # a cent off: new
+                      {"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28},      # another day: new
+                      {"posted": "2026-09-06", "payee": "Green  grocer", "amount": "-59.280"},  # again in this batch
+                      {"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.28, "category": "Groceries"}])
+        self.assertEqual([(x["status"], x.get("of")) for x in r["rows"]],
+                         [("duplicate", "chk|2"), ("added", None), ("added", None), ("duplicate", r["rows"][2]["id"]), ("duplicate", "chk|2")])
+        self.assertEqual((r["added"], r["skipped"]), (2, 3))
+        again = self.imp([{"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28}])   # sent twice: nothing new
+        self.assertEqual((again["added"], again["rows"][0]["of"]), (0, r["rows"][2]["id"]))
+        other = self.imp([{"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.28}], "card")   # another account's
+        self.assertEqual(other["added"], 1)
+
+    def test_rules_categorize_what_has_no_category(self):
+        from runway import rules
+        rules.save(self.conn, {"match": "corner bakery", "category": "Groceries"})
+        r = self.imp([{"posted": "2026-09-14", "payee": "Corner Bakery", "amount": -8},
+                      {"posted": "2026-09-14", "payee": "Corner Bakery #2", "amount": -9, "category": "Coffee & Snacks"}])
+        a, b = (self.row(x["id"]) for x in r["rows"])
+        self.assertEqual((a["category"], a["category_source"], a["needs_review"]), ("Groceries", "rule", 0))
+        self.assertEqual((b["category"], b["category_source"]), ("Coffee & Snacks", "manual"))   # one you gave stays
+
+    def test_refusals(self):
+        row = {"posted": "2026-09-14", "payee": "X", "amount": -1}
+        for account, rows in (("nope", [row]), ("brk", [row]), ("chk", []), ("chk", "rows"), ("chk", [row] * (tx.MAX_IMPORT + 1))):
+            with self.subTest(account=account, rows=str(rows)[:20]), self.assertRaises(ApiError):
+                self.imp(rows, account)
+        self.assertEqual(self.imp([{**row, "amount": -i} for i in range(1, tx.MAX_IMPORT + 1)])["added"], tx.MAX_IMPORT)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -849,6 +849,7 @@ class Handler(BaseHTTPRequestHandler):
                     "error": e.error, "error_description": e.description, "state": e.state, "iss": iss}))
             writes_on = mcp_access.allow_writes(conn)
             categorize_on = mcp_access.allow_categorize(conn)
+            all_on = mcp_access.allow_all(conn)
             token = mcp_oauth.start_consent(conn, {**req.params(), "sub": user.get("sub")})
         target = urllib.parse.urlsplit(req.redirect_uri)
         who = user.get("email") or user.get("name") or user.get("sub")
@@ -871,6 +872,12 @@ class Handler(BaseHTTPRequestHandler):
                     "Turn on Let assistants categorize in Settings → Data first. Until then this connection can't categorize.")
             categorize = (f'<label class="choice"><input type="checkbox" {state}><span><b>Categorize</b>'
                           f'<span class="help">{html.escape(note)}</span></span></label>')
+        anything = ""
+        if "write" in req.scope:   # never ticked for you: changing anything is a choice made here, each time
+            label, note, off = mcp_oauth.CONSENT["write"]
+            state = 'name="write" value="1"' if all_on else "disabled"
+            anything = (f'<label class="choice"><input type="checkbox" {state}><span><b>{label}</b>'
+                        f'<span class="help">{html.escape(note if all_on else off)}</span></span></label>')
         name = req.client_name or "An app"
         inner = f"""<p class="help">{signed_in} Approving sends you back to <b>{html.escape(target.netloc)}</b>{
             ' (this computer)' if target.scheme == 'http' else ''}.</p>
@@ -880,6 +887,7 @@ class Handler(BaseHTTPRequestHandler):
 budget, reports, net worth, orders and churning. Never your bank connections, settings or backups.</span></span></label>
 {churning}
 {categorize}
+{anything}
 <div class="actions"><button class="btn primary" type="submit" name="decision" value="allow">Allow</button>
 <button class="btn" type="submit" name="decision" value="deny">Deny</button></div>
 </form>"""
@@ -924,6 +932,8 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
                 if ("categorize:write" in params["scope"].split() and form.get("categorize") == "1"
                         and mcp_access.allow_categorize(conn)):
                     scope.add("categorize:write")
+                if "write" in params["scope"].split() and form.get("write") == "1" and mcp_access.allow_all(conn):
+                    scope.add("write")
                 code = mcp_oauth.approve(conn, params, frozenset(scope), user.get("sub"), user.get("email"))
                 back = {"code": code}
             elif decision == "deny":
