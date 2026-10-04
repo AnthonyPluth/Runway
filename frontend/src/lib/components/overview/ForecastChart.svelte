@@ -62,11 +62,14 @@
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
   // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
   const hover = $derived(pointed != null && pointed < n ? pointed : null);
+  // On a phone the readout stays put, in the top left of the chart, instead of riding along under the finger: it's
+  // readable there, and two days are compared by dragging between them. A mouse's readout follows the pointer.
+  let pinned = $state(false), lastTouch = 0;
   // Dragging sideways on a phone moves the readout; dragging up or down still scrolls the page. (Svelte's own touch
   // handlers are passive, so they couldn't stop the page scrolling sideways.)
   function sideways(el: SVGElement, onMove: (clientX: number) => void) {
     let start: Touch | null = null;
-    const down = (e: TouchEvent) => { start = e.touches[0]; };
+    const down = (e: TouchEvent) => { start = e.touches[0]; pinned = true; lastTouch = Date.now(); };
     const drag = (e: TouchEvent) => {
       const t = e.touches[0];
       if (start && Math.abs(t.clientY - start.clientY) > Math.abs(t.clientX - start.clientX)) return;
@@ -84,10 +87,13 @@
     return Math.max(v0, Math.min(v1, v0 + Math.round(((px - m.left) / iw) * (v1 - v0))));
   }
   function move(clientX: number) { if (svgEl) pointed = dayAt(clientX); }
+  // A tap sends a mouse move of its own right after the touch; that one doesn't unpin the readout.
+  function mouse(clientX: number) { if (Date.now() - lastTouch > 1000) pinned = false; move(clientX); }
 
   const tipPos = $derived.by(() => {
     if (hover == null || !svgEl) return { left: 0, top: 0 };
     const r = svgEl.getBoundingClientRect(), tw = tipEl?.offsetWidth ?? 180;
+    if (pinned) return { left: (m.left / W) * r.width, top: 0 };
     return { left: Math.min(Math.max(0, (x(hover) / W) * r.width + 12), r.width - tw), top: Math.max(0, (y(series[hover]) / H) * r.height - 60) };
   });
 </script>
@@ -125,7 +131,7 @@
         <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2" />
       {/if}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation" class="cursor-crosshair"
-        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)}
+        onmousemove={(e) => mouse(e.clientX)} onmouseleave={() => (pointed = null)}
         use:sideways={move} />
     </svg>
     {#if hover != null}
