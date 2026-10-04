@@ -195,10 +195,10 @@ describe("CardsTable", () => {
     expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
-  it("shows what a card owes, its statement, due date and minimum", () => {
+  it("shows a card’s balance, its statement, due date and minimum", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
-    expect(screen.getByText(/owes \$800\.00 now/)).toBeInTheDocument();
+    expect(screen.getByText(/balance \$800\.00/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "$600.00" })).toBeInTheDocument();
     expect(screen.getByText("due Mar 26")).not.toHaveClass("text-warning");
     expect(screen.getByText(/min \$35\.00/)).toBeInTheDocument();
@@ -236,14 +236,14 @@ describe("CardsTable", () => {
   it("separates the notes with dots and spaces", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
-    const line = screen.getByText(/owes \$800\.00 now/).textContent!.replace(/\s+/g, " ");
-    expect(line).toBe("owes $800.00 now · entered by hand");
+    const line = screen.getByText(/balance \$800\.00/).textContent!.replace(/\s+/g, " ");
+    expect(line).toBe("balance $800.00 · entered by hand");
   });
 
   it("doesn't show an average spend a statement", () => {
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.queryByText(/a statement/)).not.toBeInTheDocument();
-    expect(screen.getByText(/owes/)).toBeInTheDocument();
+    expect(screen.getByText(/balance \$/)).toBeInTheDocument();
   });
 
   it("lets you correct the statement balance, and undo that", async () => {
