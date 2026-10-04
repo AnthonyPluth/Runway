@@ -35,6 +35,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits, validate
 from .dates import add_months, clamp_day
+from .money import CENT
 from .models import (Account, Category, ChurnBalance, ChurnBankBonus, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask,
                      ChurnScore, ChurnWish, User)
 
@@ -115,7 +116,6 @@ BASE_MARKER = "*"         # in a card's rates list: its base rate (everything wi
 FEE_WARN_DAYS = 30        # an annual fee is worth deciding about this long ahead
 BONUS_WARN_DAYS = 14      # a bonus deadline with spending left is urgent from here
 HORIZON_DAYS = 180        # how far ahead Upcoming looks
-CENT = 0.005
 
 
 class ChurnError(ValueError):

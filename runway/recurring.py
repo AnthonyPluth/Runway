@@ -9,12 +9,12 @@ from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
 from . import bankdays, brands, dates, db
 from .models import Account, Override, Recurring, RecurringDismissed, Transaction
+from .money import CENT, is_zero
 
 # How far a real payment can land from its expected date and still count as that occurrence.
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
                      "semiannual": 12, "yearly": 12, "dates": 12, "once": 5}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
-CENT = 0.005
 # The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than DRIFT_SHARE of it, or
 # DRIFT_DOLLARS, whichever is more, away from it (the same way), and within STALE_TOLERANCE of each other.
 DRIFT_SHARE = 0.05
@@ -197,7 +197,7 @@ def with_account_name():
 def _same_way(item: dict, payments: list[dict]) -> list[dict]:
     """The payments that move money the item's way (money in for a paycheck, out for a bill); all of them for an item
     without an amount, which learns even its direction from them."""
-    if abs(item["amount"] or 0) < CENT:
+    if is_zero(item["amount"] or 0):
         return payments
     return [p for p in payments if (p["amount"] > 0) == (item["amount"] > 0)]
 
@@ -237,7 +237,7 @@ def still_due(item: dict, occurrence: date, paid: dict[date, float], today: date
     if today > occurrence + timedelta(days=window):
         return None
     got = paid.get(occurrence, 0.0)
-    if abs(got) < CENT:
+    if is_zero(got):
         return amount
     if edited:   # you said what this one comes to: whatever of that hasn't come yet is still expected, however small
         left = round(amount - got, 2)
@@ -290,7 +290,7 @@ def skipped_keys(conn) -> set[str]:
     """The occurrences you've skipped ("Skip the next one", "Skip this one"): a one-off edit to $0 of a recurring
     item's date (rec:<id>:<date>), which the forecast already reads as nothing coming that day."""
     return {k for k, a in conn.execute(select(Override.key, Override.amount).where(Override.key.like("rec:%")))
-            if abs(a or 0) < CENT}
+            if is_zero(a or 0)}
 
 
 CANDIDATES = 6

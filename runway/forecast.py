@@ -45,6 +45,7 @@ from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, db, plaidapi, plaidbank, simplefin, splits, statements
 from .dates import clamp_day, month_end, month_start, next_after, parse_day
+from .money import CENT, allocate_cents, cents, is_zero, same_amount
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -207,7 +208,7 @@ def pending_total(conn, account: dict, today: date) -> float:
                                  .where(T.account_id == account["id"], T.pending == 1, cond, recent)).scalar() or 0.0
                     for cond in (T.amount < 0, T.amount > 0))
     available, balance = account.get("available"), account["balance"]
-    if available is not None and available <= balance + 0.005 and available > balance + out + 0.005:
+    if available is not None and available <= balance + CENT and available > balance + out + CENT:
         out = 0.0
     return out + came_in
 
@@ -260,7 +261,7 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     for s in sent:
         # The card's credit for it: the same amount, from a few days before to a couple of weeks after it left.
         lo, hi = (parse_day(s["posted"]) - timedelta(days=5)).isoformat(), (parse_day(s["posted"]) + timedelta(days=14)).isoformat()
-        hit = next((c for c in unclaimed if abs(c["amount"] + s["amount"]) <= 0.005 and lo <= c["posted"][:10] <= hi), None)
+        hit = next((c for c in unclaimed if abs(c["amount"] + s["amount"]) <= CENT and lo <= c["posted"][:10] <= hi), None)
         if hit:
             unclaimed.remove(hit)
         else:
@@ -368,12 +369,12 @@ def fee_posted(conn, account_id: str, day: date, fee: float | None = None) -> bo
     that happens to cost the same, isn't the fee."""
     T = Transaction
     text = func.lower(func.coalesce(T.payee, "") + " " + func.coalesce(T.description, ""))
-    same = [and_(T.category == FEE_CATEGORY, func.abs(T.amount + fee) < 0.005)] if fee else []
+    same = [and_(T.category == FEE_CATEGORY, func.abs(T.amount + fee) < CENT)] if fee else []
     rows = conn.execute(select(T.payee, T.description, T.category, T.amount)
                         .where(T.account_id == account_id, T.amount < 0, or_(text.like("%fee%"), *same),
                                T.posted >= (day - timedelta(days=FEE_EARLY_DAYS)).isoformat())).fetchall()
     return any(FEE_TEXT.search(f"{r['payee'] or ''} {r['description'] or ''}")
-               or (fee and r["category"] == FEE_CATEGORY and abs(r["amount"] + fee) < 0.005) for r in rows)
+               or (fee and r["category"] == FEE_CATEGORY and same_amount(r["amount"], -fee)) for r in rows)
 
 
 def fee_recurring(recurring: list[dict], account_id: str, day: date) -> bool:
@@ -403,7 +404,7 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
     changed (churning.plan_active: by its plan_date, else before the fee), nor for a fee already charged (fee_posted) or
     one you've made a recurring item for (fee_recurring)."""
     fee = round(card.get("annual_fee") or 0.0, 2)
-    if fee < 0.005 or (card.get("status") or "open") != "open":
+    if fee < CENT or (card.get("status") or "open") != "open":
         return []
     opened = parse_day(card.get("_anniversary") or card["opened_on"])   # a product change keeps the account's anniversary
     acct = card.get("account_id")
@@ -431,15 +432,7 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
 def to_cents(values: list[float], total: float) -> list[float]:
     """Each value rounded to the cent so that they add up to `total` rounded to the cent: the cents rounding leaves over
     go to the values nearest to rounding the other way (largest remainder)."""
-    if not values:
-        return []
-    cents = [round(v * 100) for v in values]
-    gap = round(round(total, 2) * 100) - sum(cents)
-    step = 1 if gap > 0 else -1
-    order = sorted(range(len(values)), key=lambda i: (values[i] * 100 - cents[i]) * step, reverse=True)
-    for k in range(abs(gap)):
-        cents[order[k % len(order)]] += step
-    return [c / 100 for c in cents]
+    return [c / 100 for c in allocate_cents([v * 100 for v in values], cents(total))]
 
 
 def estimate_parts(*, close: date, due: date, budgets: dict[str, dict[str, float]], start: date, recurring: list[dict],
@@ -461,27 +454,27 @@ def estimate_parts(*, close: date, due: date, budgets: dict[str, dict[str, float
     if owed_now is not None:
         lines["owed_now"] = owed_now
     spent = {c: sum(v for d, v in days.items() if start.isoformat() < d <= close.isoformat()) for c, days in budgets.items()}
-    spent = {c: v for c, v in spent.items() if v >= 0.005}
+    spent = {c: v for c, v in spent.items() if v >= CENT}
     if spent:
         lines["budgets_total"] = sum(spent.values())
         named.append(("budgets", "category", sorted(spent.items(), key=lambda kv: -kv[1])))
     extra = max(0.0, -sum(e["amount"] for e in recurring))
-    if extra >= 0.005:
+    if extra >= CENT:
         lines["recurring_total"] = extra
         named.append(("recurring", "name", [(e["name"], -e["amount"]) for e in recurring]))
     if fees:
         lines["fees_total"] = -sum(f["amount"] for f in fees)
         named.append(("fees", "name", [(f["name"], -f["amount"]) for f in fees]))
-    if abs(carried) >= 0.005:
+    if not is_zero(carried):
         lines["carried"] = carried
-    if interest >= 0.005:
+    if interest >= CENT:
         lines["interest"] = interest
     out: dict = {"close": close.isoformat(), "due": due.isoformat(), **({"assumed_cycle": True} if assumed else {}),
                  **dict(zip(lines, to_cents(list(lines.values()), statement), strict=True))}
     for part, label, items in named:
         out[part] = [{label: k, "amount": v}
                      for (k, _), v in zip(items, to_cents([v for _, v in items], out[f"{part}_total"]), strict=True)]
-    if interest >= 0.005:
+    if interest >= CENT:
         out["apr"] = plan["apr"]
     out.update(statement=round(statement, 2), total=round(payment, 2))
     if out["total"] != out["statement"]:
@@ -601,7 +594,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "estimated": (item.get("amount_mode") or "fixed") != "fixed" and edited is None,
                            "recurring_id": item["id"], "key": key,
                            "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {}),
-                           **({"paid_so_far": paid[d]} if abs(paid.get(d, 0.0)) >= rec.CENT else {}),
+                           **({"paid_so_far": paid[d]} if not is_zero(paid.get(d, 0.0)) else {}),
                            **({"original_amount": usual_left if usual_left is not None else 0.0, "overridden": True} if edited is not None else {})})
 
     # Each card's latest statement (bank_statement, which sets its billing cycle) and its annual fees, ahead of the
@@ -642,7 +635,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     for p in plan:
         for q, monthly in zip([p, *p["parts"]], monthly_shares(p), strict=True):
             acct, a, why = share_account(q)
-            if a and why is None and a["kind"] == "credit" and not (p["parts"] and monthly < 0.005):
+            if a and why is None and a["kind"] == "credit" and not (p["parts"] and monthly < CENT):
                 covers[acct].update(q["names"] if q is not p
                                     else [n for n in p["names"] if not any(n in r["names"] for r in p["parts"])])
     # What's scheduled on the cards whose statements the forecast pays (not out of date), that no budget on the card has.
@@ -663,7 +656,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
             continue
         for q, way, monthly in zip([p, *p["parts"]], ways, monthly_shares(p), strict=True):
-            if p["parts"] and monthly < 0.005 and not any(v > 0.005 for v in way["days"].values()):
+            if p["parts"] and monthly < CENT and not any(v > CENT for v in way["days"].values()):
                 continue   # its parts take the whole budget (or the earlier parts take this one's): nothing to spend
             acct, a, why = share_account(q)
             if not a or why:
@@ -693,7 +686,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
         pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
         planned = info["payment"]   # what the payment plan pays: the event's amount, before any edit of yours
-        payment = paying(info, planned, pays >= today and planned > 0.005, key, old_keys[key])
+        payment = paying(info, planned, pays >= today and planned > CENT, key, old_keys[key])
         info.update(payment=round(payment, 2), carried=round(info["remaining"] - payment, 2))
         card_status.append(info)
         if info["statement_stale"]:
@@ -706,14 +699,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             continue  # paid from an account that isn't being forecast
         if info["pay_mode"] == "fixed" and info["pay_amount"] is None:
             warn(f"{label}: no amount entered for its fixed payment, so the forecast pays each statement in full.", "#setup/accounts")
-        if info["minimum_estimated"] and info["remaining"] > 0.005:
+        if info["minimum_estimated"] and info["remaining"] > CENT:
             warn(f"{label}: the bank didn’t report a minimum payment, so the forecast pays the larger of "
                  f"${MIN_PAYMENT_FLOOR:,.0f} and {MIN_PAYMENT_RATE:.0%} of the statement plus its interest.", "#setup/accounts")
-        if pays >= today and planned > 0.005:
+        if pays >= today and planned > CENT:
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -planned, "kind": "card", "estimated": False,
                            "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
-        elif pays < today and info["payment"] > 0.005:
+        elif pays < today and info["payment"] > CENT:
             warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts",
                  setting=False)   # paying the card puts it right, not a setting
         if info["statement_stale"]:
@@ -730,7 +723,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         # What carries into the statement in progress: what the closed one leaves unpaid, less any credit on the card.
         # A statement that comes out at or below zero pays nothing and carries its credit on to the next one, in every
         # mode (a card paid in full too, as the issuer does).
-        carries = info["carried"] > 0.005   # whether any statement in the forecast carries a balance
+        carries = info["carried"] > CENT   # whether any statement in the forecast carries a balance
         carried = info["carried"] - info["credit"]
         while True:
             due_k = next_after(close, card["due_day"])
@@ -754,12 +747,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
             pays_k = bankdays.next_business_day(due_k)
             planned = statement_payment(info, statement, charged=owed_interest)
-            pay = paying(info, planned, pays_k >= today and planned > 0.005, key, old_keys[key])
+            pay = paying(info, planned, pays_k >= today and planned > CENT, key, old_keys[key])
             carried = statement - pay
-            carries = carries or carried > 0.005
+            carries = carries or carried > CENT
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
-            elif planned > 0.005:
+            elif planned > CENT:
                 parts = estimate_parts(
                     close=close, due=due_k, start=prev_close, budgets=spend_of.get(card["id"], {}), recurring=on_top,
                     fees=fees_on_top, carried=carried_in, interest=owed_interest,
@@ -815,7 +808,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             owed_interest = 0.0 if first else interest(card_plan, owing, charges)
             statement = owing + owed_interest + charges
             pay = statement_payment(card_plan, statement, charged=owed_interest)
-            if pay > 0.005:
+            if pay > CENT:
                 parts = estimate_parts(
                     close=close, due=close + timedelta(days=NO_STATEMENT_DUE_DAYS), start=prev, budgets=spend_of.get(cid, {}),
                     recurring=on_top, fees=fees_on_top,
@@ -918,7 +911,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         for acct in ids:
             for d, v in spend.get(acct, {}).items():
                 by[d] += v
-        return {d: round(by[d], 2) for d in dates if by.get(d, 0.0) > 0.005}
+        return {d: round(by[d], 2) for d in dates if by.get(d, 0.0) > CENT}
 
     # Recurring charges on cards: their statements pay them, so they're not in `events` or the balances, but they're
     # listed with what's coming up (Transactions) and counted in what a budget still expects this month.
@@ -1086,7 +1079,7 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
     months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
     out: dict[str, list[dict] | None] = {}
     for p in plan:
-        if all(left(p, m) < 0.005 for m in months if m != this_month) and any(covered(p, m) for m in months):
+        if all(left(p, m) < CENT for m in months if m != this_month) and any(covered(p, m) for m in months):
             out[p["category"]] = None
             continue
         split = {m: shares(p, m) for m in months}
