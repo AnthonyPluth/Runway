@@ -570,19 +570,6 @@ def get_settings(conn, keys) -> dict[str, str | None]:
     return out
 
 
-def has_setting(conn, key: str) -> bool:
-    """Whether a setting has a value, without reading it: a secret (an API key, a bank's access) isn't decrypted just to
-    say it's there. One saved under a key Runway no longer has counts as there (using it says why it can't be read)."""
-    return key in settings_present(conn, [key])
-
-
-def settings_present(conn, keys) -> set[str]:
-    """Which of these settings have a value (has_setting for each), in one query."""
-    keys = list(keys)
-    return set(conn.execute(select(Setting.key).where(Setting.key.in_(keys), Setting.value.is_not(None), Setting.value != "")
-                            ).scalars()) if keys else set()
-
-
 def set_setting(conn, key: str, value: str | None) -> None:
     if value is not None and key in secretbox.SECRET_SETTINGS:
         value = secretbox.encrypt(value)   # secrets are stored encrypted (runway/secretbox.py)

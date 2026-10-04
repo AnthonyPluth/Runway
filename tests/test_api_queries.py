@@ -13,6 +13,7 @@ from runway.banks import bank_configured
 from runway import settings_keys as sk
 from runway.models import (Account, Budget, CardStatement, Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed, SyncLog,
                            Transaction)
+from runway.server import routes
 from runway.server.api import accounts, recurring as api_recurring, state
 from tests.shared import DbCase
 
@@ -276,11 +277,15 @@ class SettingsTests(DbCase):
         self.assertEqual(db.get_settings(self.c, keys)[sk.OPENROUTER_API_KEY], "sk-or-secret")
         self.assertEqual(db.get_settings(self.c, []), {})
 
-    def test_has_setting_doesnt_decrypt(self):
-        db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-secret")
-        db.set_setting(self.c, sk.LAST_LLM_ERROR, "")
-        with mock.patch("runway.secretbox.decrypt", side_effect=AssertionError("decrypted")):
-            self.assertTrue(db.has_setting(self.c, sk.OPENROUTER_API_KEY))
-            self.assertFalse(db.has_setting(self.c, sk.LAST_LLM_ERROR))   # empty is as good as not set
-            self.assertFalse(db.has_setting(self.c, sk.PRIMARY_ACCOUNT))
-            self.assertEqual(db.settings_present(self.c, [sk.OPENROUTER_API_KEY, sk.LAST_LLM_ERROR]), {sk.OPENROUTER_API_KEY})
+    def test_a_secret_counts_as_set_only_if_it_can_be_read(self):
+        # Saved under another RUNWAY_SECRET_KEY (a backup restored from elsewhere): not set, so Settings asks for it again.
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machines-key-abcdefghijklmnopqrstuvwxyz"}):
+            db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-elsewhere")
+            db.set_setting(self.c, sk.FINNHUB_API_KEY, "finnhub-elsewhere")
+        db.set_setting(self.c, sk.SIMPLEFIN_ACCESS_URL, "https://u:p@bridge.example/simplefin")   # readable here
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_readable_here")
+        self.c.commit()
+        with mock.patch("builtins.print"):   # (each unreadable one is logged as a warning)
+            got = routes.dispatch(routes.match("GET", "/api/state"), {}, {})
+        self.assertEqual((got["has_api_key"], got["finnhub_configured"], got["simplefin"], got["logodev_configured"],
+                          got["realie_configured"], got["connected"]), (False, False, True, True, False, True))

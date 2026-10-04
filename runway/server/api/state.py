@@ -22,9 +22,10 @@ from .recurring import one_time_item, recurring_logos, set_amount
 
 def api_state(conn, _q, _b):
     last_log = conn.execute(select(SyncLog.at, SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
-    s = db.get_settings(conn, STATE_SETTINGS)   # (one query; the keys below are only checked for being there)
-    present = db.settings_present(conn, (sk.SIMPLEFIN_ACCESS_URL, sk.OPENROUTER_API_KEY, sk.REALIE_API_KEY, sk.FINNHUB_API_KEY,
-                                          sk.LOGODEV_TOKEN))
+    # One query, the secrets among them decrypted: one saved under another RUNWAY_SECRET_KEY (a backup made elsewhere)
+    # reads as not set, so Settings asks for it again.
+    s = db.get_settings(conn, STATE_SETTINGS)
+    present = {k for k in SECRETS_SET if s[k]}
     connected = bank_configured(conn)
     return {
         "connected": connected,
@@ -130,9 +131,11 @@ def api_override_delete(conn, _q, body):
     return {"ok": True}
 
 
+# The keys api_state only says are set (when they can be read): the bank connection and the services' API keys.
+SECRETS_SET = (sk.SIMPLEFIN_ACCESS_URL, sk.OPENROUTER_API_KEY, sk.REALIE_API_KEY, sk.FINNHUB_API_KEY, sk.LOGODEV_TOKEN)
 # The settings api_state reads, in one go.
 STATE_SETTINGS = (sk.LLM_MODEL, sk.CARD_AI_MODEL, sk.LAST_SYNC_OK, sk.LAST_SYNC_WARNINGS, sk.LAST_LLM_ERROR, sk.LAST_BACKUP,
-                  sk.HORIZON_DAYS, sk.PRIMARY_ACCOUNT, sk.AUTO_AI_ON_SYNC, sk.CHURN_AI_WEB, sk.SETUP_DISMISSED)
+                  sk.HORIZON_DAYS, sk.PRIMARY_ACCOUNT, sk.AUTO_AI_ON_SYNC, sk.CHURN_AI_WEB, sk.SETUP_DISMISSED, *SECRETS_SET)
 
 
 def setup_steps(conn, settings: dict | None = None, connected: bool | None = None) -> dict:
