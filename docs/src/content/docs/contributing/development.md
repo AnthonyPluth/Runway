@@ -79,6 +79,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/tracked.py` | Hand-tracked holdings |
 | `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
+| `runway/dates.py`, `money.py` | Month arithmetic (a day a month doesn't have is its last) and month keys; amounts to the cent, and splitting a total into whole cents |
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
 | `runway/networth.py`, `realie.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
