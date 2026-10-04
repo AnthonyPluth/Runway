@@ -52,9 +52,11 @@
   // Upcoming (projected) items for the forecast account, and recurring charges on cards, on All only.
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
   let upcoming = $state<UpcomingEvent[]>([]);
+  let upcomingError = $state(false);
   function loadUpcoming() {
     if (review) return;
-    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc, { charges: true }) as UpcomingEvent[]; }, () => {});
+    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc, { charges: true }) as UpcomingEvent[]; upcomingError = false; },
+      () => { upcoming = []; upcomingError = true; });   // not the old ones: they'd look current
   }
   loadUpcoming();
 
@@ -242,6 +244,10 @@
   {/if}
 
   {#if !review}
+    {#if upcomingError}
+      <p class="mb-3 text-sm text-muted-foreground" data-testid="upcoming-failed">Couldn’t load what’s coming up.
+        <Button variant="link" size="sm" class="h-auto p-0" onclick={loadUpcoming}>Retry</Button></p>
+    {/if}
     <Upcoming events={shownEvents(upcoming)} oneAccount={!!txs.applied.account} onchanged={loadUpcoming} />
   {/if}
 

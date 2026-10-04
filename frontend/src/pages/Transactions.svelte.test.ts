@@ -333,6 +333,24 @@ describe("Transactions page", () => {
       expect(screen.getByText("Rent")).toBeInTheDocument();
     });
 
+    it("takes the old projected items down, with a Retry, when the forecast can't be loaded again", async () => {
+      let fail = false;
+      const ev = { events: [{ date: "2026-03-20", name: "Rent", amount: -1500, kind: "recurring", key: "k", balance_after: 1, account_id: "a1", account: "Checking" }] };
+      serve(rows(), 2, (path) => { if (path.startsWith("/api/overview")) { if (fail) throw new Error("Down"); return ev; } return undefined; });
+      render(Transactions);
+      await userEvent.click(await screen.findByRole("button", { name: "−$1,500.00" }));
+      fail = true;
+      const input = screen.getByRole("spinbutton", { name: "Amount" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "1400{Enter}");
+      expect(await screen.findByTestId("upcoming-failed")).toHaveTextContent("Couldn’t load what’s coming up.");
+      expect(screen.queryByText("Rent")).not.toBeInTheDocument();
+      fail = false;
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText("Rent")).toBeInTheDocument();
+      expect(screen.queryByTestId("upcoming-failed")).not.toBeInTheDocument();
+    });
+
     it("changes a projected amount and loads the forecast again in place, keeping the list", async () => {
       let amount = -1500;
       serve(rows(), 2, (path, o) => (path.startsWith("/api/overview") ? { events: [{ date: "2026-03-20", name: "Rent", amount, kind: "recurring", key: "k", balance_after: 1, account_id: "a1", account: "Checking" }] }
