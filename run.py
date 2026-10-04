@@ -3,7 +3,8 @@
 (first time: poetry install --no-root)
 
 Backups:  poetry run python run.py backup [file.json.gz]   save everything to a file
-          poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip)
+          poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip;
+                                                           stop Runway first)
 Sample:   poetry run python run.py demo                     fill an empty database with made-up data (for previews)
 """
 import argparse
@@ -51,12 +52,31 @@ if __name__ == "__main__":
         else:
             if not a.file:
                 sys.exit("Which backup file? python3 run.py restore runway-backup.json.gz")
-            with open(a.file, "rb") as f:
-                restored = backup.load(f.read())
+            try:
+                with open(a.file, "rb") as f:
+                    restored = backup.load(f.read())
+            except (OSError, ValueError) as e:
+                sys.exit(str(e))
             print(f"Backup from {restored.get('created')} ({restored.get('source')}): "
                   f"{len(restored['tables'].get('transactions', {}).get('rows', []))} transactions.")
+            if backup.warning(restored):
+                print(f"Note: {backup.warning(restored)}")
+            # A running Runway's syncs can't be held off from here (the web restore holds them): one writing during
+            # the restore would mix its rows in with the backup's.
+            print("Stop Runway first if it's running: a sync it runs during the restore would mix its rows in.")
             if not a.yes and input(f"Replace everything in {db.describe()} with it? Type yes: ").strip().lower() != "yes":
                 sys.exit("Nothing changed.")
-            with db.session() as conn:
-                counts = backup.restore(conn, restored)
-            print(f"Restored {sum(counts.values())} rows into {db.describe()}.")
+            try:
+                done = backup.restore_all(restored)
+            except ValueError as e:
+                sys.exit(str(e))
+            except OSError as e:
+                sys.exit(f"Couldn't save a copy of what's here first ({e.strerror or e}), so nothing was restored.")
+            print(f"Restored {sum(done['counts'].values())} rows into {db.describe()}.")
+            if done["safety_copy"]:
+                print(f"A copy of what was here before is at {done['safety_copy']}.")
+            if done["unreadable_secrets"]:
+                print(f"These can't be read with this Runway's secret key: {', '.join(done['unreadable_secrets'])}. Set the key "
+                      "the backup was made with as RUNWAY_SECRET_KEY_OLD and start Runway, or enter them again in Settings.")
+            if done["warning"]:
+                print(f"Note: {done['warning']}")

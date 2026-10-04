@@ -65,7 +65,7 @@ If a setting is missing, the container stops with a message saying which one (se
 
 1. On the old machine: Settings → Data → Backup → **Download a backup** (or `poetry run python run.py backup`).
 2. Start the container on the server, sign in, and go to Settings → Data → Backup → **Restore**, choosing that file.
-   (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
+   (Or copy the file into `./data`, stop the running container, and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
 The backup holds your bank access and API keys encrypted with your key: set the same `RUNWAY_SECRET_KEY` on the
 server (or copy `secret.key` into its `./data`) before restoring. Restored under another key, they can't be read (the
