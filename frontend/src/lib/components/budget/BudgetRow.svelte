@@ -65,9 +65,9 @@
   <div class="flex min-h-8 flex-wrap items-center gap-x-2.5">
     <span class="relative shrink-0">
       <CatIcon name={c.name} size={sub ? 20 : 28} />
-      <!-- The account as a small badge on the emoji, as Transactions puts it on a merchant's logo. -->
+      <!-- The account as a small badge on the emoji, as Transactions puts it on a merchant's logo; not on a phone. -->
       {#if account}<BankBadge accountId={account} name={accountName ?? ""} size={sub ? "size-3 rounded text-[7px]" : "size-4 rounded-md text-[9px]"}
-        class={cn("pointer-events-auto", sub ? "-right-1 -bottom-1" : "lg:-right-1.5 lg:-bottom-1.5")} />{/if}
+        class={cn("pointer-events-auto phone:hidden", sub ? "-right-1 -bottom-1" : "lg:-right-1.5 lg:-bottom-1.5")} />{/if}
     </span>
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>

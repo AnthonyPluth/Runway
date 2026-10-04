@@ -69,6 +69,7 @@ describe("BudgetRow", () => {
       const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onsave: vi.fn(), onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Visa");
       expect(badge(container)).toHaveClass("pointer-events-auto");   // so its title shows on hover
+      expect(badge(container)).toHaveClass("phone:hidden");   // not shown on a phone
       expect(badge(container)!.querySelector("img")).toHaveAttribute("src", "/logo/c1.png");
       expect(badge(container)!.querySelector("img")!.parentElement).toHaveClass("size-4");
     });
