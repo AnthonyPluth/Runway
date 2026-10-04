@@ -509,6 +509,75 @@ def api_tx_create(conn, _q, body):
     return {"ok": True, "id": tx_id}
 
 
+MAX_IMPORT = 500   # transactions in one import
+
+
+def api_tx_import(conn, _q, body):
+    """Add many transactions to one account at once, as from a statement: {"account": id, "transactions": [{posted,
+    amount, payee, category?, notes?}, ...]}, each checked as api_tx_create checks one. A row that's refused is reported
+    and the rest are still added, together, in this request's one transaction. A row is a duplicate (and skipped) when
+    the account already has a transaction on that day for the same amount, to the cent, and the same payee as names are
+    compared (categorize.text_key), or when the same row came earlier in this import. Rows without a category go through
+    the rules and Runway's own guesses as a sync's new transactions do (not the AI model); what's still uncategorized
+    waits in Review. Reply: {ok, added, skipped, rows: [{i, status: added (with id) | duplicate (of: the one it
+    repeats) | error (with error)}]}."""
+    acct = conn.execute(select(Account.id, Account.kind).where(Account.id == str(body.get("account") or ""))).fetchone()
+    if not acct or acct["kind"] == "investment":
+        raise ApiError("Choose an account")
+    rows = body.get("transactions")
+    if not isinstance(rows, list) or not rows:
+        raise ApiError("Send the transactions to add")
+    if len(rows) > MAX_IMPORT:
+        raise ApiError(f"Send at most {MAX_IMPORT} transactions at once")
+    known = set(conn.execute(select(Category.name)).scalars())
+    out: list[dict] = []
+    good: list[tuple[int, dict]] = []
+    for i, r in enumerate(rows):
+        try:
+            if not isinstance(r, dict):
+                raise ApiError("Each transaction is an object")
+            posted = _valid_date(r.get("posted") or "")
+            if r.get("amount") in ("", None):
+                raise ApiError("Enter the amount")
+            amount = _valid_amount(r["amount"])
+            payee = _name(r.get("payee"))
+            if not payee:
+                raise ApiError("Give it a name")
+            category = r.get("category") or None
+            if category is not None and str(category) not in known:
+                raise ApiError(f"Unknown category: {category}")
+            good.append((i, {"posted": posted, "amount": amount, "payee": payee, "notes": _note(r.get("notes")),
+                             "category": None if category is None else str(category)}))
+        except ApiError as e:
+            out.append({"i": i, "status": "error", "error": str(e)})
+
+    def key(posted, amount, payee) -> tuple:
+        return str(posted)[:10], round((amount or 0) * 100), categorize.text_key(payee)
+    seen: dict[tuple, str] = {}
+    if good:
+        days = sorted({g["posted"] for _i, g in good})
+        t = Transaction
+        for r in conn.execute(select(t.id, t.posted, t.amount, t.payee).where(
+                t.account_id == acct["id"], t.posted >= days[0], t.posted < (date.fromisoformat(days[-1]) + timedelta(days=1)).isoformat())):
+            seen.setdefault(key(r["posted"], r["amount"], r["payee"]), r["id"])
+    new: list[dict] = []
+    for i, g in good:
+        k = key(g["posted"], g["amount"], g["payee"])
+        if k in seen:
+            out.append({"i": i, "status": "duplicate", "of": seen[k]})
+            continue
+        tx_id = seen[k] = f"{acct['id']}{MANUAL}{uuid.uuid4().hex[:16]}"
+        new.append({"id": tx_id, "account_id": acct["id"], **g, "category_source": "manual" if g["category"] else None,
+                    "confidence": 1 if g["category"] else None, "needs_review": 0 if g["category"] else 1, "pending": 0})
+        out.append({"i": i, "status": "added", "id": tx_id})
+    if new:
+        conn.execute(insert(Transaction), new)
+        open_ = [n["id"] for n in new if not n["category"]]
+        if open_:
+            categorize.categorize(conn, open_, use_ai=False)
+    return {"ok": True, "added": len(new), "skipped": len(rows) - len(new), "rows": sorted(out, key=lambda r: r["i"])}
+
+
 def api_tx_delete(conn, _q, _b, tx_id):
     """Delete a transaction you added (a bank's come and go with the bank)."""
     _tx(conn, tx_id)

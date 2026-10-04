@@ -104,7 +104,7 @@ class IssuerTests(unittest.TestCase):
 
     def test_metadata(self):
         self.assertEqual(mcp_oauth.protected_resource_metadata(ISS), {
-            "resource": RES, "authorization_servers": [ISS], "scopes_supported": ["read", "churning:write", "categorize:write"],
+            "resource": RES, "authorization_servers": [ISS], "scopes_supported": ["read", "churning:write", "categorize:write", "write"],
             "bearer_methods_supported": ["header"]})
         m = mcp_oauth.authorization_server_metadata(ISS)
         self.assertEqual((m["issuer"], m["authorization_endpoint"], m["token_endpoint"], m["registration_endpoint"], m["revocation_endpoint"]),
@@ -141,12 +141,21 @@ class ValueTests(unittest.TestCase):
             with self.subTest(uri=bad):
                 self.assertFalse(mcp_oauth.redirect_matches(reg, bad))
 
+    def test_what_the_consent_page_says_write_allows(self):
+        label, note, off = mcp_oauth.CONSENT["write"]
+        self.assertEqual(label, "Change anything")
+        for words in ("Add, change and remove your financial data", "transactions, budgets, categories, rules, recurring items, accounts, "
+                      "net worth items, equity, churning and orders", "Never bank connections, API keys, notifications or these assistant settings"):
+            self.assertIn(words, note)
+        self.assertIn("Let assistants change anything", off)
+
     def test_scopes(self):
         self.assertEqual(mcp_oauth.parse_scope(None), {"read"})
         self.assertEqual(mcp_oauth.parse_scope(""), {"read"})
         self.assertEqual(mcp_oauth.parse_scope("churning:write"), {"read", "churning:write"})
         self.assertEqual(mcp_oauth.scope_text(mcp_oauth.parse_scope("churning:write read")), "read churning:write")
-        for bad in ("write", "read admin", "openid", 5):
+        self.assertEqual(mcp_oauth.scope_text(mcp_oauth.parse_scope("write churning:write")), "read churning:write write")
+        for bad in ("writes", "write:all", "read admin", "openid", 5):
             with self.subTest(scope=bad), self.assertRaises(OAuthError) as e:
                 mcp_oauth.parse_scope(bad)
             self.assertEqual(e.exception.error, "invalid_scope")
@@ -389,7 +398,7 @@ class TokenTests(Db):
     def test_refresh_refusals(self):
         c, other = self.client(), self.client()
         out = self.tokens(c)
-        for client_id, over in ((other["client_id"], {}), (c["client_id"], {"scope": "read churning:write"}),
+        for client_id, over in ((other["client_id"], {}), (c["client_id"], {"scope": "read churning:write"}), (c["client_id"], {"scope": "write"}),
                                 (c["client_id"], {"resource": "https://other.example/mcp"}), (c["client_id"], {"refresh_token": "rwr_nope"}),
                                 (c["client_id"], {"refresh_token": out["access_token"]})):
             with self.subTest(over=over), self.assertRaises(OAuthError):

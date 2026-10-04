@@ -10,11 +10,11 @@
   import { inputCls, warnText } from "./ui";
 
   // AI assistants connect to Runway's MCP endpoint (/mcp) by its address and sign in with OAuth: you approve each one
-  // on Runway's consent page. This shows the address, holds the switches that let them change churning, or categorize,
-  // at all (each with what it allows, in a line under it: that's what you're agreeing to), and lists the assistants
+  // on Runway's consent page. This shows the address, holds the switches that let them change churning, categorize, or
+  // change anything, at all (each with what it allows, in a line under it: that's what you're agreeing to), and lists the assistants
   // connected (and disconnects them).
   type Connection = { id: number; client: string | null; who: string | null; scope: string[]; created: string | null; last_used: string | null };
-  type Status = { allow_writes: boolean; allow_categorize: boolean; oauth: boolean; url: string | null; reason: string | null; connections: Connection[] };
+  type Status = { allow_writes: boolean; allow_categorize: boolean; allow_all: boolean; oauth: boolean; url: string | null; reason: string | null; connections: Connection[] };
   let status = $state<Status | null>(null);
   let error = $state("");
   let address = $state<HTMLInputElement | null>(null);
@@ -24,22 +24,31 @@
   }
   load();
   async function setWrites(e: Event) {
-    const allow = (e.currentTarget as HTMLInputElement).checked;
+    const box = e.currentTarget as HTMLInputElement, allow = box.checked;
     try {
       const r = await api<{ allow_writes: boolean }>("/api/mcp-settings/writes", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_writes: r.allow_writes };
       toast.success(r.allow_writes ? "Assistants can change churning" : "Assistants can only read again");
-    } catch (err) { toast.error((err as Error).message); await load(); }
+    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
   }
   async function setCategorize(e: Event) {
-    const allow = (e.currentTarget as HTMLInputElement).checked;
+    const box = e.currentTarget as HTMLInputElement, allow = box.checked;
     try {
       const r = await api<{ allow_categorize: boolean }>("/api/mcp-settings/categorize", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_categorize: r.allow_categorize };
       toast.success(r.allow_categorize ? "Assistants can categorize" : "Assistants can't categorize any more");
-    } catch (err) { toast.error((err as Error).message); await load(); }
+    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
+  }
+  async function setAll(e: Event) {
+    const box = e.currentTarget as HTMLInputElement, allow = box.checked;
+    try {
+      const r = await api<{ allow_all: boolean }>("/api/mcp-settings/all", { method: "POST", body: { allow } });
+      if (status) status = { ...status, allow_all: r.allow_all };
+      toast.success(r.allow_all ? "Assistants can change anything, asking first" : "Assistants can't change everything any more");
+    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
   }
   function access(scope: string[]): string {
+    if (scope.includes("write")) return "Read + any change";
     const extra = [scope.includes("churning:write") && "churning", scope.includes("categorize:write") && "categorizing"].filter(Boolean);
     return ["Read", ...extra].join(" + ");
   }
@@ -53,7 +62,7 @@
   const url = $derived(status?.url || `${location.origin}/mcp`);
   const addHelp = $derived(`Add this address to your assistant and approve it here when it asks. Claude Code: claude mcp add --transport http runway ${url}. Claude on the web or desktop: Settings → Connectors → Add custom connector.`);
 
-  // The two switches. `allows` is what turning it on lets an assistant do: consent text, so it's shown, in one line.
+  // The switches. `allows` is what turning it on lets an assistant do: consent text, so it's shown, in one line.
   const SWITCHES = [
     { id: "mcp-writes", label: "Let assistants change churning", on: () => !!status?.allow_writes, set: setWrites,
       allows: "Mark benefits used; add or update cards, benefits, to-dos and plans. Never deletes.",
@@ -61,6 +70,9 @@
     { id: "mcp-categorize", label: "Let assistants categorize", on: () => !!status?.allow_categorize, set: setCategorize,
       allows: "Set or accept the category of a transaction or order item. No deleting, splitting or renaming.",
       hint: "Applies to every assistant you allowed to categorize when you connected it. If you ask it to, it can remember a category for the merchant or item; it can't add categories. Turn it off any time and it stops at once." },
+    { id: "mcp-all", label: "Let assistants change anything", on: () => !!status?.allow_all, set: setAll,
+      allows: "Add, change and remove your data, asking you first. Never bank connections, API keys, notifications or these settings.",
+      hint: "Applies to every assistant you allowed to change anything when you connected it: transactions, budgets, categories, rules, recurring items, accounts, net worth, equity, churning and orders. Turn it off any time and it stops at once." },
   ];
 </script>
 

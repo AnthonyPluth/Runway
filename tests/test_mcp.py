@@ -15,8 +15,8 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, mcp_access, mcp_oauth, mcp_server, server
 from runway.server import mcp_http
-from runway.models import (ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
-                           RetailItemMemory, RetailOrder, Transaction, TxSplit)
+from runway.models import (Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
+                           RetailItemMemory, RetailOrder, Rule, Transaction, TxSplit)
 from tests.shared import forget_oauth, hold_mcp_switch, tag
 
 VERIFIER = "v" * 50
@@ -24,6 +24,38 @@ CALLBACK = "http://127.0.0.1:1/cb"
 READ = mcp_access.Access(frozenset({"read"}), None, None)
 WRITE = mcp_access.Access(frozenset({"read", "churning:write"}), None, None)
 CATEGORIZE = mcp_access.Access(frozenset({"read", "categorize:write"}), None, None)
+ANY = mcp_access.Access(frozenset({"read", "write"}), None, None)
+
+# Every change "write" allows (mcp_access.writable_routes over ROUTES). A route added to server/routes.py is allowed
+# unless it's BLOCKED, and fails this list until someone has looked at whether an assistant should have it.
+ALLOWED = [
+    "DELETE /api/overrides", "DELETE /api/recurring/{id}", "DELETE /api/rules/{id}", "DELETE /api/transactions/{id}",
+    "POST /api/accounts/{id}", "POST /api/accounts/{id}/remove", "POST /api/accounts/{id}/restore", "POST /api/accounts/{id}/statements",
+    "POST /api/accounts/{id}/statements/{id}/remove", "POST /api/ai/apply", "POST /api/ai/suggest", "POST /api/assets",
+    "POST /api/assets/{id}", "POST /api/assets/{id}/refresh", "POST /api/assets/{id}/remove", "POST /api/budget", "POST /api/categories",
+    "POST /api/categories/look", "POST /api/categories/move", "POST /api/categories/pay-with", "POST /api/categories/remove",
+    "POST /api/categories/rename", "POST /api/churning/balances", "POST /api/churning/bank", "POST /api/churning/bank/{id}",
+    "POST /api/churning/bank/{id}/remove", "POST /api/churning/benefits/{id}", "POST /api/churning/benefits/{id}/remove",
+    "POST /api/churning/benefits/{id}/unuse", "POST /api/churning/benefits/{id}/use", "POST /api/churning/cards",
+    "POST /api/churning/cards/{id}", "POST /api/churning/cards/{id}/benefits", "POST /api/churning/cards/{id}/plan/done",
+    "POST /api/churning/cards/{id}/plan/undo", "POST /api/churning/cards/{id}/rates", "POST /api/churning/cards/{id}/remove",
+    "POST /api/churning/currencies", "POST /api/churning/currencies/{id}/remove", "POST /api/churning/found/{id}/dismiss",
+    "POST /api/churning/found/{id}/undismiss", "POST /api/churning/scores", "POST /api/churning/suggest", "POST /api/churning/tasks",
+    "POST /api/churning/tasks/{id}", "POST /api/churning/tasks/{id}/remove", "POST /api/churning/tasks/{id}/snooze",
+    "POST /api/churning/wishlist", "POST /api/churning/wishlist/{id}", "POST /api/churning/wishlist/{id}/applied",
+    "POST /api/churning/wishlist/{id}/remove", "POST /api/equity/companies", "POST /api/equity/companies/{id}",
+    "POST /api/equity/companies/{id}/grants", "POST /api/equity/companies/{id}/remove", "POST /api/equity/grants/{id}",
+    "POST /api/equity/grants/{id}/remove", "POST /api/investments/cost", "POST /api/investments/plan", "POST /api/overrides",
+    "POST /api/recategorize", "POST /api/recurring", "POST /api/recurring/dismiss", "POST /api/recurring/suggestions/dismiss",
+    "POST /api/recurring/suggestions/restore", "POST /api/recurring/{id}", "POST /api/recurring/{id}/amount",
+    "POST /api/recurring/{id}/match", "POST /api/retail/charges/{id}/apply", "POST /api/retail/charges/{id}/link",
+    "POST /api/retail/charges/{id}/restore", "POST /api/retail/charges/{id}/unlink", "POST /api/retail/items/{id}",
+    "POST /api/retail/items/{id}/restore", "POST /api/retail/match", "POST /api/retail/orders/{id}/suggest", "POST /api/rules",
+    "POST /api/rules/preview", "POST /api/rules/{id}", "POST /api/rules/{id}/apply", "POST /api/tracked/{id}", "POST /api/transactions",
+    "POST /api/transactions/bulk", "POST /api/transactions/import", "POST /api/transactions/{id}", "POST /api/transactions/{id}/accept",
+    "POST /api/transactions/{id}/category", "POST /api/transactions/{id}/name", "POST /api/transactions/{id}/recurring",
+    "POST /api/transactions/{id}/split",
+]
 
 
 class RunwayServer(unittest.TestCase):
@@ -59,6 +91,7 @@ class RunwayServer(unittest.TestCase):
             conn.execute(delete(ChurnCard).where(ChurnCard.owner == self.owner))
             mcp_access.set_allow_writes(conn, False)
             mcp_access.set_allow_categorize(conn, False)
+            mcp_access.set_allow_all(conn, False)
 
     def cards(self):
         with db.session() as conn:
@@ -120,11 +153,13 @@ class PagesTests(RunwayServer):
                 mcp_http.local_fetch(path, {}, None, WRITE)
         with db.session() as conn:
             mcp_access.set_allow_writes(conn, True)
-        for path in ("accounts", "sync", "transactions", "mcp-settings/writes", "settings", "backup", "plaid/status",
-                     "churning/currencies", "churning/balances", "churning/cards/1/remove", "churning/benefits/1/remove",
-                     "churning/tasks/1/remove", "churning/wishlist/1/remove", "churning/cards/1/extra"):
+        for path in ("accounts", "sync", "mcp-settings/writes", "settings", "backup", "plaid/status", "churning/cards/1/extra"):
             with self.subTest(path=path), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
                 mcp_http.local_fetch(path, {}, {}, WRITE)                         # posting: only the listed changes
+        for path in ("transactions", "churning/currencies", "churning/balances", "churning/cards/1/remove", "churning/benefits/1/remove",
+                     "churning/tasks/1/remove", "churning/wishlist/1/remove"):
+            with self.subTest(path=path), self.assertRaisesRegex(mcp_server.ToolError, mcp_http.CANT_CHANGE):
+                mcp_http.local_fetch(path, {}, {}, WRITE)                         # what only "write" allows
         with self.assertRaises(urllib.error.HTTPError) as e:                     # the old key's pages are gone
             urllib.request.urlopen(self.base + "/api/mcp/accounts", timeout=20)
         self.assertEqual(e.exception.code, 404)
@@ -261,8 +296,8 @@ class PagesTests(RunwayServer):
                                                .where(RetailItemMemory.key.like(f"%{self.tag}%"))).fetchone())
             for other in (f"transactions/{tx}/split", f"transactions/{tx}/recurring", "transactions/bulk", "recategorize",
                          "categories", "categories/rename", "categories/remove", f"retail/orders/costco%7C{self.tag}/suggest"):
-                with self.subTest(path=other), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
-                    mcp_http.local_fetch(other, {}, {}, CATEGORIZE)                    # only the listed changes
+                with self.subTest(path=other), self.assertRaisesRegex(mcp_server.ToolError, "Change anything"):
+                    mcp_http.local_fetch(other, {}, {}, CATEGORIZE)                    # only the listed changes ("write" has the rest)
             with db.session() as conn:
                 mcp_access.set_allow_categorize(conn, False)
             with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):       # off again applies to the very next change
@@ -273,6 +308,173 @@ class PagesTests(RunwayServer):
                 conn.execute(delete(Transaction).where(Transaction.id == tx))
                 conn.execute(delete(RetailItem).where(RetailItem.order_id == "costco|" + self.tag))
                 conn.execute(delete(RetailOrder).where(RetailOrder.id == "costco|" + self.tag))
+
+
+class AnythingTests(RunwayServer):
+    """The "write" scope and "Let assistants change anything": what mcp_http.local_fetch lets through, and what it never does."""
+
+    def all(self, on):
+        with db.session() as conn:
+            mcp_access.set_allow_all(conn, on)
+
+    def category(self, name):
+        with db.session() as conn:
+            return conn.execute(select(Category.name).where(Category.name == name)).fetchone() is not None
+
+    def test_it_needs_its_own_scope_and_switch_every_time(self):
+        name = "Assistant " + self.tag
+        with db.session() as conn:
+            self.assertFalse(mcp_access.allow_all(conn))                          # off by default
+            mcp_access.set_allow_writes(conn, True)                               # the other switches don't open it
+            mcp_access.set_allow_categorize(conn, True)
+        for path, body in (("categories", {"name": name}), ("rules", None)):
+            with self.subTest(path=path), self.assertRaisesRegex(mcp_server.ToolError, "switched off"):
+                mcp_http.local_fetch(path, {}, body, ANY)
+        self.assertEqual(mcp_http.local_fetch("access", {"scope": "write"}, None, ANY), {"writes": False, "why": mcp_http.ALL_OFF})
+        self.all(True)
+        for access in (READ, WRITE, CATEGORIZE):                                  # nor do the other scopes
+            with self.subTest(scopes=access.scopes), self.assertRaisesRegex(mcp_server.ToolError, "reconnect"):
+                mcp_http.local_fetch("categories", {}, {"name": name}, access)
+            with self.subTest(scopes=access.scopes), self.assertRaises(mcp_server.ToolError):
+                mcp_http.local_fetch("rules", {}, None, access)                   # a page only "write" opens
+        self.assertFalse(self.category(name))
+        self.assertEqual(mcp_http.local_fetch("access", {"scope": "write"}, None, ANY), {"writes": True})
+        try:
+            mcp_http.local_fetch("categories", {}, {"name": name}, ANY)
+            mcp_http.local_fetch("categories/rename", {}, {"name": name, "new_name": name + " 2"}, ANY)
+            self.assertTrue(self.category(name + " 2"))
+            self.all(False)                                                       # off again applies to the very next change
+            with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):
+                mcp_http.local_fetch("categories/remove", {}, {"name": name + " 2"}, ANY)
+            self.assertTrue(self.category(name + " 2"))
+            self.all(True)
+            mcp_http.local_fetch("categories/remove", {}, {"name": name + " 2"}, ANY)
+            self.assertFalse(self.category(name + " 2"))
+        finally:
+            with db.session() as conn:
+                conn.execute(delete(Category).where(Category.name.in_([name, name + " 2"])))
+
+    def test_it_brings_churning_and_categorizing_with_it(self):
+        self.all(True)
+        for scope in ("churning:write", "categorize:write"):
+            self.assertEqual(mcp_http.local_fetch("access", {"scope": scope}, None, ANY), {"writes": True})
+        mcp_http.local_fetch("churning/cards", {}, {"owner": self.owner, "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}, ANY)
+        self.assertEqual(self.cards(), 1)
+        self.all(False)
+        self.assertEqual(mcp_http.local_fetch("access", {"scope": "churning:write"}, None, ANY), {"writes": False, "why": mcp_http.WRITES_OFF})
+        with db.session() as conn:
+            mcp_access.set_allow_writes(conn, True)                               # its own switch still works for it
+        self.assertEqual(mcp_http.local_fetch("access", {"scope": "churning:write"}, None, ANY), {"writes": True})
+
+    def test_a_delete_is_routed_as_one(self):
+        self.all(True)
+        rid = mcp_http.local_fetch("rules", {}, {"match": "assistant " + self.tag, "rename": "Assistant"}, ANY)["id"]
+
+        def there():
+            with db.session() as conn:
+                return conn.execute(select(Rule.id).where(Rule.id == rid)).fetchone() is not None
+        try:
+            self.assertIn(rid, [r["id"] for r in mcp_http.local_fetch("rules", {}, None, ANY)])
+            with self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
+                mcp_http.local_fetch(f"rules/{rid}/apply", {}, {}, ANY, "DELETE")      # only routes that are DELETEs
+            for method in ("PUT", "PATCH", "HEAD"):
+                with self.subTest(method=method), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
+                    mcp_http.local_fetch(f"rules/{rid}", {}, {}, ANY, method)
+            self.assertTrue(there())
+            mcp_http.local_fetch(f"rules/{rid}", {}, {}, ANY, "DELETE")
+            self.assertFalse(there())
+        finally:
+            with db.session() as conn:
+                conn.execute(delete(Rule).where(Rule.id == rid))
+
+    def test_what_is_blocked_is_never_reached(self):
+        self.all(True)
+        token = self.make_token("read", "write")
+        with db.session() as conn:
+            grant = conn.execute(select(OAuthGrant.id).where(OAuthGrant.client_id == self.clients[-1])).scalar()
+            key = db.get_setting(conn, "openrouter_api_key")
+        blocked = [(m, p) for m, p, _fn in server.ROUTES if mcp_access.blocked(p)]
+        self.assertGreater(len(blocked), 30)
+        for m, p in blocked:
+            path = p[len("/api/"):].replace("{id}", str(grant))
+            body = None if m == "GET" else {"allow": False, "openrouter_api_key": "sk-changed", "clear": True}
+            with self.subTest(route=f"{m} {p}"), self.assertRaisesRegex(mcp_server.ToolError, "^" + mcp_http.OUT_OF_REACH):
+                mcp_http.local_fetch(path, {}, body, ANY, m)
+        with db.session() as conn:                                               # nothing ran: the switch is on, the key kept
+            self.assertTrue(mcp_access.allow_all(conn))
+            self.assertEqual(db.get_setting(conn, "openrouter_api_key"), key)
+            self.assertIsNone(conn.execute(select(OAuthGrant.revoked).where(OAuthGrant.id == grant)).scalar())
+        self.assertTrue(token)
+
+    def test_nothing_outside_the_routes_and_no_other_page(self):
+        self.all(True)
+        for path in ("backup", "restore", "sync", "investments/sync", "ext/ping", "auth/login", "../oauth/token", "../mcp",
+                     "access/x", "endpoints/x", "", "mcp-settings%2Fall", "transactions?x=1"):
+            for method, body in (("GET", None), ("POST", {}), ("DELETE", {})):
+                with self.subTest(path=path, method=method), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
+                    mcp_http.local_fetch(path, {}, body, ANY, method)
+        for path in ("recurring/suggestions/dismissed", "investments/live", "plaid/oauth_resume", "accounts/x/logo-options"):
+            with self.subTest(path=path), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
+                mcp_http.local_fetch(path, {}, None, ANY)                          # GET: only the pages listed
+        with self.assertRaisesRegex(mcp_server.ToolError, "JSON object"):
+            mcp_http.local_fetch("categories", {}, ["x"], ANY)                   # type: ignore[arg-type]
+
+    def test_an_accounts_bank_connection_is_not_changed(self):
+        self.all(True)
+        with self.assertRaisesRegex(mcp_server.ToolError, "bank connection"):
+            mcp_http.local_fetch("accounts/nope", {}, {"display_name": "X", "provider": "plaid"}, ANY)
+        with self.assertRaisesRegex(mcp_server.ToolError, "Account not found"):   # without it, the page's own answer
+            mcp_http.local_fetch("accounts/nope", {}, {"display_name": "X"}, ANY)
+
+    def test_the_endpoints_page(self):
+        with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):
+            mcp_http.local_fetch("endpoints", {}, None, ANY)
+        self.all(True)
+        with self.assertRaisesRegex(mcp_server.ToolError, "reconnect"):
+            mcp_http.local_fetch("endpoints", {}, None, WRITE)
+        got = mcp_http.local_fetch("endpoints", {}, None, ANY)
+        self.assertIn("DELETE /api/transactions/{id} (destructive)", got["transactions"])
+        self.assertIn("POST /api/transactions/import", got["transactions"])
+        self.assertIn("GET /api/rules", got["rules"])
+        flat = [e for es in got.values() for e in es]
+        self.assertFalse([e for e in flat if mcp_access.blocked(e.split()[1])])
+        self.assertEqual({e.split()[0] + " " + e.split()[1] for e in flat if not e.startswith("GET")}, set(ALLOWED))
+
+
+class AllowlistTests(unittest.TestCase):
+    """What "write" opens, worked out from ROUTES, and what it never does."""
+
+    def test_every_change_is_allowed_or_blocked_and_the_list_is_reviewed(self):
+        allowed = {f"{m} {p}" for m, p in mcp_http.ANYTHING}
+        self.assertEqual(sorted(allowed), ALLOWED)                               # a new route: look at it, then add it here
+        for m, p, _fn in server.ROUTES:
+            if m in ("POST", "DELETE"):
+                with self.subTest(route=f"{m} {p}"):
+                    self.assertNotEqual(f"{m} {p}" in allowed, mcp_access.blocked(p))
+        for path in ALLOWED:
+            self.assertNotRegex(path, r"mcp|settings|plaid|carta|finnhub|logodev|realie|token|push|connect|logo|backup")
+
+    def test_the_blocked_set(self):
+        for p in ("/api/mcp-settings", "/api/mcp-settings/all", "/api/mcp-settings/connections/{id}/revoke", "/api/settings",
+                  "/api/connect", "/api/plaid/items/{id}/remove", "/api/carta/connect", "/api/finnhub/settings", "/api/logodev/fetch",
+                  "/api/realie/settings", "/api/retail/token", "/api/retail/token/remove", "/api/retail/settings", "/api/push",
+                  "/api/push/test", "/api/accounts/{id}/logo", "/api/merchants/logo", "/api/investments/logo", "/api/state"):
+            self.assertTrue(mcp_access.blocked(p), p)
+        for p in ("/api/settingsx", "/api/retail/tokens", "/api/accounts/{id}", "/api/pushed", "/api/retail/match"):
+            self.assertFalse(mcp_access.blocked(p), p)
+        gets = {p for m, p, _ in server.ROUTES if m == "GET"}
+        for p in (*mcp_access.READABLE, *mcp_access.READABLE_PATTERNS, *mcp_access.WRITE_READABLE):
+            self.assertIn(p, gets)
+            self.assertFalse(mcp_access.blocked(p), p)
+
+    def test_what_is_destructive(self):
+        for m, p in (("DELETE", "/api/rules/{id}"), ("DELETE", "/api/overrides"), ("POST", "/api/categories/remove"),
+                     ("POST", "/api/accounts/{id}/remove"), ("POST", "/api/recategorize"), ("POST", "/api/transactions/bulk"),
+                     ("POST", "/api/rules/{id}/apply"), ("POST", "/api/ai/apply"), ("POST", "/api/recurring/dismiss")):
+            self.assertTrue(mcp_access.destructive(m, p), p)
+        for m, p in (("POST", "/api/transactions"), ("POST", "/api/transactions/import"), ("POST", "/api/rules/{id}"),
+                     ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore")):
+            self.assertFalse(mcp_access.destructive(m, p), p)
 
 
 class SettingsTests(RunwayServer):
@@ -291,15 +493,20 @@ class SettingsTests(RunwayServer):
         status, got = self.api("/api/mcp-settings")
         self.assertEqual(status, 200)
         self.assertEqual({k: v for k, v in got.items() if k != "connections"},
-                         {"allow_writes": False, "allow_categorize": False, "oauth": True, "url": self.base + "/mcp", "reason": None})
+                         {"allow_writes": False, "allow_categorize": False, "allow_all": False, "oauth": True, "url": self.base + "/mcp",
+                          "reason": None})
         self.assertIsInstance(got["connections"], list)                          # (listed in the next test)
         self.assertEqual(self.api("/api/mcp-settings/writes", {"allow": True})[1], {"allow_writes": True})
         self.assertTrue(self.api("/api/mcp-settings")[1]["allow_writes"])
         self.assertEqual(self.api("/api/mcp-settings/writes", {})[1], {"allow_writes": False})   # no value: off
         self.assertEqual(self.api("/api/mcp-settings/categorize", {"allow": True})[1], {"allow_categorize": True})
         self.assertEqual({k: v for k, v in self.api("/api/mcp-settings")[1].items() if k.startswith("allow")},
-                         {"allow_writes": False, "allow_categorize": True})              # one switch doesn't flip the other
+                         {"allow_writes": False, "allow_categorize": True, "allow_all": False})   # one switch doesn't flip another
         self.assertEqual(self.api("/api/mcp-settings/categorize", {})[1], {"allow_categorize": False})
+        self.assertEqual(self.api("/api/mcp-settings/all", {"allow": True})[1], {"allow_all": True})
+        self.assertEqual({k: v for k, v in self.api("/api/mcp-settings")[1].items() if k.startswith("allow")},
+                         {"allow_writes": False, "allow_categorize": False, "allow_all": True})
+        self.assertEqual(self.api("/api/mcp-settings/all", {"allow": "no"})[1], {"allow_all": False})
 
     def test_connections_are_listed_and_revoked(self):
         mine, other = "Claude Code " + self.tag, "Other " + self.tag   # other tests' connections may be listed too
@@ -415,6 +622,32 @@ class StreamableHttpTests(RunwayServer):
             mcp_access.set_allow_writes(conn, False)                           # and off again applies to the next change
         self.assertTrue(self.call(key, "add_card", {"fields": fields})["isError"])
 
+    def test_a_statement_entered_over_mcp(self):
+        from runway.models import Account
+        key, acct = self.make_token("read", "write"), "cash-" + self.tag
+        with db.session() as conn:
+            conn.execute(insert(Account).values(id=acct, name="Wallet " + self.tag, kind="checking", balance=0))
+        rows = [{"posted": "2026-09-01", "payee": "Farmers Market", "amount": -12.5}, {"posted": "2026-09-02", "payee": "Refund", "amount": 3},
+                {"posted": "2026-09-01", "payee": "farmers  market", "amount": "-12.50"}]
+        try:
+            self.assertTrue(self.call(key, "add_transactions", {"account": acct, "transactions": rows})["isError"])   # switch off
+            with db.session() as conn:
+                mcp_access.set_allow_all(conn, True)
+            _, _, body = self.rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, key)
+            self.assertIn(mcp_server.ANYTHING_RULES, json.loads(body)["result"]["instructions"])
+            got = json.loads(self.call(key, "add_transactions", {"account": acct, "transactions": rows})["content"][0]["text"])
+            self.assertEqual((got["added"], got["skipped"], got["rows"][2]["status"]), (2, 1, "duplicate"))
+            refused = self.call(key, "call_endpoint", {"method": "POST", "path": "/api/mcp-settings/all", "body": {"allow": False}})
+            self.assertTrue(refused["isError"])
+            self.assertIn("can't reach", refused["content"][0]["text"])
+            with db.session() as conn:
+                self.assertTrue(mcp_access.allow_all(conn))
+                self.assertEqual(conn.execute(select(func.count()).select_from(Transaction).where(Transaction.account_id == acct)).scalar(), 2)
+        finally:
+            with db.session() as conn:
+                conn.execute(delete(Transaction).where(Transaction.account_id == acct))
+                conn.execute(delete(Account).where(Account.id == acct))
+
     def test_the_tools_reach_only_the_allowlists(self):
         key = self.make_token()
         result = self.call(key, "get_order", {"order_id": "../../settings"})
@@ -453,8 +686,8 @@ class Fake:
     def __init__(self, pages=None):
         self.pages, self.calls = pages or {"churning": CHURNING}, []
 
-    def __call__(self, path, params, body=None):
-        self.calls.append((path, params) if body is None else (path, params, body))
+    def __call__(self, path, params, body=None, method=None):
+        self.calls.append((path, params) if body is None else (path, params, body) if method is None else (path, params, body, method))
         if body is not None:
             return {"ok": True}
         if path not in self.pages:
@@ -468,12 +701,12 @@ class ScopedFake(Fake):
         super().__init__()
         self.allowed = set(allowed)
 
-    def __call__(self, path, params, body=None):
+    def __call__(self, path, params, body=None, method=None):
         if path == "access":
             self.calls.append((path, params))
             scope = params.get("scope")
             return {"writes": True} if scope in self.allowed else {"writes": False, "why": f"No {scope}."}
-        return super().__call__(path, params, body)
+        return super().__call__(path, params, body, method)
 
 
 def mcp_access_match(pattern, path):
@@ -577,6 +810,90 @@ class ProtocolTests(unittest.TestCase):
         r = ask("tools/call", {"name": "set_transaction_category", "arguments": {"transaction_id": "a", "category": "Groceries"}}, fake)
         self.assertEqual(r["result"]["content"][0]["text"], "No categorize:write.")   # Runway says why
         self.assertEqual([c for c in fake.calls if len(c) == 3], [])
+
+    def test_write_offers_every_tool_and_the_rest_offer_none_of_its_own(self):
+        anything = {t["name"] for t in mcp_server.ANY_TOOLS}
+        for allowed in ((), ("churning:write",), ("categorize:write",), ("churning:write", "categorize:write")):
+            with self.subTest(allowed=allowed):
+                fake = ScopedFake(allowed)
+                self.assertTrue(anything.isdisjoint(t["name"] for t in ask("tools/list", fake=fake)["result"]["tools"]))
+                r = ask("tools/call", {"name": "add_transaction", "arguments": {"fields": {}}}, fake)
+                self.assertEqual(r["result"]["content"][0]["text"], "No write.")    # Runway says why
+                self.assertEqual([c for c in fake.calls if len(c) > 2], [])
+        fake = ScopedFake(("write",))
+        self.assertEqual([t["name"] for t in ask("tools/list", fake=fake)["result"]["tools"]], [t["name"] for t in mcp_server.ALL_TOOLS])
+        self.assertEqual([c for c in fake.calls if c[0] == "access"], [("access", {"scope": "write"})])   # one question is enough
+
+    def test_write_tools_ask_first_and_say_when_they_destroy(self):
+        tools = {t["name"]: t for t in ask("tools/list", fake=ScopedFake(("write",)))["result"]["tools"]}
+        reads = {"list_rules", "preview_rule", "list_endpoints"}
+        for t in mcp_server.ANY_TOOLS:
+            with self.subTest(tool=t["name"]):
+                listed = tools[t["name"]]
+                a = listed["annotations"]
+                if t["name"] in reads:
+                    self.assertTrue(a["readOnlyHint"])
+                    self.assertNotIn(mcp_server.ASK, listed["description"])
+                    continue
+                self.assertFalse(a["readOnlyHint"])
+                if t["route"]:
+                    want = mcp_access.destructive(*t["route"]) or t["name"] == "remove_budget"
+                    self.assertEqual(a["destructiveHint"], want)
+                    allowed = (t["route"] in mcp_http.ANYTHING or t["route"][1] in mcp_access.WRITE_READABLE)
+                    self.assertTrue(allowed, t["route"])                          # every typed tool's route is one "write" opens
+                self.assertTrue(listed["description"].endswith(mcp_server.DESTRUCTIVE if a["destructiveHint"] else mcp_server.ASK))
+                self.assertIn(mcp_server.ASK, listed["description"])
+        self.assertTrue(tools["call_endpoint"]["annotations"]["destructiveHint"])
+        self.assertTrue(tools["add_transactions"]["annotations"]["idempotentHint"])
+        self.assertFalse(tools["add_transactions"]["annotations"]["destructiveHint"])
+        for t in mcp_server.WRITE_TOOLS + mcp_server.CATEGORIZE_TOOLS:            # the older ones ask first too
+            self.assertTrue(t["description"].endswith(mcp_server.ASK), t["name"])
+        self.assertEqual(len(tools), len(mcp_server.ALL_TOOLS))
+
+    def test_the_instructions_say_to_ask_before_each_change(self):
+        told = ask("initialize", {}, ScopedFake(("write",)))["result"]["instructions"]
+        for words in ("explicit yes", "destructive", "never under one blanket yes", "add_transactions", "call_endpoint",
+                      "Bank connections, API keys, notifications and these assistant settings are out of reach"):
+            self.assertIn(words, told)
+        self.assertNotIn("read-only", told)
+        self.assertTrue(ask("initialize", {}, ScopedFake(()))["result"]["instructions"].endswith("Everything is read-only."))
+
+    def test_write_tools_send_what_the_web_app_sends(self):
+        rows = [{"posted": "2026-09-01", "payee": "Cafe", "amount": -4.5}]
+        calls = [("add_transactions", {"account": "cash|1", "transactions": rows}, ("transactions/import", {}, {"account": "cash|1", "transactions": rows})),
+                 ("add_transaction", {"fields": {"account": "a", "amount": 5}}, ("transactions", {}, {"account": "a", "amount": 5})),
+                 ("update_transaction", {"transaction_id": "a|manual:x/y", "fields": {"notes": "n"}}, ("transactions/a%7Cmanual%3Ax%2Fy", {}, {"notes": "n"})),
+                 ("delete_transaction", {"transaction_id": "a|manual:1"}, ("transactions/a%7Cmanual%3A1", {}, {}, "DELETE")),
+                 ("remove_budget", {"category": "Dining"}, ("budget", {}, {"category": "Dining", "amount": 0})),
+                 ("unlink_transaction_recurring", {"transaction_id": "t"}, ("transactions/t/recurring", {}, {})),
+                 ("remove_statement", {"account_id": "card", "statement_date": "2026-09-01"}, ("accounts/card/statements/2026-09-01/remove", {}, {})),
+                 ("delete_rule", {"rule_id": 7}, ("rules/7", {}, {}, "DELETE")),
+                 ("clear_forecast_amount", {"key": "rec:1:2026-10-01"}, ("overrides", {}, {"key": "rec:1:2026-10-01"}, "DELETE")),
+                 ("save_retirement_plan", {"plan": None}, ("investments/plan", {}, {"plan": None})),
+                 ("call_endpoint", {"method": "post", "path": "/api/categories/look", "body": {"name": "Dining", "color": "red"}},
+                  ("categories/look", {}, {"name": "Dining", "color": "red"})),
+                 ("call_endpoint", {"method": "DELETE", "path": "api/rules/3"}, ("rules/3", {}, {}, "DELETE"))]
+        fake = ScopedFake(("write",))
+        for name, args, want in calls:
+            with self.subTest(tool=name):
+                fake.calls.clear()
+                r = ask("tools/call", {"name": name, "arguments": args}, fake)
+                self.assertNotIn("isError", r["result"], r)
+                self.assertEqual([c for c in fake.calls if len(c) > 2], [want])
+        fake.calls.clear()
+        ask("tools/call", {"name": "call_endpoint", "arguments": {"method": "GET", "path": "/api/rules", "body": {"x": 1}, "query": {"a": 1}}}, fake)
+        self.assertEqual(fake.calls[-1], ("rules", {"a": 1}))                     # a GET sends no body
+        for args in ({"method": "PUT", "path": "/api/rules"}, {"method": "GET"}, {"method": "GET", "path": "/"},
+                     {"method": "GET", "path": "rules", "query": ["x"]}):
+            with self.subTest(args=args):
+                fake.calls.clear()
+                self.assertTrue(ask("tools/call", {"name": "call_endpoint", "arguments": args}, fake)["result"]["isError"])
+                self.assertEqual([c for c in fake.calls if c[0] != "access"], [])
+        for name, args in (("delete_transaction", {}), ("delete_rule", {"rule_id": "x"}), ("remove_statement", {"account_id": "card"})):
+            with self.subTest(tool=name, args=args):
+                fake.calls.clear()
+                self.assertTrue(ask("tools/call", {"name": name, "arguments": args}, fake)["result"]["isError"])
+                self.assertEqual([c for c in fake.calls if len(c) > 2], [])
 
     def test_categorizing_tools_post_what_the_web_app_sends(self):
         calls = [("set_transaction_category", {"transaction_id": "plaid/a b", "category": " Groceries "},

@@ -94,6 +94,7 @@ class OAuthServer(unittest.TestCase):
             conn.execute(delete(ChurnCard).where(ChurnCard.owner == self.owner))
             mcp_access.set_allow_writes(conn, False)
             mcp_access.set_allow_categorize(conn, False)
+            mcp_access.set_allow_all(conn, False)
 
     def mine(self, stmt):
         """The first column of this statement's first row (`.in_(self.clients)` picks "this test's clients")."""
@@ -140,9 +141,9 @@ class OAuthServer(unittest.TestCase):
         start = body.index('name="consent" value="') + len('name="consent" value="')
         return body[start:body.index('"', start)]
 
-    def answer(self, page, decision="allow", churning=False, cookies=None, headers=None, token=None, categorize=False):
+    def answer(self, page, decision="allow", churning=False, cookies=None, headers=None, token=None, categorize=False, write=False):
         fields = {"consent": token if token is not None else self.consent_token(page), "decision": decision,
-                  **({"churning": "1"} if churning else {}), **({"categorize": "1"} if categorize else {})}
+                  **({"churning": "1"} if churning else {}), **({"categorize": "1"} if categorize else {}), **({"write": "1"} if write else {})}
         ck = {"runway_consent": page.cookie("runway_consent").value} if cookies is None else cookies
         return self.form("/oauth/authorize", fields, headers, {**ck, **getattr(self, "session", {})})
 
@@ -191,7 +192,7 @@ class MetadataTests(OAuthServer):
                 r = self.http("GET", path)
                 self.assertEqual(r.status, 200)
                 self.assertEqual(r.json, {"resource": self.resource, "authorization_servers": [self.iss],
-                                          "scopes_supported": ["read", "churning:write", "categorize:write"], "bearer_methods_supported": ["header"]})
+                                          "scopes_supported": ["read", "churning:write", "categorize:write", "write"], "bearer_methods_supported": ["header"]})
                 self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))   # no CORS
         m = self.http("GET", "/.well-known/oauth-authorization-server").json
         self.assertEqual(m, mcp_oauth.authorization_server_metadata(self.iss))
@@ -342,6 +343,29 @@ class ConsentTests(OAuthServer):
         with db.session() as conn:
             mcp_access.set_allow_categorize(conn, False)                          # read again when you answer
         self.assertEqual(self.exchange(c, self.answer(page, categorize=True).query()["code"]).json["scope"], "read")
+
+    def test_the_change_anything_box_follows_its_switch_and_is_never_ticked_for_you(self):
+        c = self.client()
+        page = self.authorize(c, scope="read write").body.decode()               # asked, switch off: shown, off, and why
+        self.assertIn('type="checkbox" disabled><span><b>Change anything', page)
+        self.assertIn("Turn on Let assistants change anything in Settings → Data first", page)
+        self.assertEqual(self.exchange(c, self.answer(self.authorize(c, scope="read write"), write=True).query()["code"]).json["scope"], "read")
+        self.all(True)
+        page = self.authorize(c, scope="read write")
+        body = page.body.decode()
+        self.assertIn('<input type="checkbox" name="write" value="1"><span><b>Change anything', body)   # not ticked
+        self.assertIn("Add, change and remove your financial data", body)
+        self.assertIn("Never bank connections, API keys, notifications or these assistant settings", body)
+        self.assertEqual(self.exchange(c, self.answer(page).query()["code"]).json["scope"], "read")   # left unticked: read only
+        page = self.authorize(c, scope="read write")
+        self.assertEqual(self.exchange(c, self.answer(page, write=True).query()["code"]).json["scope"], "read write")
+        self.assertNotIn("Change anything", self.authorize(c, scope="read churning:write").body.decode())   # not asked: not there
+        page = self.authorize(c, scope="read churning:write")
+        self.assertEqual(self.exchange(c, self.answer(page, write=True).query()["code"]).json["scope"], "read")   # nor granted
+
+    def all(self, on):
+        with db.session() as conn:
+            mcp_access.set_allow_all(conn, on)
 
     def test_allow_and_deny(self):
         c = self.client()
