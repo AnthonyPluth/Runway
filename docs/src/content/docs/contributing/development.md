@@ -32,7 +32,7 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs the checks to run before you push, each tool once: ruff and mypy, Runway's own Semgrep rules, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs the checks to run before you push, each tool once: ruff and mypy, Runway's own Semgrep rules, the fleet checks (see [Merging](#merging)), the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## One paved path
 
@@ -90,6 +90,8 @@ poetry run alembic check                                       # the schema and 
 
 A column that refers to another table's row (an account's id, above all) gets a foreign key, `schema.refers(table, column, "accounts.id", ondelete)`: `CASCADE` when the row belongs to what it refers to (an account's transactions), `SET NULL` when it only points at it (the account a card is paid from). Deleting an account (`deleted_accounts.remove`) relies on them, and `tests/test_deleted_accounts.py` fails for a column named like an account id without one, or a settings key named by an account id that isn't in `settings_keys.PER_ACCOUNT`. Ids kept on purpose after what they name is gone (the deleted accounts list, investment accounts' ids, Plaid's) have none. A backup restores with the keys checked when the restore commits, so rows may come in any order.
 
+Give each migration the next four-digit number after main's newest (`0041_…py`, `revision = '0041'`) and a test of its own in `tests/test_migrations.py`, a method named `test_0041_…` that downgrades to the revision before it, writes the data it changes, upgrades and checks the result. `make check` and CI fail when there is more than one Alembic head (two branches that each added the next number), a number is used twice, or a migration has no test (`tools/fleet_checks.py`).
+
 Runway applies it on its next start. Queries, in the app and in the tests, are SQLAlchemy statements over the ORM models (`Connection.execute()` doesn't take SQL text), compiled for whichever database is in use; [Queries with SQLAlchemy](/Runway/contributing/orm/) is the guide.
 
 ## Code layout
@@ -139,5 +141,14 @@ Every push to `main` runs the tests and, at the same time, builds the image for 
 3. deletes untagged leftovers. Every released version stays available, so you can pin one (`image: ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose.
 
 Versions follow `vMAJOR.MINOR.PATCH`, decided by what's been merged since the last release. Pull request titles start with a type (they end up in each merge commit's message): `feat: …` bumps the minor version, `fix: …` (or anything else) the patch, and a `!` before the colon (`feat!: …`, `fix!: …`) the major version, for a change that breaks an existing setup. `#minor` or `#major` at the end of a line, or a line starting with `BREAKING CHANGE:`, work too. (A message that only mentions them mid-sentence doesn't count.) The running version is shown under **Settings → Data**.
+
+## Merging
+
+A pull request is ready when its **Merge gate** status passes: every check on its head commit green (`.github/scripts/merge-gate.sh`). Besides the tests and the security scans, that includes:
+
+- **Fleet checks** (`tools/fleet_checks.py`, `make fleet-checks`): one Alembic head, a test for each new migration, the workflows' conventions (bash by default, actions pinned by SHA with their version in a comment, `gh api` lists paginated), and that each commit an AI agent wrote names its model in a trailer, `Co-Authored-By: Claude <Model> <version> <noreply@anthropic.com>`.
+- **Agent review** (`.github/workflows/agent-review.yml`): a pull request an agent wrote (its commits carry a `Claude-Session:` or Claude `Co-Authored-By:` trailer) is reviewed by a fresh Claude Code session that has no access to the one that wrote it. It reads the change against `AGENTS.md` with only Read, Grep and Glob, confined to the review's directory, and loads no settings, hooks, skills, plugins, MCP servers or `CLAUDE.md` (`.github/scripts/agent-review-run.sh`). It posts its findings as a comment and sets the **Agent review** status: a blocking finding fails it, and with it the merge gate, until a new push is reviewed clean. It runs main's copy of the workflow and prompt, so a pull request can't change how it is reviewed. Anyone else's pull request gets a passing status saying it isn't an agent's.
+
+  It needs one of two repository secrets (**Settings → Secrets and variables → Actions**): `CLAUDE_CODE_OAUTH_TOKEN`, for a Claude Pro or Max subscription (run `claude setup-token` and paste the token it prints), or `ANTHROPIC_API_KEY`, an API key from the Claude Console, which is used when both are set. The `AGENT_REVIEW_MODEL` and `AGENT_REVIEW_BUDGET_USD` variables set the model and the most one review may spend, as Claude Code estimates it (`opus`, 5).
 
 [Dependabot](https://github.com/AnthonyPluth/Runway/blob/main/.github/dependabot.yml) opens weekly pull requests to keep the GitHub Actions and the Python base image up to date; each one runs the tests before it can be merged.
