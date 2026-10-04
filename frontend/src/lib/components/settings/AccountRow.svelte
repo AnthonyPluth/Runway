@@ -129,7 +129,7 @@
     const id = a.id, what = label, moved = onhidden;
     // The hide itself is saved and the row has moved; refreshing the app's state after it only updates counts elsewhere, and
     // the next state check does that if this one fails, so it stays quiet.
-    const done = (v: boolean) => { if (moved) { moved(id, v); Promise.resolve().then(() => refreshState()).catch(() => {}); } else reload(); };
+    const done = (v: boolean) => { if (moved) { moved(id, v); Promise.resolve().then(() => refreshState()).catch(() => { /* stays quiet: see above */ }); } else reload(); };
     done(on);
     if (on) undoable(`${what} hidden`, async () => { await setHiddenOnServer(false); done(false); });
     else toast.success(`${what} is shown again`);
