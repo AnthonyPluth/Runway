@@ -16,12 +16,14 @@ from sqlalchemy import select
 from .models import Account, PlaidAccount, PlaidItem, User
 
 # (pattern, institution): checked in order against the lowercased institution and account names. Not for logos: which
-# institution a name is (plaidbank uses it to tell whether two accounts are the same one).
+# institution a name is (plaidbank uses it to tell whether two accounts are the same one). Institutions' own names only,
+# never their cards' ("Sapphire", "Venture X", "Double Cash"): which bank issues a card is the bank's (SimpleFIN's and
+# Plaid's institution names say so), not a list of products for Runway to keep up to date.
 PATTERNS = [
-    (r"\bchase\b|sapphire|\bcs[pr]\b|freedom (flex|unlimited)|\bjpmorgan", "chase"),
-    (r"capital ?one|venture ?x?\b|quicksilver|savor", "capital-one"),
-    (r"\bciti(bank|group)?\b|double cash|custom cash|costco anywhere", "citibank"),
-    (r"american express|\bamex\b|blue cash|platinum card|gold card|delta skymiles", "american-express"),
+    (r"\bchase\b|\bjpmorgan", "chase"),
+    (r"capital ?one", "capital-one"),
+    (r"\bciti(bank|group)?\b", "citibank"),
+    (r"american express|\bamex\b", "american-express"),
     (r"\bdiscover\b", "discover-card"),
     (r"bank of america|\bbofa\b|merrill", "bank-of-america"),
     (r"wells ?fargo", "wells-fargo"),
@@ -37,9 +39,6 @@ PATTERNS = [
     (r"robinhood", "robinhood"),
     (r"\bsofi\b", "sofi"),
     (r"paypal", "paypal"),
-    (r"apple (card|cash|savings)", "apple"),
-    (r"amazon", "amazon"),
-    (r"target (circle|redcard)|\btarget\b", "target"),
 ]
 _compiled = [(re.compile(p), slug) for p, slug in PATTERNS]
 
@@ -88,7 +87,7 @@ SITES = {
     "u-s-bank": "usbank.com", "m-t-bank": "mtb.com", "navy-federal-credit-union": "navyfederal.org", "usaa": "usaa.com",
     "fidelity": "fidelity.com", "vanguard": "vanguard.com", "charles-schwab": "schwab.com", "e-trade": "etrade.com",
     "interactive-brokers": "interactivebrokers.com", "robinhood": "robinhood.com", "sofi": "sofi.com",
-    "paypal": "paypal.com", "apple": "apple.com", "amazon": "amazon.com", "target": "target.com",
+    "paypal": "paypal.com",
 }
 NO_LOGO = "none"   # accounts.logo: you chose a letter instead of a logo
 
@@ -146,7 +145,7 @@ def account_brands(conn) -> dict[str, dict]:
         label = inst or r["display_name"] or r["name"] or "?"
         out[r["id"]] = {"src": None, "auto": None, "institution": inst,
                         "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
-        # the account's own name only says which bank it is when the bank doesn't ("Venture X" is Capital One)
+        # the account's own name only says which bank it is when the bank doesn't ("Chase Freedom" is Chase)
         s = SITES.get((brand(inst) if inst else brand(r["display_name"], r["name"])) or "")
         if s:
             sites[r["id"]] = s
@@ -177,8 +176,9 @@ def account_brands(conn) -> dict[str, dict]:
 # "Southwest"), a marketplace whose charges name the store ("DoorDash", "Instacart"), a payment app, or a brand
 # whose products are worth telling apart and that the bank doesn't say ("Google", "YouTube", "Max"). A sub-brand
 # with no name of its own here stops at its own entry ("Uber Pass" stays as it is, not "Uber").
+# A card's payment is neither (pays_a_card): "Payment To Costco Anywhere Visa" isn't Costco.
 # Store orders are paired with their transactions by runway/retail/match.py's own, stricter MERCHANT patterns, not
-# these: a payment to the Costco Anywhere Visa card can show Costco's logo, but it's never a Costco order's charge.
+# these: they also take a statement's shorter forms ("AMZ", "TGT").
 MERCHANT_PATTERNS: list[tuple[str, str, str | None]] = [
     (r"prime ?video", "primevideo.com", "Prime Video"),
     (r"\baudible\b", "audible.com", "Audible"),
@@ -288,16 +288,33 @@ MERCHANT_PATTERNS: list[tuple[str, str, str | None]] = [
 ]
 _merchants = [(re.compile(p), site, name) for p, site, name in MERCHANT_PATTERNS]
 BRAND_NAMES = {name.lower() for _p, _site, name in MERCHANT_PATTERNS if name}   # the brands' own names, lowercased
+# A payment's words, and a card's (a store card's bank: "syf" is Synchrony). Text with both is a card's bill ("Amazon
+# Corp Syf Paymnt", "Payment To Costco Anywhere Visa", "Target Card Payment"), not something bought at the store it
+# names (pays_a_card). A payment alone can still be the merchant's own bill ("AT&T Payment", "Venmo Payment").
+_PAYMENT = r"paymnts?|payments?|pymts?|pmts?|autopay|e-?pay"
+_CARD = r"syf|synchrony|card"
 # A payee with one of these words is a payment to, money from, or a part of the business that's worth telling apart
 # ("Amazon Corp Syf Paymnt" is a store card's bill, "Costco Gas" isn't groceries, "Apple Cash" isn't a purchase): it
 # keeps the bank's text.
 _NOT_A_PURCHASE = re.compile(
-    r"\b(pay|paymnts?|payments?|pymts?|pmts?|autopay|e-?pay|syf|synchrony|card|cash|transfer|xfer|payroll|salary|"
+    rf"\b(pay|{_PAYMENT}|{_CARD}|cash|transfer|xfer|payroll|salary|"
     r"deposit|dir dep|refund|gas|fuel|pharmacy|rx|optical|liquor|car ?wash|tire|auto|travel|insurance|bank)\b")
+_PAYS = re.compile(rf"\b({_PAYMENT})\b")
+_A_CARD = re.compile(rf"\b({_CARD}|crd|visa|mastercard)\b")
+
+
+def pays_a_card(*names: str | None) -> bool:
+    """Whether these texts (a payee, a bank's description) say the money pays a card: a payment's word and a card's,
+    in the same text ("Payment To Costco Anywhere Visa", "AMAZON CORP SYF PAYMNT")."""
+    texts = [(n or "").lower() for n in names]
+    return any(_PAYS.search(t) and _A_CARD.search(t) for t in texts)
 
 
 def merchant(*names: str | None) -> str | None:
-    """The website of the big merchant the first name (payee, then description) names, if any."""
+    """The website of the big merchant the first name (payee, then description) names, if any. None for a card's payment
+    (pays_a_card), as merchant_name gives none: a payment to the Costco Anywhere Visa card isn't Costco's."""
+    if pays_a_card(*names):
+        return None
     for name in names:
         text = " ".join((name or "").lower().split())
         if not text:

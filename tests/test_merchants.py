@@ -488,5 +488,82 @@ class MerchantTests(DbCase):
         self.assertEqual(started.call_count, 2)
 
 
+class CardPaymentLogoTests(DbCase):
+    """A card's payment has no merchant: it shows the logo of the card's bank (forecast.paid_cards says which card),
+    else the paying account's."""
+
+    def setUp(self):
+        super().setUp()
+        self.c.execute(insert(Account), [
+            {"id": "chk", "name": "Checking", "org": "Northwind Bank", "kind": "checking", "pay_from": None},
+            {"id": "chk2", "name": "Bills", "org": "Northwind Bank", "kind": "checking", "pay_from": None},
+            {"id": "sav", "name": "Savings", "org": "Northwind Bank", "kind": "savings", "pay_from": None},
+            {"id": "c1", "name": "Rewards Card", "org": "Contoso Bank", "kind": "credit", "pay_from": "chk"},
+            {"id": "c2", "name": "Store Card", "org": "Fabrikam Card Services", "kind": "credit", "pay_from": "chk2"}])
+
+    def tx(self, id, account, posted, amount, payee, category):
+        self.c.execute(insert(Transaction).values(id=id, account_id=account, posted=posted, amount=amount, payee=payee,
+                                                  description=payee.upper(), category=category))
+
+    def paid(self):
+        from runway import forecast
+        return forecast.paid_cards(self.c, db.rows(self.c.execute(select(Transaction))))
+
+    def test_which_card_a_payment_pays(self):
+        # the card's credit for it says which card, whichever account it left (and whatever its text names)
+        self.tx("p1", "chk", "2026-09-01", -412.50, "Payment To Store Visa", "Credit Card Payment")
+        self.tx("p1c", "c2", "2026-09-04", 412.50, "Payment Thank You", "Credit Card Payment")
+        # no credit for it yet: the only card paid from that account (Settings → Accounts)
+        self.tx("p2", "chk", "2026-09-10", -88.00, "Online Payment", "Credit Card Payment")
+        # a transfer that no card has a credit for isn't a card payment
+        self.tx("p3", "chk", "2026-09-11", -200.00, "Transfer To Savings", "Transfer")
+        self.tx("p4", "chk", "2026-09-12", -15.00, "Sweep", "Ignore")
+        self.tx("p5", "chk", "2026-09-13", -30.00, "Corner Shop", None)
+        # a card's own payment (a reversed one too) is its own
+        self.tx("p6", "c1", "2026-09-14", -20.00, "Payment Returned", "Credit Card Payment")
+        # a transfer that lands on a card is its payment
+        self.tx("p7", "chk", "2026-09-15", -64.00, "Transfer", "Transfer")
+        self.tx("p7c", "c1", "2026-09-16", 64.00, "Online Transfer", "Transfer")
+        self.assertEqual(self.paid(), {"p1": "c2", "p1c": "c2", "p2": "c1", "p6": "c1", "p7": "c1", "p7c": "c1"})
+
+    def test_when_it_can_be_more_than_one_card_the_bank_s_own(self):
+        self.tx("p1", "chk2", "2026-09-01", -50.00, "Online Payment", "Credit Card Payment")
+        self.tx("p2", "chk", "2026-09-01", -75.00, "Online Payment", "Credit Card Payment")
+        self.tx("p3", "sav", "2026-09-01", -10.00, "Online Payment", "Credit Card Payment")   # pays no card
+        # two cards with a credit of the same amount: neither, so the paying account's card (c2: chk2's only one)
+        self.tx("p1a", "c1", "2026-09-03", 50.00, "Payment Thank You", "Credit Card Payment")
+        self.tx("p1b", "c2", "2026-09-03", 50.00, "Payment Thank You", "Credit Card Payment")
+        got = self.paid()
+        self.assertEqual((got["p1"], got["p2"], got["p3"]), ("c2", "c1", "sav"))
+        # a card with no paying account could be paid from any of them: the bank's own
+        self.c.execute(insert(Account).values(id="c3", name="Travel Card", org="Contoso Bank", kind="credit"))
+        got = self.paid()
+        self.assertEqual((got["p1"], got["p2"]), ("chk2", "chk"))
+        # ... unless the card's credit says which (outside the window it doesn't: 15 days later)
+        self.tx("p2c", "c3", "2026-09-05", 75.00, "Payment Thank You", "Credit Card Payment")
+        self.tx("p3c", "c3", "2026-09-16", 10.00, "Payment Thank You", "Credit Card Payment")
+        got = self.paid()
+        self.assertEqual((got["p2"], got["p3"]), ("c3", "sav"))
+
+    def test_the_list_shows_the_card_s_bank_not_the_store(self):
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.c.execute(insert(Merchant).values(id="site:costco.com", logo_url="x", logo="cG5n", logo_type="image/png"))
+        self.tx("buy", "c2", "2026-09-02", -120.00, "Costco Whse #0001", "Groceries")
+        self.tx("pay", "chk", "2026-09-10", -88.00, "Payment To Costco Anywhere Visa", "Credit Card Payment")
+        self.tx("pay2", "chk2", "2026-09-10", -40.00, "Costco Bill", "Credit Card Payment")   # names it, but pays a card
+        self.tx("got", "c2", "2026-09-12", 40.00, "Payment Thank You", "Credit Card Payment")
+
+        def items():
+            return {t["id"]: (t["logo"], t["logo_account"]) for t in server.api_transactions(self.c, {}, None)["items"]}
+        self.assertEqual(items(), {"buy": ("/api/merchants/site%3Acostco.com/logo", None), "pay": (None, "c1"),
+                                   "pay2": (None, "c2"), "got": (None, "c2")})
+        # a logo you chose for it still wins; "no logo" leaves its letter, not the bank's
+        merchants.choose(self.c, "Costco Bill", "costco.com")
+        merchants.choose(self.c, "Payment To Costco Anywhere Visa", hidden=True)
+        got = items()
+        self.assertEqual(got["pay2"], ("/api/merchants/site%3Acostco.com/logo", "c2"))
+        self.assertEqual(got["pay"], (None, None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,12 @@
 
 <script lang="ts">
   import { api } from "$lib/api";
+  import { app } from "$lib/app.svelte";
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
   import Logo from "$lib/components/Logo.svelte";
+  import { txLogo } from "$lib/components/transactions/logo";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
@@ -93,11 +95,12 @@
     <Group title="Recent" inset="3.75rem">
       {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each latest.items as t (t.id)}
+        {@const logo = txLogo(t, app.state?.brands).src}
         <div class="cell">
-          <!-- The merchant's logo (or its category) with the account's bank on its corner, as on Transactions. -->
+          <!-- The merchant's logo (a card payment's: its card's bank's; else its category) with the account's bank on its corner, as on Transactions. -->
           <span class="relative shrink-0">
-            {#if t.logo}
-              <Logo src={t.logo} />
+            {#if logo}
+              <Logo src={logo} />
             {:else}<CatIcon name={t.category} size={32} />{/if}
             <BankBadge accountId={t.account_id} name={t.account_name ?? ""} />
           </span>

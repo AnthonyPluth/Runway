@@ -112,6 +112,21 @@ describe("TxRow", () => {
       expect(container.querySelector("img")).toHaveAttribute("src", "/logos/bb.png");
     });
 
+    it("shows a card payment's card's bank's logo, or that bank's letter, unless it has a logo of its own", () => {
+      app.state = { connected: true, brands: { card: { institution: "Contoso Bank", initial: "C", src: "/logos/contoso.png" },
+        plain: { institution: "Fabrikam", initial: "F", src: null } } };
+      const pay = { payee: "Payment To Northwind Visa", category: null };
+      let r = render(TxRow, props(tx({ ...pay, logo: null, logo_account: "card" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toHaveAttribute("src", "/logos/contoso.png");
+      r.unmount();
+      r = render(TxRow, props(tx({ ...pay, logo: null, logo_account: "plain" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toBeNull();
+      expect(screen.getByText("F", { selector: "span[aria-hidden=true]" })).toBeInTheDocument();
+      r.unmount();
+      r = render(TxRow, props(tx({ ...pay, logo: "/logos/chosen.png", logo_account: "card" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toHaveAttribute("src", "/logos/chosen.png");
+    });
+
     it("shows the merchant's first letter when it doesn't", () => {
       const { container } = render(TxRow, props(tx({ logo: null })));
       expect(container.querySelector("img")).toBeNull();

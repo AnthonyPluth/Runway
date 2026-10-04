@@ -13,11 +13,14 @@ from runway.models import Account, Merchant, PlaidAccount, PlaidItem
 
 class BrandTests(unittest.TestCase):
     def test_names(self):
-        cases = {"Chase": "chase", "JPMorgan Chase Bank": "chase", "CSP (Sam)": "chase", "Capital One": "capital-one",
-                 "Venture X (Alex)": "capital-one", "Citi": "citibank", "American Express": "american-express",
+        cases = {"Chase": "chase", "JPMorgan Chase Bank": "chase", "Chase Freedom (Sam)": "chase", "Capital One": "capital-one",
+                 "Citi": "citibank", "American Express": "american-express",
                  "Amex Card": "american-express", "E*TRADE from Morgan Stanley": "e-trade", "Fidelity Investments": "fidelity",
-                 "Wealthfront": None, "Mortgage 4100": None}   # which institution a name is; not logos
-        for name, want in cases.items():
+                 "Wealthfront": None, "Mortgage 4100": None,
+                 # a card's own name isn't its bank's: that's the bank's to say
+                 "CSP (Sam)": None, "Venture X (Alex)": None, "Double Cash": None, "Costco Anywhere Visa": None,
+                 "Blue Cash Preferred": None, "Apple Card": None, "Amazon Prime Visa": None, "Target RedCard": None}
+        for name, want in cases.items():   # which institution a name is; not logos
             self.assertEqual(brands.brand(name), want, name)
 
     def test_same_institution_by_brand_then_by_name(self):
@@ -32,11 +35,43 @@ class BrandTests(unittest.TestCase):
         # Matching a bank account: a known brand on each side decides, either way; else the institution names, if they
         # agree; else it can't tell.
         self.assertIs(brands.institution_match(("Chase", None, "Card"), ("JPMorgan Chase", None, "Freedom")), True)
-        self.assertIs(brands.institution_match((None, None, "Sapphire Reserve"), ("Citibank", None, "Card")), False)
+        self.assertIsNone(brands.institution_match((None, None, "Sapphire Reserve"), ("Citibank", None, "Card")))   # a card's name says nothing
         self.assertIs(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings")), True)
         self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings"), by_name=False))
         self.assertIs(brands.institution_match(("Chase", None, "Card"), ("Citibank", None, "Card"), by_name=False), False)
         self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Wealthfront", None, "Cash")))
+
+    def test_matching_without_card_names(self):
+        """Matching a bank's account to yours (plaidbank's auto-match: by_name=False), before and after Runway stopped
+        knowing which bank issues which card: an account whose institution is named matches as it did; one without
+        (an account you added yourself) can no longer be told apart by its card's name, either way."""
+        cases = [  # (yours: institution, display name, name), (the bank's: institution, official name, name), before, now
+            (("Chase", None, "Sapphire Reserve"), ("JPMorgan Chase", "Chase Sapphire Reserve", "CSR"), True, True),
+            (("Capital One", None, "Venture X"), ("Capital One", "Venture X Rewards", "Venture X"), True, True),
+            (("Citi", None, "Double Cash"), ("Citibank Online", None, "Double Cash"), True, True),
+            (("American Express", None, "Blue Cash"), ("American Express", None, "Blue Cash Preferred"), True, True),
+            (("Wells Fargo", None, "Active Cash"), ("Wells Fargo", None, "Active Cash"), True, True),
+            (("Chase", None, "Freedom"), ("Citibank Online", None, "Custom Cash"), False, False),
+            (("Northwind Credit Union", None, "Checking"), ("Northwind CU", None, "Checking"), None, None),
+            ((None, None, "Everyday Checking"), ("Chase", None, "Total Checking"), None, None),
+            ((None, "Chase Freedom", "Card 1234"), ("Chase", None, "Freedom Unlimited"), True, True),   # the bank's name
+            # no institution on yours, and only its card's name to go by: no longer known
+            ((None, None, "Sapphire Preferred"), ("Chase", "Chase Sapphire Preferred", "Sapphire"), True, None),
+            ((None, "CSP", "Card 1234"), ("Chase", None, "Freedom Unlimited"), True, None),
+            ((None, None, "Venture X"), ("Capital One", "Venture X Rewards", "Venture X"), True, None),
+            ((None, None, "Costco Anywhere Visa"), ("Citibank Online", None, "Costco Anywhere Visa Card"), True, None),
+            ((None, None, "Gold Card"), ("American Express", None, "Gold Card"), True, None),
+            ((None, None, "Target RedCard"), ("TD Bank", None, "Target Circle Card"), True, None),
+            ((None, None, "Apple Card"), ("Goldman Sachs", None, "Apple Card"), True, None),
+            (("Apple Card", None, "Apple Card"), ("Goldman Sachs Bank", None, "Apple Card"), True, None),
+            ((None, None, "Sapphire Preferred"), ("Citibank Online", "Citi Double Cash", "Double Cash"), False, None),
+            ((None, None, "Quicksilver"), ("Chase", None, "Freedom Flex"), False, None),
+            ((None, None, "Delta SkyMiles Gold"), ("Chase", None, "Sapphire"), False, None),
+            # wrongly ruled out before: the Amazon card is Chase's
+            ((None, None, "Amazon Prime Visa"), ("Chase", None, "Prime Visa"), False, None),
+        ]
+        for ours, theirs, _before, now in cases:
+            self.assertIs(brands.institution_match(ours, theirs, by_name=False), now, (ours, theirs))
 
     def test_accounts_get_logo_dev_s_logo_by_institution(self):
         from unittest import mock
@@ -55,7 +90,8 @@ class BrandTests(unittest.TestCase):
             c.execute(insert(Account).values(id="f", name="Brokerage", org="Fidelity Investments", kind="investment"))
             c.execute(insert(Account).values(id="csr", name="CSR", org="Chase Bank Alex", kind="credit",
                                              owner="Alex"))
-            c.execute(insert(Account).values(id="vx", name="Venture X", kind="credit"))   # no institution: its name says
+            c.execute(insert(Account).values(id="cf", name="Chase Freedom", kind="credit"))   # no institution: its name says
+            c.execute(insert(Account).values(id="vx", name="Venture X", kind="credit"))      # a card's name doesn't
             c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
                                                products="investments"))
             c.execute(insert(Account).values(id="x", name="Odd", org="?", kind="checking"))
@@ -68,8 +104,7 @@ class BrandTests(unittest.TestCase):
             brands.account_brands(c)
             asked = {r["id"]: r["logo_url"] for r in c.execute(select(Merchant.id, Merchant.logo_url))}
             # banks Runway knows by website; the rest by name, for the next fetch
-            self.assertEqual(sorted(asked), ["brand:wealthfront", "site:capitalone.com", "site:chase.com",
-                                             "site:citi.com", "site:fidelity.com"])
+            self.assertEqual(sorted(asked), ["brand:wealthfront", "site:chase.com", "site:citi.com", "site:fidelity.com"])
             self.assertTrue(asked["brand:wealthfront"].startswith("https://img.logo.dev/name/Wealthfront"))
             # once a logo has been fetched (a sync does it), the account uses it
             c.execute(update(Merchant)
@@ -79,6 +114,8 @@ class BrandTests(unittest.TestCase):
             self.assertEqual(got["w"]["src"], "/api/merchants/brand%3Awealthfront/logo")
             self.assertEqual(got["csr"]["src"], "/api/merchants/site%3Achase.com/logo")
             self.assertIsNone(got["f"]["src"])
+            self.assertEqual(got["cf"]["src"], "/api/merchants/site%3Achase.com/logo")
+            self.assertEqual((got["vx"]["src"], got["vx"]["initial"]), (None, "V"))   # its letter
             self.assertEqual(merchants.logo(c, "brand:wealthfront"), (b"png", "image/png"))
             # a logo you chose replaces the institution's (which stays as `auto`); "none" is the letter
             c.execute(update(Account).where(Account.id == "f").values(logo="chase.com"))
@@ -159,9 +196,26 @@ class MerchantLogoTests(unittest.TestCase):
                  (("WAL-MART #1234", None), "walmart.com"), (("Starbucks Store 99", None), "starbucks.com"),
                  (("Joe's Coffee", "SQ *JOES COFFEE"), None), (("Payroll", "ACME CORP DIRECT DEP"), None),
                  (("POS Purchase", "COSTCO WHSE #0001"), "costco.com"),  # the description names it when the payee doesn't
-                 (("Delta Dental", None), None), (("Targeted Ads LLC", None), None), (("Ringling Bros", None), None)]
+                 (("Delta Dental", None), None), (("Targeted Ads LLC", None), None), (("Ringling Bros", None), None),
+                 (("Costco Whse #123", None), "costco.com"), (("AMZN Mktp", None), "amazon.com"),
+                 (("Starbucks", "APPLE PAY DEBIT CARD STARBUCKS"), "starbucks.com"),
+                 (("POS Purchase", "DEBIT CARD PURCHASE COSTCO WHSE"), "costco.com"),
+                 # a bill paid to the merchant itself is still the merchant's
+                 (("AT&T Payment", None), "att.com"), (("Venmo Payment", None), "venmo.com"),
+                 # a card's payment isn't the store's, whichever text says so
+                 (("Payment To Costco Anywhere Visa", None), None), (("Amazon Corp Syf Paymnt", None), None),
+                 (("Target Card Payment", None), None), (("Online Payment", "PAYMENT TO COSTCO ANYWHERE VISA"), None),
+                 (("Costco Anywhere Visa", "CITI CARD ONLINE PAYMENT"), None)]
         for (payee, desc), want in cases:
             self.assertEqual(brands.merchant(payee, desc), want, payee)
+        for payee in ("Payment To Costco Anywhere Visa", "Amazon Corp Syf Paymnt", "Target Card Payment"):
+            self.assertIsNone(brands.merchant_name(payee), payee)   # nor its name
+
+    def test_store_orders_still_leave_out_card_payments(self):
+        from runway.retail.match import MERCHANT
+        self.assertIsNone(MERCHANT["costco"].search("PAYMENT TO COSTCO ANYWHERE VISA"))
+        self.assertIsNotNone(MERCHANT["costco"].search("COSTCO WHSE #0123"))
+        self.assertIsNotNone(MERCHANT["amazon"].search("AMZN Mktp US"))
 
 
 if __name__ == "__main__":
