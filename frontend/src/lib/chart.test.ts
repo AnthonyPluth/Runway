@@ -89,6 +89,29 @@ describe("scrub and sideways", () => {
     expect(moves).toEqual([]);
   });
 
+  it("keeps following a sideways drag that drifts up or down, rather than sticking on a day", () => {
+    const moves: number[] = [];
+    const el = document.createElement("div");
+    sideways(el, (x) => moves.push(x));
+    fire(el, "touchstart", touch(100, 100));
+    fire(el, "touchmove", touch(120, 101));
+    fire(el, "touchmove", touch(110, 160));
+    const e = fire(el, "touchmove", touch(105, 200));
+    expect(moves).toEqual([120, 110, 105]);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it("keeps leaving a drag that started vertical to the page, even when it drifts sideways", () => {
+    const moves: number[] = [];
+    const el = document.createElement("div");
+    sideways(el, (x) => moves.push(x));
+    fire(el, "touchstart", touch(100, 100));
+    fire(el, "touchmove", touch(102, 130));
+    const e = fire(el, "touchmove", touch(200, 140));
+    expect(moves).toEqual([]);
+    expect(e.defaultPrevented).toBe(false);
+  });
+
   it("sideways leaves the touch itself to the tap's mouse events, and follows a changed handler", () => {
     const el = document.createElement("div"), moves: number[] = [], later: number[] = [];
     const a = sideways(el, (x) => moves.push(x));
