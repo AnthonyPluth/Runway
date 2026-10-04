@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import prices
+from . import tls
 
 WS_URL = "wss://ws.finnhub.io"
 REST_URL = "https://finnhub.io/api/v1"
@@ -46,14 +46,14 @@ class KeyRejected(FinnhubError):
     pass
 
 
-def rest_quote(key: str, symbol: str, opener=urllib.request.urlopen) -> dict:
+def rest_quote(key: str, symbol: str, opener=None) -> dict:
     """One quote over REST: {c: price, pc: previous close, t: time, ...}. Used to check a key, and for a previous
     close when Yahoo has none. Raises KeyRejected or FinnhubError."""
     # the key goes in a header, so it's not in any URL that gets logged
     req = urllib.request.Request(f"{REST_URL}/quote?symbol={urllib.parse.quote(symbol)}",
                                  headers={"X-Finnhub-Token": key, "Accept": "application/json"})
     try:
-        with opener(req, timeout=10, context=prices._ctx()) as resp:
+        with (opener(req, timeout=10, context=tls.ssl_context()) if opener else tls.urlopen(req, timeout=10)) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
@@ -68,7 +68,7 @@ def rest_quote(key: str, symbol: str, opener=urllib.request.urlopen) -> dict:
     return data
 
 
-def check_key(key: str, opener=urllib.request.urlopen) -> None:
+def check_key(key: str, opener=None) -> None:
     """Raises FinnhubError if the key isn't usable: the format, then one quote."""
     if not KEY_FORMAT.fullmatch(key):
         raise FinnhubError("That doesn't look like a Finnhub API key (letters and digits, from finnhub.io/dashboard).")
@@ -77,7 +77,7 @@ def check_key(key: str, opener=urllib.request.urlopen) -> None:
 
 def _connect(key: str):
     import websocket   # imported here: only installs with a Finnhub key need it
-    return websocket.create_connection(f"{WS_URL}?token={key}", timeout=10, sslopt={"context": prices._ctx()})
+    return websocket.create_connection(f"{WS_URL}?token={key}", timeout=10, sslopt={"context": tls.ssl_context()})
 
 
 class Feed:

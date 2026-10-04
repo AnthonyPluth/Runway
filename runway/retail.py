@@ -37,7 +37,7 @@ from typing import Any
 from dateutil import parser as dateparser
 from sqlalchemy import case, delete, func, insert, select, update
 
-from . import categorize, db, monitoring, oidc, splits
+from . import categorize, db, monitoring, oidc, splits, validate
 from . import settings_keys as sk
 from .models import Account, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 
@@ -74,14 +74,14 @@ def _money(v) -> float | None:
     if v is None or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        return validate.parse_external(v)
     if isinstance(v, dict):
         for k in ("amount", "value", "total", "price"):
             if k in v:
                 return _money(v[k])
         return None
     m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(v))
-    return float(m.group(0).replace(",", "")) if m else None
+    return validate.parse_external(m.group(0), drop=",") if m else None
 
 
 def _day(v) -> str | None:

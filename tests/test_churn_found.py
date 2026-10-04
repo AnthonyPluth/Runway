@@ -303,7 +303,7 @@ class ChatRequestTests(DbCase):
     def test_card_suggestions_carry_the_web_search_tool_and_nothing_private(self):
         self.c.execute(insert(Account).values(id="acct-secret-1", name="Chase Sapphire Reserve (8814)", kind="credit",
                                               owner="Alex", org="Chase Bank Alex", balance=-4321.99))
-        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+        with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
             out = churn_found.suggest(self.c, "chase", "Sapphire Reserve (8814)")
         body = self.sent(urlopen)
         self.assertEqual(body["tools"], [{"type": "openrouter:web_search", "parameters": {
@@ -316,7 +316,7 @@ class ChatRequestTests(DbCase):
 
     def test_a_model_without_tools_gets_the_web_plugin(self):
         refused = urllib.error.HTTPError("u", 404, "Not Found", {}, io.BytesIO(b'{"error":{"message":"No endpoints found that support tool use"}}'))
-        with mock.patch("urllib.request.urlopen", side_effect=[refused, _response(self.REPLY)]) as urlopen:
+        with mock.patch("runway.tls.urlopen", side_effect=[refused, _response(self.REPLY)]) as urlopen:
             out = churn_found.suggest(self.c, "chase", "Sapphire Reserve")
         body = self.sent(urlopen)
         self.assertEqual(body["plugins"], [{"id": "web", "max_results": categorize.WEB_RESULTS}])
@@ -338,27 +338,27 @@ class ChatRequestTests(DbCase):
 
     def test_switched_off_and_categorizing_send_no_web_search(self):
         db.set_setting(self.c, sk.CHURN_AI_WEB, "0")
-        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+        with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
             churn_found.suggest(self.c, "chase", "Sapphire Reserve")
             self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
             self.assertIn("Found it", categorize.call_llm("k", "m", "p"))
             self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
 
     def test_categorizing_asks_for_providers_that_keep_nothing_and_says_when_there_are_none(self):
-        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+        with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
             categorize.call_llm("k", "openrouter/free", "p")
             self.assertEqual(self.sent(urlopen)["provider"], {"data_collection": "deny"})
             churn_found.suggest(self.c, "chase", "Sapphire Reserve")   # a card's name only: any provider
             self.assertNotIn("provider", self.sent(urlopen))
         none = urllib.error.HTTPError("u", 404, "Not Found", {},
                                       io.BytesIO(b'{"error":{"message":"No endpoints found matching your data policy"}}'))
-        with mock.patch("urllib.request.urlopen", side_effect=none), \
+        with mock.patch("runway.tls.urlopen", side_effect=none), \
                 self.assertRaisesRegex(RuntimeError, "without keeping them.*Settings → Connections"):
             categorize.call_llm("k", "openrouter/free", "p")
 
     def test_other_errors_are_not_mistaken_for_a_model_without_tools(self):
         down = urllib.error.HTTPError("u", 502, "Bad Gateway", {}, io.BytesIO(b"upstream tool error"))
-        with mock.patch("urllib.request.urlopen", side_effect=down) as urlopen, \
+        with mock.patch("runway.tls.urlopen", side_effect=down) as urlopen, \
                 self.assertRaisesRegex(RuntimeError, "web search failed.*502"):
             churn_found.suggest(self.c, "chase", "Sapphire Reserve")
         self.assertEqual(urlopen.call_count, 1)
