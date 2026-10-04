@@ -4,6 +4,7 @@
 // seed, so the same plan always shows the same picture and typing a figure moves it only by what you changed.
 // What you enter (spending, savings, income, events) is in today's dollars and keeps pace with inflation; a loan's
 // payment and balance are fixed dollar amounts, so in today's dollars they shrink each year by inflation.
+import { fmt0 } from "$lib/format";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 export const RUNS = 1000;
@@ -229,4 +230,116 @@ export function project(plan: RetirementPlan, current: number, thisYear: number,
     atRetirement: mid[retireIndex], atEnd: mid[n - 1], runsOutAge: outAge(mid), lowRunsOutAge: outAge(low),
     held: held(plan, thisYear, assets, years),
   };
+}
+
+
+// ------------------------------------------------------------------------------------------------ the plan as a form
+// What the planner's form needs to make of a plan and its fields: numbers as typed, the ages that can't be, and the
+// plain-words lines about the plan, a sale and a loan's payment.
+
+/** Numbers as typed: an empty or half-typed box counts as nothing rather than breaking the projection. */
+export const num = (v: unknown) => (typeof v === "number" && isFinite(v) ? v : 0);
+/** A fraction as the percentage a field shows ("0.025" → "2.5"). */
+export const pctIn = (v: number) => String(+(v * 100).toFixed(2));
+export const copyPlan = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
+
+/** Runway's own starting figures (what planner.default() gives), from what it knows of your investments. */
+export const startingPlan = (computed: { annual_spending: number; yearly_savings: number; expected_return: number }, year: number): Partial<RetirementPlan> => ({
+  people: [{ name: "You", birth_year: year - 40, retire_age: 65, savings: computed.yearly_savings }],
+  plan_to_age: 95, spending: computed.annual_spending, spending_own: false, return_before: computed.expected_return,
+  return_after: 0.04, volatility: 0.12, inflation: 0.025, income: [], events: [], assets: [],
+});
+
+type Person = RetirementPlan["people"][number];
+/** Who's in the plan, by name ("You" for the first, "Partner" for the second, until they're named). */
+export const personNames = (plan: RetirementPlan) => plan.people.map((p, i) => p.name || (i ? "Partner" : "You"));
+/** A partner to add: the first person's birth year and retirement age, with nothing saved yet. */
+export const newPartner = (plan: RetirementPlan): Person => ({ name: "Partner", birth_year: plan.people[0].birth_year, retire_age: plan.people[0].retire_age, savings: 0 });
+
+// Ages that can't be: retiring before the age you are now, or planning to an age before retirement. Each says so
+// under its field, and there's no projection until they're fixed.
+const ageNow = (p: Person, year: number) => year - num(p.birth_year);
+export const retireError = (p: Person, year: number) =>
+  num(p.birth_year) > 1900 && num(p.retire_age) > 0 && num(p.retire_age) < ageNow(p, year) ? `At least ${ageNow(p, year)}, your age now` : null;
+// How long to plan for is in the first person's age, like the chart's.
+export const planToError = (plan: RetirementPlan) => {
+  const retireAt = num(plan.people[0].retire_age);
+  return num(plan.plan_to_age) > 0 && retireAt > 0 && num(plan.plan_to_age) <= retireAt ? `Past the retirement age (${retireAt})` : null;
+};
+export const agesFit = (plan: RetirementPlan, year: number) => plan.people.every((p) => !retireError(p, year)) && !planToError(plan);
+/** Whether there's enough to project from: birth years, retirement ages and how long to plan for, all fitting together. */
+export const planUsable = (plan: RetirementPlan, year: number) =>
+  plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0 && agesFit(plan, year);
+
+/** The plan with every figure a number, as project() takes it (an income or event of a person who's gone is left out). */
+export function projectable(plan: RetirementPlan): RetirementPlan {
+  const p = copyPlan(plan);
+  p.people = p.people.map((x) => ({ ...x, savings: num(x.savings) }));
+  p.spending = num(p.spending);
+  p.income = p.income.filter((i) => i.person < p.people.length).map((i) => ({ ...i, amount: num(i.amount), start_age: num(i.start_age),
+    end_age: typeof i.end_age === "number" && isFinite(i.end_age) ? i.end_age : null }));
+  p.events = p.events.map((e) => ({ ...e, amount: num(e.amount), year: num(e.year) }));
+  return p;
+}
+
+/** Whether a birth year is one a person alive today could have (14 to 100 years ago). */
+export const bornOk = (y: unknown, thisYear: number) => num(y) >= thisYear - 100 && num(y) <= thisYear - 14;
+/** The Assumptions line once folded: who, how long, income in retirement, returns and inflation. */
+export function assumptionsLine(plan: RetirementPlan): string {
+  const names = personNames(plan);
+  const born = plan.people.length > 1 ? plan.people.map((p, i) => `${names[i]} born ${p.birth_year}`).join(", ") : `Born ${plan.people[0].birth_year}`;
+  const income = plan.income.map((inc) => `${inc.name || "Income"} ${fmt0(num(inc.amount))} a year at ${inc.start_age}`);
+  const returns = `${pctIn(num(plan.return_before))}% returns (${pctIn(num(plan.return_after))}% retired), ${pctIn(num(plan.inflation))}% inflation`;
+  return [born, `to age ${plan.plan_to_age}`, ...(income.length ? income : ["no retirement income yet"]), returns].join(" · ");
+}
+
+/** The chance the money lasts, in a word, by the same thresholds as its color; the thresholds are in its tooltip. */
+export const verdict = (s: number) => (s >= 0.85 ? "Likely" : s >= 0.7 ? "Uncertain" : "Unlikely");
+export const VERDICT_TIP = "Likely at 85% or more, uncertain from 70%, unlikely below 70%";
+
+/** Equity still vesting: what it comes to once it's all vested, at today's share price (value_by_year's last entry). */
+export const vestsTo = (a: PlanAsset) => (a.kind === "equity" && (a.value_by_year?.length ?? 0) > 1 ? a.value_by_year![a.value_by_year!.length - 1] : null);
+
+const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
+/** What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
+ * In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then. */
+export function saleTitle(a: PlanAsset, sellYear: number, thisYear: number, plan: RetirementPlan, dollars: Dollars): string {
+  const shownIn = (v: number, y: number) => inDollars(v, y, thisYear, num(plan.inflation), dollars);
+  const real = sale(a, sellYear, thisYear, plan.inflation);
+  const value = shownIn(real.value, sellYear), owed = shownIn(real.owed, sellYear);
+  const worth = a.kind === "equity" ? `${a.name}: ${fmt0(value)} vested by ${sellYear}, at today’s share price${dollars === "future" ? " grown with inflation" : ""}`
+    : `${a.name} worth ${fmt0(value)} in ${sellYear}`;
+  const l = a.loan;
+  let loan = "";
+  if (l && loanProjected(a)) {
+    const terms = `${+(l.rate ?? 0).toFixed(3)}% and ${fmt0(l.payment ?? 0)} a month ${PAYMENT_FROM[l.source ?? "manual"]}`;
+    loan = owed > 0 ? `, less ${fmt0(owed)} still owed on the loan at ${terms}` : `; the loan (${terms}) is paid off by then`;
+  } else if (a.owed) {   // held at today's balance in today's dollars, so it grows with inflation in future ones
+    loan = dollars === "future" ? `, less the ${fmt0(a.owed)} owed on the loan today (${fmt0(owed)} in ${sellYear} dollars)`
+      : `, less ${fmt0(owed)} owed on the loan today`;
+  }
+  const unit = dollars === "future" ? `In ${sellYear} dollars, at ${pctIn(num(plan.inflation))}% a year inflation.` : "In today’s dollars.";
+  return `${worth}${loan}. ${unit}`;
+}
+
+/** What happens to a loan's monthly payment in the plan, in plain words: whether it's already in the spending figure
+ * and when it stops. */
+export function paymentLine(a: PlanAsset, sellYear: number | null, spendingOwn: boolean): string {
+  const l = a.loan!;
+  const pay = `${fmt0(l.payment ?? 0)}/month`;
+  const ends = paymentEnds(a, sellYear);
+  const when = ends == null ? null : l.payoff_year == null || ends <= l.payoff_year ? `until it’s sold in ${ends}` : `until it’s paid off in ${l.payoff_year}`;
+  const why = l.note === "payment_below_interest" ? " It doesn’t cover the interest, so it never pays the loan down."
+    : l.note === "no_rate" ? " Add the loan’s interest rate in Settings → Accounts to see when it ends." : "";
+  if (spendingOwn) {
+    return `Its ${pay} loan payment goes on ${when ?? "past the end of the plan"}.${why}`;
+  }
+  if (l.payment_counted) {
+    return when ? `Its ${pay} loan payment is already in your spending, ${when}; from ${ends} the plan takes it off.${why}`
+      : `Its ${pay} loan payment is already in your spending, and stays in it.${why}`;
+  }
+  if (l.payment_counted == null) {
+    return `Runway couldn’t tell whether its ${pay} loan payment is in your spending, so the plan leaves your spending as it is.${why}`;
+  }
+  return `Its ${pay} loan payment was paid as a transfer, so it isn’t in your spending and the plan adds it to your spending in retirement ${when ?? "for as long as the plan runs"}.${why}`;
 }
