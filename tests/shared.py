@@ -6,7 +6,7 @@ takes a database of its own with own_database(), so nothing it writes reaches an
 last_sync_ok in the shared schema and failed another module's on 2026-09-30.
 
 The "Let assistants change churning", "Let assistants categorize" and "Let assistants change anything" switches are
-settings rows: a test that sets one, or depends on one, holds mcp_switch() (for all three) so another process doesn't flip it in the middle. Everything else a test makes, it should find and remove
+settings rows: a test that sets one, or depends on one, in the shared schema holds mcp_switch() (for all three) so another process doesn't flip it in the middle (one with a database of its own needn't). Everything else a test makes, it should find and remove
 by its own names and ids, never by clearing a table.
 """
 import fcntl
@@ -63,19 +63,24 @@ def forget_oauth(conn, client_ids) -> None:
 def own_database(case, **env) -> str:
     """In setUp (or a test): a database for this test alone, with db.session() pointed at it and RUNWAY_DATA (plus any
     other environment variables given) set, all undone when the test is cleaned up. On Postgres its schema is named
-    after its path. Returns the path, for db.connect()."""
+    after its path. Returns the path, for db.connect().
+
+    In setUpClass (pass the class): the same for every test in the class, undone after tearDownClass. db.session() is
+    patched for the whole process, so a server a class starts on a thread uses it too: start the server after this, and
+    stop it in tearDownClass (class cleanups run after that)."""
     from runway import db
+    later = case.addClassCleanup if isinstance(case, type) else case.addCleanup
     tmp = tempfile.TemporaryDirectory()
-    case.addCleanup(tmp.cleanup)
+    later(tmp.cleanup)
     environ = mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, **env})
     environ.start()
-    case.addCleanup(environ.stop)
+    later(environ.stop)
     path = os.path.join(tmp.name, "runway.db")
     db.init(path)
     opened = db.session
     session = mock.patch.object(db, "session", lambda p=None: opened(p or path))
     session.start()
-    case.addCleanup(session.stop)
+    later(session.stop)
     return path
 
 

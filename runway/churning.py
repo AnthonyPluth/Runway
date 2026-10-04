@@ -26,15 +26,17 @@ decide each application themselves. The page says so.
 """
 from __future__ import annotations
 
-import calendar
 import re
 from datetime import date
+from collections.abc import Iterator
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, func, insert, select, update
 
 from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits, validate
+from .dates import add_months, clamp_day
+from .money import CENT
 from .models import (Account, Category, ChurnBalance, ChurnBankBonus, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask,
                      ChurnScore, ChurnWish, User)
 
@@ -115,26 +117,10 @@ BASE_MARKER = "*"         # in a card's rates list: its base rate (everything wi
 FEE_WARN_DAYS = 30        # an annual fee is worth deciding about this long ahead
 BONUS_WARN_DAYS = 14      # a bonus deadline with spending left is urgent from here
 HORIZON_DAYS = 180        # how far ahead Upcoming looks
-CENT = 0.005
 
 
 class ChurnError(ValueError):
     pass
-
-
-# ------------------------------------------------------------------------------------------------ dates
-
-def add_months(d: date, months: int) -> date:
-    """The same day `months` later; the 31st (or Feb 29) becomes the month's last day where there's no such day."""
-    return d + relativedelta(months=months)
-
-
-def _day(s: str | None) -> date | None:
-    return date.fromisoformat(s) if s else None
-
-
-def _on(year: int, month: int, day: int) -> date:
-    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
 
 
 # ------------------------------------------------------------------------------------------------ one card
@@ -168,6 +154,17 @@ def anniversaries(conn) -> dict[int, str]:
     return out
 
 
+def fee_anniversaries(opened: date, since: date) -> Iterator[date]:
+    """The days an annual fee is charged on an account opened on `opened` (for a product change, the original card's:
+    `anniversaries`), from `since` on: each anniversary of the day it was opened, from the first (a day the month
+    doesn't have is its last: Feb 29 -> Feb 28), to the end of the calendar. The Churning page's next fee (next_fee) and
+    the forecast's fees (forecast.annual_fees) both count from these."""
+    for year in range(max(opened.year + 1, since.year), date.max.year + 1):
+        d = clamp_day(year, opened.month, opened.day)
+        if d >= since:
+            yield d
+
+
 def next_fee(card: dict, today: date) -> date | None:
     """The next annual fee: on the account's anniversary (`_anniversary`, from `anniversaries`; else the day the card
     was opened), from today on. None for a card without a fee, or one that's closed. (The fee posts in its anniversary
@@ -176,11 +173,8 @@ def next_fee(card: dict, today: date) -> date | None:
     if not card.get("annual_fee") or (card.get("status") or "open") != "open":
         return None
     opened = date.fromisoformat(card.get("_anniversary") or card["opened_on"])
-    for year in range(max(opened.year, today.year - 1), today.year + 2):
-        d = _on(year, opened.month, opened.day)
-        if d > opened and d >= today:
-            return d
-    return None
+    d = next(fee_anniversaries(opened, today), None)
+    return d if d and d.year <= today.year + 1 else None   # one opened over a year from now: nothing yet
 
 
 def has_bonus(card: dict) -> bool:

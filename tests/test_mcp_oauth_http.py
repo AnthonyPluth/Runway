@@ -4,7 +4,6 @@ import base64
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import unittest
 import urllib.error
@@ -19,7 +18,7 @@ from sqlalchemy import delete, func, select, update
 from runway import db, mcp_access, mcp_oauth, mcp_server, oidc, server
 from runway.server import common
 from runway.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
-from tests.shared import forget_oauth, hold_mcp_switch, tag
+from tests.shared import forget_oauth, own_database, tag
 from tests.test_server import NoRedirect, Provider
 
 VERIFIER = "correct-horse-battery-staple-" + "x" * 30
@@ -52,20 +51,17 @@ class Reply:
 
 
 class OAuthServer(unittest.TestCase):
-    """A real Runway on a temporary database, with no sign-in (so you're "signed in" on this computer). On Postgres the
-    database is shared with test modules running alongside (tests/shared.py): each test removes only what it made, and
-    holds the churning switch."""
+    """A real Runway on a database of its own (tests/shared.py's own_database, for the whole class; on Postgres its own
+    schema), with no sign-in (so you're "signed in" on this computer). Nothing else writes to it, so another module's
+    tests can't end a session or flip a switch under these, and the churning switch needn't be held. Each test still
+    removes what it made and turns the switches off, so the tests don't depend on each other's order."""
     env: dict = {}
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.saved = {k: os.environ.get(k) for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER", "RUNWAY_DATA", *cls.env)}
+        own_database(cls, **cls.env)        # undone, with the environment, after tearDownClass has stopped the server
         for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER"):
             os.environ.pop(k, None)
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        os.environ.update(cls.env)
-        db.init()
         cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -76,12 +72,8 @@ class OAuthServer(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
-        cls.tmp.cleanup()
-        for k, v in cls.saved.items():
-            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
     def setUp(self):
-        hold_mcp_switch(self)
         self.tag = tag()
         self.owner = "Alex " + self.tag                                           # the churning cards this test makes
         self.card = {"owner": self.owner, "issuer": "chase", "product": "Sapphire", "opened_on": "2025-01-15"}
@@ -633,6 +625,8 @@ class SignInTests(OAuthServer):
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)       # /mcp needs no session
         # The answer must come from the person who was shown the page
         page = self.http("GET", done.location, cookies=self.session)
+        self.assertEqual(page.status, 200, "the session ended between the two fetches (logged out)")
+        self.assertIn(b'name="consent" value="', page.body)
         self.session = {}
         signed_out = self.answer(page)
         self.assertEqual(signed_out.status, 302)

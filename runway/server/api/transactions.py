@@ -133,8 +133,7 @@ def tx_where(conn, q) -> tuple[list, list[str]]:
             where += [T.amount > 0 if kind == "in" else T.amount < 0,
                       or_(T.category.is_(None), func.coalesce(T.is_split, 0) == 1, T.category.notin_(moves + ignore))]
     if q.get("scope", [""])[0] == "budget":   # the same accounts the Budget page counts
-        where.append(T.account_id.in_(select(Account.id).where(Account.hidden == 0,
-                                                               Account.kind.in_(["checking", "savings", "credit"]))))
+        where.append(T.account_id.in_(select(Account.id).where(*db.SPENDING_ACCOUNTS)))
     if text := q.get("q", [""])[0].strip():
         like = f"%{text.lower()}%"
         # The merchant, the bank's text, your note, the category (or a split's), or the amount typed as a number.

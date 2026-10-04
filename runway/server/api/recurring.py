@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import and_, delete, func, insert, not_, or_, select, update
 
-from ... import db, forecast, merchants, recurring
+from ... import dates, db, forecast, merchants, recurring
 from ...models import Account, Override, Recurring, Transaction
 from ..common import ApiError
 from .transactions import tx_logos
@@ -59,7 +59,7 @@ def _due(conn, it: dict, hist: list[dict], today: date, skipped: set[str]) -> di
     forecast (forecast.build)."""
     window = recurring.MATCH_WINDOW_DAYS.get(it["frequency"], 6)
     first_tx = conn.execute(select(func.min(Transaction.posted)).where(Transaction.account_id == it["account_id"])).scalar()
-    since = max(today - timedelta(days=window + 1), date.fromisoformat(first_tx[:10]) + timedelta(days=window) if first_tx else today)
+    since = max(today - timedelta(days=window + 1), dates.parse_day(first_tx) + timedelta(days=window) if first_tx else today)
     paid = recurring.paid_by_occurrence(it, hist)
     due, skips = [], []
     for d in forecast.occurrences(it, min(since, today - timedelta(days=1)), today + timedelta(days=400)):

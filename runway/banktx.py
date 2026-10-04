@@ -17,6 +17,7 @@ from sqlalchemy import insert, select
 
 from . import payees, splits
 from .models import Transaction
+from .money import CENT
 
 PLAID_IDS = "%|pl:%"   # LIKE pattern for the ids of transactions from Plaid ("<account>|pl:<Plaid's id>")
 OVERLAP_DAYS = 3       # the same transaction can post a few days apart at two providers
@@ -31,7 +32,7 @@ def near(posted: str, amount: float) -> tuple:
     d = date.fromisoformat(posted)
     return (Transaction.posted >= (d - timedelta(days=OVERLAP_DAYS)).isoformat(),
             Transaction.posted <= (d + timedelta(days=OVERLAP_DAYS)).isoformat(),
-            Transaction.amount > amount - 0.005, Transaction.amount < amount + 0.005)
+            Transaction.amount > amount - CENT, Transaction.amount < amount + CENT)
 
 
 def bank_values(row, posted: str, amount: float) -> dict:

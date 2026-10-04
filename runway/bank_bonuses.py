@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import delete, insert, select
 
 # churning imports this module too; its helpers are read when called, so either can be imported first.
-from . import categories, churning, db, validate
+from . import categories, churning, dates, db, validate
 from .models import Account, ChurnBankBonus, Transaction
 
 TYPES = ("checking", "savings", "business")
@@ -123,7 +123,7 @@ def eligibility(b: dict, bonuses: list[dict], today: date) -> dict:
     if b.get("once_per_lifetime"):
         return {"status": "never", "on": None, "override": False, "why": f"Once per lifetime; received {got[-1]}"}
     if b.get("repeat_months"):
-        on = max(today, churning.add_months(date.fromisoformat(got[-1]), b["repeat_months"]))
+        on = max(today, dates.add_months(date.fromisoformat(got[-1]), b["repeat_months"]))
         return {"status": "now" if on <= today else "later", "on": on.isoformat(), "override": False,
                 "why": f"{b['repeat_months']} months after the last bonus ({got[-1]})"}
     return {"status": "unknown", "on": None, "override": False, "why": "Add the bank's rule from the offer's terms"}
@@ -135,7 +135,7 @@ def next_fee_reminder(b: dict, today: date) -> date | None:
         return None
     opened = date.fromisoformat(b["opened_on"])
     for n in range(0, 600):
-        d = churning.add_months(opened, n)
+        d = dates.add_months(opened, n)
         if d >= today and d > opened:
             return d
     return None
