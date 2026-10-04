@@ -200,11 +200,11 @@ class DbTests(DbCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 churning.save_card(self.c, {**base, **bad})
         cid = churning.save_card(self.c, {**base, "authorized_user": True, "fee_month": 5, "notes": "  hi "})
-        row = self.c.execute(select(ChurnCard.authorized_user, ChurnCard.business, ChurnCard.fee_month,
+        row = self.c.execute(select(ChurnCard.authorized_user, ChurnCard.business,
                                     ChurnCard.notes, ChurnCard.status, ChurnCard.bonus_months, ChurnCard.base_rate,
                                     ChurnCard.currency)
                              .where(ChurnCard.id == cid)).fetchone()
-        self.assertEqual(tuple(row), (1, 0, None, "hi", "open", 3, 1.0, "cash"))
+        self.assertEqual(tuple(row), (1, 0, "hi", "open", 3, 1.0, "cash"))
         with self.assertRaisesRegex(ChurnError, "not found"):
             churning.save_card(self.c, {"product": "X"}, 999)
         with self.assertRaisesRegex(ChurnError, "category"):

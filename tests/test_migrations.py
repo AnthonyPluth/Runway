@@ -53,10 +53,17 @@ class MigrationTests(unittest.TestCase):
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
-            row = conn.execute(select(Account.name, Account.owner, Account.daily_spend)).fetchone()
-            self.assertEqual((row["name"], row["owner"], row["daily_spend"]), ("Checking", None, 0))
+            row = conn.execute(select(Account.name, Account.owner)).fetchone()
+            self.assertEqual((row["name"], row["owner"]), ("Checking", None))
             self.assertGreater(conn.execute(select(func.count()).select_from(Category)).fetchone()[0], 10)
         db.init(self.path)   # starting again changes nothing
+
+    def test_database_from_before_migrations_without_accounts_yet_is_upgraded(self):
+        # The tables it lacks are made as the baseline had them, columns later migrations drop again included.
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+        db.init(self.path)
+        self.assertEqual(drift(self.path), [])
 
     def test_database_from_before_migrations_keeps_daily_spend_switched_back_on(self):
         # One that had v4's one-time switch-off (and noted it) before migrations came in: it isn't done again.
@@ -65,12 +72,16 @@ class MigrationTests(unittest.TestCase):
             c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
             c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('a1', 'Checking', 1)")
             c.exec_driver_sql("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
+        from alembic import command
+        with db.engine(self.path).begin() as c:   # what db.migrate does, as far as 0036 (0037 drops the column)
+            db._upgrade_legacy(c)
+            command.stamp(db.alembic_config(c), db.BASELINE)
+            command.upgrade(db.alembic_config(c), "0036")
+        with db.engine(self.path).begin() as c:
+            self.assertEqual(c.exec_driver_sql("SELECT daily_spend FROM accounts").scalar(), 1)
+            self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
-        with db.session(self.path) as conn:
-            self.assertEqual(conn.execute(select(Account.daily_spend)).fetchone()[0], 1)
-            self.assertIsNone(conn.execute(select(Setting.key)
-                                           .where(Setting.key == "migrated_daily_spend_off")).fetchone())
 
     def test_0026_switches_daily_spend_off_once(self):
         from alembic import command
@@ -91,25 +102,24 @@ class MigrationTests(unittest.TestCase):
                     if flag is not None:
                         # raw SQL: on the raw connection, with a parameter either database's driver takes
                         c.execute(sa.text("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', :v)"), {"v": flag})
-                    command.upgrade(db.alembic_config(c), "head")
+                    command.upgrade(db.alembic_config(c), "0036")
                 with db.engine(self.path).begin() as c:
                     self.assertEqual(dict(c.exec_driver_sql("SELECT id, daily_spend FROM accounts").fetchall()), want)
                     self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
                     command.downgrade(db.alembic_config(c), "0025")
         with db.engine(self.path).begin() as c:
-            command.upgrade(db.alembic_config(c), "head")
-            c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
-        db.init(self.path)   # starting again leaves an account switched back on alone
-        with db.session(self.path) as conn:
-            self.assertEqual(conn.execute(select(Account.daily_spend).where(Account.id == "a1")).fetchone()[0], 1)
+            command.upgrade(db.alembic_config(c), "head")   # and on to 0037, which drops the column
+            self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts WHERE id='a1'").scalar(), "Checking")
+        db.init(self.path)
         self.assertEqual(drift(self.path), [])
 
     def test_plaid_account_counted_twice_is_retired(self):
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
-            c.exec_driver_sql("DROP INDEX accounts_plaid_account")
-            c.exec_driver_sql("UPDATE alembic_version SET version_num='0011'")
+            command.downgrade(db.alembic_config(c), "0011")
+        with db.engine(self.path).begin() as c:
             c.exec_driver_sql("INSERT INTO accounts(id, name, plaid_account_id) VALUES ('sf', 'Freedom', 'p1'), "
                               "('pl:p1', 'Freedom ••9999', 'p1'), ('pl:p2', 'Savings', 'p2')")
         with db.engine(self.path).begin() as c:
@@ -453,6 +463,30 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(dict(c.exec_driver_sql("SELECT category, pay_with FROM budgets").fetchall()),
                              {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
             self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
+
+    def test_0037_drops_what_nothing_reads(self):
+        from alembic import command
+        db.init(self.path)
+        instr = "SELECT count(*) FROM pg_proc WHERE proname = 'instr' AND pronamespace = current_schema()::regnamespace"
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0036")
+        with db.engine(self.path).begin() as c:
+            if c.dialect.name == "postgresql":
+                self.assertEqual(c.exec_driver_sql(instr).scalar(), 1)
+            c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('chk', 'Checking', 1)")
+            c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on, fee_month) "
+                              "VALUES (1, 'Alex', 'chase', 'Sapphire', '2025-03-10', 11)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            self.assertNotIn("fee_month", {col["name"] for col in sa.inspect(c).get_columns("churn_cards")})
+            self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts").scalar(), "Checking")
+            self.assertEqual(c.exec_driver_sql("SELECT opened_on FROM churn_cards").scalar(), "2025-03-10")
+            if c.dialect.name == "postgresql":
+                self.assertEqual(c.exec_driver_sql(instr).scalar(), 0)
+            self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
+        self.assertEqual(drift(self.path), [])
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

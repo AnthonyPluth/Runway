@@ -175,11 +175,6 @@ def ids(conn) -> set[str]:
     return set(conn.execute(select(DeletedAccount.id).where(DeletedAccount.restored_at.is_(None))).scalars())
 
 
-def plaid_ids(conn) -> set[str]:
-    """Plaid bank and card accounts that belonged to an account you deleted."""
-    return set(conn.execute(select(DeletedAccount.plaid_account_id).where(DeletedAccount.plaid_account_id.is_not(None))).scalars())
-
-
 def inv_ids(conn) -> set[str]:
     """Investment accounts (inv_accounts.id) that belonged to an account you deleted, which Plaid's sync leaves out."""
     out: set[str] = set()

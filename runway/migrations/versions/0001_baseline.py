@@ -9,7 +9,11 @@ Create Date: 2026-09-25 14:01:40.310024
 from alembic import op
 import sqlalchemy as sa
 
-from runway.schema import POSTGRES_INSTR, now_text
+from runway.schema import now_text
+
+# SQLite's instr(haystack, needle), for Postgres: Runway's queries used it then (migration 0037 drops it).
+POSTGRES_INSTR = ("CREATE OR REPLACE FUNCTION instr(text, text) RETURNS integer AS 'SELECT strpos($1, $2)' "
+                  "LANGUAGE sql IMMUTABLE")
 
 
 revision = '0001'

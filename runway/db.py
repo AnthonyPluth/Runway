@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, inspect, select
+from sqlalchemy import Column, Integer, MetaData, Table, and_, case, create_engine, event, func, inspect, select
 from sqlalchemy.dialects import postgresql as pg_dialect
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import Engine
@@ -388,39 +388,45 @@ def alembic_config(connection=None):
     return cfg
 
 
-def _baseline_columns() -> dict[str, set[str]]:
-    """The tables and columns as of the baseline migration (later migrations add the rest)."""
+def _baseline_tables() -> dict[str, Table]:
+    """The tables as of the baseline migration (later migrations add the rest, and drop some columns again)."""
     with create_engine("sqlite://").begin() as c:
         command.upgrade(alembic_config(c), BASELINE)
-        insp = inspect(c)
-        return {t: {col["name"] for col in insp.get_columns(t)} for t in insp.get_table_names() if t != "alembic_version"}
+        meta = MetaData()
+        meta.reflect(c)
+        return {t.name: t for t in meta.sorted_tables if t.name != "alembic_version"}
 
 
 def _upgrade_legacy(sa_conn) -> None:
     """Databases made before Runway used migrations: add the columns that were added over time, so they match
-    the baseline migration, which is then recorded as done (and later migrations run as usual)."""
-    baseline = _baseline_columns()
+    the baseline migration, which is then recorded as done (and later migrations run as usual). A column is made as
+    schema.py has it; one a later migration dropped, as the baseline had it."""
+    baseline = _baseline_tables()
     insp = inspect(sa_conn)
     have = set(insp.get_table_names())
+
+    def as_then(table, name):   # without its foreign keys: the migration that adds them adds them
+        c = table.c[name] if name in table.c else baseline[table.name].c[name]
+        return Column(c.name, c.type, primary_key=c.primary_key, nullable=c.nullable, autoincrement=c.autoincrement,
+                      server_default=c.server_default.arg if c.server_default is not None else None)
+
     for table in schema.metadata.sorted_tables:
         if table.name not in baseline:
             continue
         if table.name not in have:   # the table as it was then; later migrations add to it
-            Table(table.name, MetaData(), *[c._copy() for c in table.columns if c.name in baseline[table.name]],
+            Table(table.name, MetaData(), *[as_then(table, c.name) for c in baseline[table.name].columns],
                   sqlite_autoincrement=table.kwargs.get("sqlite_autoincrement", False)).create(sa_conn)
             continue
         cols = {c["name"] for c in insp.get_columns(table.name)}
-        for col in table.columns:
-            if col.name not in cols and col.name in baseline[table.name]:
-                ddl = CreateColumn(col).compile(dialect=sa_conn.dialect)
+        for name in (c.name for c in baseline[table.name].columns):
+            if name not in cols:
+                ddl = CreateColumn(as_then(table, name)).compile(dialect=sa_conn.dialect)
                 sa_conn.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {ddl}")
     for table in schema.metadata.sorted_tables:
         if table.name in baseline:
             for index in table.indexes:
-                if all(c.name in baseline[table.name] for c in index.columns):   # later ones come with their migration
+                if all(c.name in baseline[table.name].c for c in index.columns):   # later ones come with their migration
                     index.create(sa_conn, checkfirst=True)
-    if sa_conn.dialect.name == "postgresql":
-        sa_conn.exec_driver_sql(schema.POSTGRES_INSTR)
 
 
 MIGRATE_LOCK = 0x52554E574159   # "RUNWAY": Postgres advisory lock key, held while one process migrates

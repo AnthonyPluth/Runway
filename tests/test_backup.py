@@ -75,7 +75,7 @@ class BackupTests(unittest.TestCase):
         src = self.fill(self.a)
         data = backup.load(backup.dump(src))
         t = data["tables"]["accounts"]
-        drop = t["columns"].index("daily_spend")                 # pretend an older version didn't have it
+        drop = t["columns"].index("logo")                        # pretend an older version didn't have it
         t["columns"].pop(drop)
         t["rows"] = [r[:drop] + r[drop + 1:] for r in t["rows"]]
         t["columns"].append("column_from_the_future"); [r.append(1) for r in t["rows"]]

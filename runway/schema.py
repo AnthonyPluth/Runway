@@ -39,7 +39,6 @@ accounts = Table(
     Column('pay_from', Text, doc='credit cards: account id that pays the statement'),
     Column('owed_positive', Integer, server_default=text('0'), doc='credit/loan: 1 if the bank reports the amount owed as a positive number'),
     Column('in_forecast', Integer, server_default=text('1'), doc='cash accounts: include in the projection'),
-    Column('daily_spend', Integer, server_default=text('0'), doc='unused: the forecast no longer takes out everyday spending (kept so older backups restore)'),
     Column('hidden', Integer, server_default=text('0')),
     Column('networth_hidden', Integer, server_default=text('0'), doc='1: left out of Net worth (still shown everywhere else)'),
     Column('owner', Text, doc='a signed-in person\'s first name, "Joint", or NULL'),
@@ -676,7 +675,6 @@ churn_cards = Table(
     Column('authorized_user', Integer, server_default=text('0'), doc="1: you're an authorized user on someone else's card"),
     Column('business', Integer, server_default=text('0'), doc="1: a business card (most don't count toward 5/24)"),
     Column('annual_fee', Float, server_default=text('0')),
-    Column('fee_month', Integer, doc='the month the annual fee posts (1-12); NULL = the month it was opened'),
     Column('currency', Text, server_default=text("'cash'"),
            doc='what it earns, and its bonus is paid in (a key of churning.CURRENCIES or churn_currencies)'),
     Column('base_rate', Float, server_default=text('1'), doc='points per dollar on everything without a rate of its own'),
@@ -897,7 +895,3 @@ Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a 
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}
-
-# SQLite's instr(haystack, needle), which Runway's queries use, for Postgres.
-POSTGRES_INSTR = ("CREATE OR REPLACE FUNCTION instr(text, text) RETURNS integer AS 'SELECT strpos($1, $2)' "
-                  "LANGUAGE sql IMMUTABLE")

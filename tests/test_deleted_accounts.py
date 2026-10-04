@@ -94,7 +94,8 @@ class DeleteAccountTests(LedgerCase):
         plaidbank.match(self.conn, "p-cc", "cc2", TODAY)   # you chose to use the Plaid card for another account
         tomb = self.conn.execute(select(DeletedAccount.id, DeletedAccount.plaid_account_id)).fetchone()
         self.assertEqual(tuple(tomb), ("cc", None))         # still deleted, but its statements aren't held back
-        self.assertEqual(deleted_accounts.plaid_ids(self.conn), set())
+        card = {"account_id": "p-cc", "last_statement_balance": 120.0, "last_statement_issue_date": "2026-09-10"}
+        self.assertEqual(plaidbank.store_statements(self.conn, {"item_id": "item"}, {"liabilities": {"credit": [card]}}), 1)
         self.assertEqual(self.conn.execute(select(PlaidAccount.ignored)).scalar(), 0)
 
     def test_what_pointed_at_it_lets_go(self):
