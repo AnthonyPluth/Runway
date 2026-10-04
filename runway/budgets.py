@@ -2,25 +2,31 @@
 the Budget page and the forecast, which spends the budgets."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 
-from dateutil.relativedelta import relativedelta
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 
 from . import db, splits
+from .dates import month_key, month_start
 from .models import Account
+
+
+def _totals_query(start: date, end: date, by_month: bool = False):
+    """Net amount per category from start up to end, across checking, savings and cards (not loans or investments);
+    `by_month`: per category in each month too ("YYYY-MM", as `month`)."""
+    t = splits.parts()
+    # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
+    group = [func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("month")] if by_month else []
+    return (select(*group, t.c.category.label("category"), func.sum(t.c.amount).label("total"))
+            .join(Account, Account.id == t.c.account_id)
+            .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), *db.SPENDING_ACCOUNTS)
+            .group_by(*group, t.c.category))
 
 
 def month_totals(conn, start: date, end: date) -> dict:
     """Net amount per category for the month, across checking, savings and cards (not loans or investments)."""
-    t = splits.parts()
-    rows_ = conn.execute(
-        select(t.c.category.label("category"), func.sum(t.c.amount).label("total"))
-        .join(Account, Account.id == t.c.account_id)
-        .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), *db.SPENDING_ACCOUNTS)
-        .group_by(t.c.category)
-    ).fetchall()
-    return {r["category"]: r["total"] or 0.0 for r in rows_}
+    return {r["category"]: r["total"] or 0.0 for r in conn.execute(_totals_query(start, end)).fetchall()}
 
 
 def family_spent(cats: list[dict], totals: dict) -> dict[str, float]:
@@ -49,12 +55,18 @@ def budget_carry(conn, cats: list[dict], budget_rows: dict, month: date) -> dict
     carry = {name: 0.0 for name in starts}
     if not starts:
         return carry
-    m = min(starts.values())
+    months, m = [], min(starts.values())
     while m < month:
-        nxt = m + relativedelta(months=1)
-        spent = family_spent(cats, month_totals(conn, m, nxt))
+        months.append(m)
+        m = month_start(m, 1)
+    if not months:
+        return carry
+    totals: dict[str, dict] = defaultdict(dict)   # every month's (month_totals), in one query
+    for r in conn.execute(_totals_query(months[0], m, by_month=True)).fetchall():
+        totals[r["month"]][r["category"]] = r["total"] or 0.0
+    for m in months:
+        spent = family_spent(cats, totals.get(month_key(m), {}))
         for name, start in starts.items():
             if start <= m:
                 carry[name] = max(0.0, round(budget_rows[name]["amount"] + carry[name] - spent.get(name, 0.0), 2))
-        m = nxt
     return carry
