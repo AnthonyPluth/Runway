@@ -130,10 +130,11 @@
   </div>
 
   <div class="@container/title col-start-3 row-start-1 min-w-0 pr-3">
-    <!-- The merchant keeps at least 6 characters. Beside it, the badges (receipt included) and the recurring name are their
-         full text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
-    <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
-      <button type="button" class="min-w-[6ch] cursor-pointer truncate text-left font-medium hover:underline hover:underline-offset-4 max-sm:max-w-full" title={name}
+    <!-- The merchant keeps at least 6 characters and gives up the rest of its line, never the line itself: the badges
+         (receipt included) and the recurring icon stay beside it on every screen. They're their full text when the cell
+         is 24rem wide or on a phone, and otherwise just an icon; the recurring name shows only when the cell is wide. -->
+    <div class="flex min-w-0 items-center gap-1.5">
+      <button type="button" class="min-w-[6ch] cursor-pointer truncate text-left font-medium hover:underline hover:underline-offset-4" title={name}
         aria-haspopup="dialog" onclick={() => onopen?.()}>{name}</button>
       {#if t.pending}<Badge variant="secondary" title="Pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
         <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="Pending" /><span class="hidden @sm/title:inline max-sm:inline">Pending</span></Badge>{/if}
