@@ -524,7 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({e.strerror or e}), so nothing was restored."})
             except sqlalchemy.exc.OperationalError as e:
-                if "locked" in str(e):
+                if db.is_busy(e):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(e)
             counts = done["counts"]
@@ -581,7 +581,7 @@ class Handler(BaseHTTPRequestHandler):
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
             except sqlalchemy.exc.OperationalError as e:
-                if "locked" in str(e):
+                if db.is_busy(e):
                     return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
                 return self._error(e)
             except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
@@ -676,7 +676,7 @@ class Handler(BaseHTTPRequestHandler):
         except retail.RetailError as e:
             return self._json(400, {"error": str(e), **({"code": e.code} if e.code else {})})
         except sqlalchemy.exc.OperationalError as e:
-            if "locked" in str(e):
+            if db.is_busy(e):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
             return self._error(e)
 

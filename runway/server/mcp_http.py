@@ -155,7 +155,7 @@ def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mc
     except ApiError as e:
         raise ToolError(str(e)) from None
     except sqlalchemy.exc.OperationalError as e:
-        if "locked" in str(e):
+        if db.is_busy(e):
             raise ToolError("Runway is busy saving a sync. Try again in a few seconds.") from None
         raise
     except (ValueError, TypeError, KeyError):

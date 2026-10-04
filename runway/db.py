@@ -13,6 +13,7 @@ import contextlib
 import math
 import os
 import re
+import sqlite3
 import threading
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -289,6 +290,25 @@ class Connection:
             self._orm.close()
             self._orm = None
         self.sa.close()
+
+
+# Postgres's SQLSTATEs for "another transaction is in the way, try again": lock_not_available (a lock_timeout ran out),
+# deadlock_detected and serialization_failure (this transaction was the one rolled back).
+BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001"})
+
+
+def is_busy(e: BaseException) -> bool:
+    """Whether a database error means only that something else was writing at the time (a sync, say), so the same
+    request is worth trying again in a moment: SQLite's "database is locked" (SQLITE_BUSY, SQLITE_LOCKED), or one of
+    Postgres's BUSY_SQLSTATES. Takes SQLAlchemy's error or the driver's own."""
+    orig = getattr(e, "orig", None) or e
+    state = getattr(orig, "sqlstate", None)
+    if state is not None:   # psycopg's errors carry their SQLSTATE
+        return state in BUSY_SQLSTATES
+    if isinstance(orig, sqlite3.OperationalError):
+        name = getattr(orig, "sqlite_errorname", None) or ""   # (not on one made by hand, as in the tests)
+        return name.startswith(("SQLITE_BUSY", "SQLITE_LOCKED")) or str(orig).startswith(("database is locked", "database table is locked"))
+    return False
 
 
 def connect(path: str | None = None) -> Connection:
