@@ -31,7 +31,6 @@ class HandlerTests(DbCase):
     def one(self, stmt):
         return self.c.execute(stmt).fetchone()
 
-    # ------------------------------------------------------------------------------------------ accounts
 
     def test_accounts_list(self):
         self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank",
@@ -61,7 +60,6 @@ class HandlerTests(DbCase):
                        .where(Account.id == "demo-checking"))
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
-        # The account a card is paid from: one of yours (the database refuses another), or none.
         with self.assertRaisesRegex(ApiError, "Pick one of your accounts"):
             accounts.api_account_update(self.c, {}, {"pay_from": "nope"}, "demo-card")
         accounts.api_account_update(self.c, {}, {"pay_from": "demo-checking"}, "demo-card")
@@ -76,22 +74,18 @@ class HandlerTests(DbCase):
         self.assertNotIn("pay_mode", next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-checking"))
         accounts.api_account_update(self.c, {}, {"pay_mode": "fixed", "pay_amount": "312.50", "apr": 24.99}, "demo-card")
         self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
-        # anything wrong is refused before anything is saved
         for bad in ({"pay_mode": "revolve"}, {"pay_amount": "lots"}, {"pay_amount": -5}, {"apr": "nan"}, {"apr": 150}):
             with self.assertRaises(ApiError):
                 accounts.api_account_update(self.c, {}, {"display_name": "Changed", **bad}, "demo-card")
         self.assertIsNone(self.one(select(Account.display_name).where(Account.id == "demo-card"))[0])
         self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
-        # back to paying in full, and blanks clear the amount and the APR
         accounts.api_account_update(self.c, {}, {"pay_mode": "full", "pay_amount": "", "apr": None}, "demo-card")
         self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
         accounts.api_account_update(self.c, {}, {"pay_mode": "minimum", "apr": "0"}, "demo-card")
         self.assertEqual(plan(), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
-        # which is what the forecast reads
         from runway import forecast
         self.assertEqual(forecast.payment_plan(self.c, "demo-card", 24.99),
                          {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0, "apr_source": "you"})
-        # with no APR of yours, the list has the issuer's alongside (Settings shows it as the field's placeholder)
         self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank", products="liabilities"))
         self.c.execute(insert(PlaidAccount).values(plaid_account_id="pa1", item_id="it1", mask="1234"))
         self.c.execute(insert(CardStatement).values(plaid_account_id="pa1", item_id="it1", last_statement_date="2026-09-01",
@@ -109,7 +103,6 @@ class HandlerTests(DbCase):
         self.assertEqual({k: mtg["loan"][k] for k in ("rate", "payment", "source", "plaid", "set_rate", "set_payment")},
                          {"rate": 6.25, "payment": 1840.5, "source": "manual", "plaid": False, "set_rate": 6.25, "set_payment": 1840.5})
         self.assertNotIn("loan", next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-checking"))
-        # Empty clears one (the payment is then worked out from recent payments); 0 is a rate.
         accounts.api_account_update(self.c, {}, {"interest_rate": "0", "monthly_payment": ""}, "demo-mortgage")
         self.assertEqual(terms(), (0, None))
         for bad in ({"interest_rate": "31"}, {"interest_rate": "-1"}, {"interest_rate": "lots"}, {"monthly_payment": "-5"},
@@ -117,10 +110,9 @@ class HandlerTests(DbCase):
             with self.assertRaises(ApiError):
                 accounts.api_account_update(self.c, {}, bad, "demo-mortgage")
         self.assertEqual(terms(), (0, None))
-        self.assertEqual(self.one(select(Account.display_name).where(Account.id == "demo-mortgage"))[0], None)   # nothing half-saved
+        self.assertEqual(self.one(select(Account.display_name).where(Account.id == "demo-mortgage"))[0], None)
         with self.assertRaisesRegex(ApiError, "Only a loan"):
             accounts.api_account_update(self.c, {}, {"interest_rate": "5"}, "demo-checking")
-        # The lender's terms through Plaid aren't yours to change.
         self.c.execute(insert(LoanTerms).values(plaid_account_id="pm", item_id="it1", kind="mortgage", interest_rate=5.5,
                                                 monthly_payment=2000))
         self.c.execute(update(Account).where(Account.id == "demo-mortgage").values(plaid_account_id="pm"))
@@ -132,8 +124,7 @@ class HandlerTests(DbCase):
         mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
         self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["plaid"], mtg["loan"]["plaid_payment"]),
                          (5.5, 2000, True, True))
-        accounts.api_account_update(self.c, {}, {"display_name": "Home loan"}, "demo-mortgage")   # the rest still saves
-        # What Plaid leaves out (a new loan's payment, or a deferred student loan's $0) is yours to set, and used.
+        accounts.api_account_update(self.c, {}, {"display_name": "Home loan"}, "demo-mortgage")
         self.c.execute(update(LoanTerms).where(LoanTerms.plaid_account_id == "pm").values(monthly_payment=0))
         accounts.api_account_update(self.c, {}, {"monthly_payment": "1,950"}, "demo-mortgage")
         self.assertEqual(terms(), (0, 1950))
@@ -141,7 +132,6 @@ class HandlerTests(DbCase):
         self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["source"], mtg["loan"]["plaid_payment"]),
                          (5.5, 1950, "manual", False))
 
-    # ------------------------------------------------------------------------------------------ push
 
     def test_push_recent(self):
         for i in range(10):
@@ -150,7 +140,6 @@ class HandlerTests(DbCase):
         self.assertEqual(out["recent"], [{"title": f"t{i}", "sent": float(i)} for i in range(9, 1, -1)])
         self.assertEqual(out["devices"], [])
 
-    # ------------------------------------------------------------------------------------------ state
 
     def test_state(self):
         self.c.execute(insert(Account).values(id="inv", name="Brokerage", kind="investment"))
@@ -166,8 +155,6 @@ class HandlerTests(DbCase):
         self.assertEqual(st["setup"], {"bank": True, "primary": True, "recurring": True, "budgets": True, "dismissed": False})
 
     def test_state_sync_times_carry_their_offset(self):
-        # The setting is the server's local time, the log's `at` UTC: both go out with an offset, so the browser shows
-        # its own time zone and not the server's.
         db.set_setting(self.c, "last_sync_ok", "2026-09-30T07:02:00")
         self.c.execute(insert(SyncLog).values(at="2026-09-30 12:02:00", ok=1, message="3 new transactions"))
         st = state.api_state(self.c, {}, {})
@@ -211,7 +198,6 @@ class HandlerTests(DbCase):
         self.assertEqual({a["id"]: a["balance_date"] for a in fc["accounts"]},
                          {a["id"]: a["balance_date"] for a in fc["all_accounts"] if a["id"] in {b["id"] for b in fc["accounts"]}})
         self.assertTrue(all(a["balance_date"] for a in fc["accounts"]))
-        # nothing is taken out for everyday spending, so nothing about it is sent
         self.assertFalse(any({"daily_spend", "daily_spend_on", "daily_spend_estimate"} & set(a) for a in fc["accounts"]))
         self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])
 
@@ -231,7 +217,7 @@ class HandlerTests(DbCase):
         self.assertEqual([tuple(r) for r in self.c.execute(select(Override.key, Override.amount))], [("rec:1:2026-09-01", -20.0)])
         state.api_override_delete(self.c, {}, {"key": "rec:1:2026-09-01"})
         self.assertIsNone(self.one(select(Override.key)))
-        state.api_override_set(self.c, {}, {"key": "cardclose:cc:2026-09-10", "amount": -500})   # a card payment, by its closing date
+        state.api_override_set(self.c, {}, {"key": "cardclose:cc:2026-09-10", "amount": -500})
         self.assertEqual(self.one(select(Override.key))[0], "cardclose:cc:2026-09-10")
         state.api_override_delete(self.c, {}, {"key": "cardclose:cc:2026-09-10"})
 
@@ -245,7 +231,6 @@ class HandlerTests(DbCase):
         state.api_settings(self.c, {}, {"primary_account": ""})
         self.assertIsNone(db.get_setting(self.c, "primary_account"))
 
-    # ------------------------------------------------------------------------------------------ budget
 
     def test_budget(self):
         self.c.execute(insert(Account).values(id="c2", name="Zeta", display_name="Alpha Card", kind="credit"))
@@ -276,13 +261,11 @@ class HandlerTests(DbCase):
     def test_budget_set(self):
         with self.assertRaises(ApiError):
             budget.api_budget_set(self.c, {}, {"category": "Transfer", "amount": 5})
-        with self.assertRaises(ApiError):   # no budget to roll over yet
+        with self.assertRaises(ApiError):
             budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": True})
         with self.assertRaises(ApiError):
             budget.api_budget_set(self.c, {}, {"category": "Groceries", "pay_with": "nope"})
         paid = lambda: self.one(select(Category.pay_with).where(Category.name == "Travel"))[0]
-        # The card is the category's (still accepted here, for now): no budget needed, and the budget coming and going
-        # leaves it alone.
         budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": "demo-checking"})
         self.assertEqual(paid(), "demo-checking")
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": "-250"})
@@ -305,13 +288,12 @@ class HandlerTests(DbCase):
         ev = lambda day, cat, amount, kind="recurring", acct="demo-checking": {
             "date": day.isoformat(), "category": cat, "amount": amount, "kind": kind, "account_id": acct, "name": "x"}
         fc = {"events": [ev(TODAY, "Subscriptions", -20.0),
-                         ev(next_month, "Subscriptions", -99.0),            # another month's
-                         ev(TODAY, "Subscriptions", 50.0),                  # money in isn't spending
+                         ev(next_month, "Subscriptions", -99.0),
+                         ev(TODAY, "Subscriptions", 50.0),
                          ev(TODAY, "Income", 3000.0),
-                         ev(TODAY, None, -500.0, kind="card")],             # a card's statement payment
-              # on a card: counted in its subcategory and in the parent above it
+                         ev(TODAY, None, -500.0, kind="card")],
               "charges": [ev(TODAY, "Streaming TV", -15.5, acct="demo-card"), ev(next_month, "Streaming TV", -15.5, acct="demo-card"),
-                          ev(TODAY, "Income", 40.0, acct="demo-card")]}   # a card doesn't receive income
+                          ev(TODAY, "Income", 40.0, acct="demo-card")]}
 
         def coming(month):
             return {c["name"]: c["expected"] for c in budget.api_budget(self.c, q(month=f"{month:%Y-%m}"), {})["categories"]}
@@ -319,17 +301,14 @@ class HandlerTests(DbCase):
         with mock.patch.object(budget.forecast, "build", return_value=fc) as build:
             now = coming(TODAY)
             self.assertEqual((now["Subscriptions"], now["Streaming TV"], now["Groceries"]), (35.5, 15.5, 0.0))
-            # the paycheck still to come is income's, and nothing else counts there
             income = {c["name"]: c["expected"] for c in budget.api_budget(self.c, {}, {})["income_rows"]}
             self.assertEqual(income, {"Income": 3000.0})
-            # the forecast is asked for this month's rest: from today to its last day
             self.assertEqual(build.call_args.args[1:], (TODAY, max(1, (next_month - timedelta(days=1) - TODAY).days)))
             later = coming(next_month)
             self.assertEqual((later["Subscriptions"], later["Streaming TV"]), (114.5, 15.5))
             build.reset_mock()
-            self.assertEqual(set(coming(last_month).values()), {0.0})   # a month that's over expects nothing
+            self.assertEqual(set(coming(last_month).values()), {0.0})
             build.assert_not_called()
-        # The rest stays as it was: what's left is still the budget less what's spent.
         g = next(c for c in budget.api_budget(self.c, {}, {})["categories"] if c["name"] == "Groceries")
         self.assertEqual(g["left"], round(600 - g["spent"], 2))
 
@@ -349,50 +328,43 @@ class HandlerTests(DbCase):
         paid = sum(r[0] for r in self.c.execute(select(Transaction.amount).where(
             Transaction.category == "Income", Transaction.posted >= start.isoformat())))
         save = lambda name, **kw: budget.api_budget_set(self.c, {}, {"category": name, **kw})
-        self.assertEqual(save("Bonus", amount=300), {"ok": True, "raised": []})   # its parent has no budget
+        self.assertEqual(save("Bonus", amount=300), {"ok": True, "raised": []})
         self.assertEqual(save("Income", amount=6000)["raised"], [])
-        # a subcategory's raises its parent's, as for spending
         self.assertEqual(save("Bonus", amount=6500)["raised"], [{"category": "Income", "amount": 6500.0}])
         with self.assertRaises(ApiError) as e:
             save("Income", rollover=True)
         self.assertEqual(str(e.exception), "Income doesn’t roll over")
-        self.assertEqual(save("Income", pay_with="demo-card"), {"ok": True})   # no card for income: ignored
+        self.assertEqual(save("Income", pay_with="demo-card"), {"ok": True})
         self.assertIsNone(self.one(select(Category.pay_with).where(Category.name == "Income"))[0])
         with mock.patch.object(budget.forecast, "build", return_value={"events": [], "charges": []}):
             b = budget.api_budget(self.c, {}, {})
         rows = {c["name"]: c for c in b["income_rows"]}
-        self.assertEqual(list(rows), ["Income", "Bonus"])   # Refunds come off spending: not income
+        self.assertEqual(list(rows), ["Income", "Bonus"])
         inc = rows["Income"]
         self.assertEqual((inc["budget"], inc["spent"], inc["own_spent"], inc["left"], inc["carried"], inc["pay_with"]),
                          (6500.0, round(paid + 250, 2), round(paid, 2), round(6500 - paid - 250, 2), 0.0, None))
         self.assertEqual((rows["Bonus"]["spent"], rows["Bonus"]["left"]), (250.0, 6250.0))
-        self.assertEqual(b["income"], round(paid + 250, 2))   # the total as before
+        self.assertEqual(b["income"], round(paid + 250, 2))
         self.assertNotIn("Income", [c["name"] for c in b["categories"]])
 
     def test_saving_a_subcategorys_budget_raises_its_parents(self):
         categories.add(self.c, "Medical Care")
         for name, parent in (("Dental", "Medical Care"), ("Eye Care", "Medical Care"), ("Flights", "Travel")):
             categories.add(self.c, name, parent=parent)
-        # a level deeper than the app makes (its walk up the tree doesn't stop at two)
         self.c.execute(insert(Category).values(name="Braces", parent="Dental", is_transfer=0, is_income=0))
         amount = lambda name: self.one(select(Budget.amount).where(Budget.category == name))[0]
         save = lambda name, value: budget.api_budget_set(self.c, {}, {"category": name, "amount": value})
         save("Medical Care", 300)
         self.assertEqual(save("Eye Care", 200), {"ok": True, "raised": []})
         self.assertEqual(save("Dental", "150.004"), {"ok": True, "raised": [{"category": "Medical Care", "amount": 350.0}]})
-        # lowering one never lowers the parent; the parent's still enough
         self.assertEqual(save("Eye Care", 100)["raised"], [])
         self.assertEqual(amount("Medical Care"), 350.0)
-        # two levels up, each to its own subcategories' total
         self.assertEqual(save("Braces", 400)["raised"], [{"category": "Dental", "amount": 400.0}, {"category": "Medical Care", "amount": 500.0}])
-        # removing a budget leaves the parents alone
         self.assertEqual(save("Braces", "0"), {"ok": True, "raised": []})
         self.assertEqual((amount("Dental"), amount("Medical Care")), (400.0, 500.0))
-        # a parent without a budget isn't given one
         self.assertEqual(save("Flights", 900)["raised"], [])
         self.assertIsNone(self.one(select(Budget.amount).where(Budget.category == "Travel")))
 
-    # ------------------------------------------------------------------------------------------ transactions
 
     def ids(self, **kw):
         return [t["id"] for t in transactions.api_transactions(self.c, q(**kw), {})["items"]]
@@ -436,12 +408,11 @@ class HandlerTests(DbCase):
         self.c.execute(update(Transaction).where(Transaction.id == b).values(category="Reimbursed"))
         self.c.execute(update(Transaction).where(Transaction.id == c).values(category=None))
         everything = set(self.ids(limit=1000))
-        self.assertTrue({a, b, c} <= everything)   # shown unless asked to hide them
+        self.assertTrue({a, b, c} <= everything)
         hidden = transactions.api_transactions(self.c, q(ignored="0", limit=1000), {})
         self.assertEqual({t["id"] for t in hidden["items"]}, everything - {a, b})
         self.assertEqual(hidden["total"], len(everything) - 2)
-        self.assertEqual(set(self.ids(ignored="0", category="Ignore")), {a, b})   # asked for by name: shown
-        # ignored=only is exactly what ignored=0 hides: a split with an Ignore part stays in the list, so it isn't counted
+        self.assertEqual(set(self.ids(ignored="0", category="Ignore")), {a, b})
         d = self.one(select(Transaction.id).where(Transaction.id.notin_([a, b, c])).order_by(Transaction.id))[0]
         amount = self.one(select(Transaction.amount).where(Transaction.id == d))[0]
         half = round(amount / 2, 2)    # whole cents, whatever the demo data's amount is on the day it's seeded
@@ -500,7 +471,6 @@ class HandlerTests(DbCase):
         self.assertEqual(rows[a], (None, None, None))
         self.assertEqual(rows[b], ("Shopping", "manual", None))
 
-    # ------------------------------------------------------------------------------------------ sync
 
     def test_plaid_banks(self):
         with mock.patch.object(sync.plaid, "configured", return_value=True):
@@ -552,7 +522,6 @@ class HandlerTests(DbCase):
             rp.assert_called_once()
         log = self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
         self.assertEqual(tuple(log), (1, "0 new transactions · bank messages: Bank note"))
-        # It worked, so it counts as a good sync; what the bank said is kept apart for the sidebar, until a clean sync.
         self.assertTrue(db.get_setting(self.c, "last_sync_ok"))
         self.assertEqual(state.api_state(self.c, {}, {})["sync_warnings"], ["Bank note"])
         with mock.patch.object(sync.simplefin, "sync", return_value={"new": [], "errors": []}), \

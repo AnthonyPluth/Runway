@@ -28,7 +28,7 @@ const setup = (extra: Record<string, unknown> = {}) => {
 const tick = (name: string) => screen.getByRole("checkbox", { name: `Select ${name}` });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-06-01T12:00:00") });   // "this year" is 2026
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-06-01T12:00:00") });
   vi.mocked(api).mockReset();
   categories.list = [category("Coffee"), category("Groceries")];
 });
@@ -113,8 +113,7 @@ describe("TxTable", () => {
 
   describe("changing many at once", () => {
     const was = [{ id: "a", category: "Coffee", category_source: "ai", confidence: 0.8, needs_review: 1, payee: "Alpha", is_split: 0 }];
-    beforeEach(() => { vi.mocked(api).mockResolvedValue({ updated: 2, was }); });   // (braces: see pickers test)
-    // The toast a change leaves behind: its message, and the Undo that goes with it.
+    beforeEach(() => { vi.mocked(api).mockResolvedValue({ updated: 2, was }); });
     const undoToast = () => vi.mocked(toast).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => Promise<void> } }];
 
     it("sets a category for the selected transactions", async () => {
@@ -166,7 +165,7 @@ describe("TxTable", () => {
       await undoToast()[1].action.onClick();
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: was } });
       expect(toast).toHaveBeenLastCalledWith("Undone", undefined);
-      expect(p.onchanged).toHaveBeenCalledTimes(2);   // once after the change, once after the undo
+      expect(p.onchanged).toHaveBeenCalledTimes(2);
     });
 
     it("says so when the undo fails", async () => {
@@ -295,7 +294,7 @@ describe("TxTable", () => {
       await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
       expect(screen.getByText("212 selected")).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Accept" }));
-      expect(screen.getByRole("dialog")).toHaveTextContent("Accept 212 transactions?");   // that many: it asks first
+      expect(screen.getByRole("dialog")).toHaveTextContent("Accept 212 transactions?");
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Accept" }));
       await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { filter: every, reviewed: true } }));
       expect(p.onchanged).toHaveBeenCalled();
@@ -332,9 +331,8 @@ describe("TxTable", () => {
       const bar = screen.getByRole("region", { name: "Change the selected transactions" });
       expect(bar).toHaveTextContent("1 selected");
       expect(within(bar).getByRole("combobox", { name: "Category for the selected transactions" })).toHaveTextContent("Categorize");
-      expect(within(bar).queryByRole("textbox")).not.toBeInTheDocument();   // the rest is under More
+      expect(within(bar).queryByRole("textbox")).not.toBeInTheDocument();
       await userEvent.click(within(bar).getByRole("button", { name: "More actions" }));
-      // (jsdom can't place a popover, so it counts as hidden, names and all)
       await fireEvent.click(screen.getByText("Accept", { selector: "[data-popover-content] button" }));
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], reviewed: true } });
       expect(p.onchanged).toHaveBeenCalled();

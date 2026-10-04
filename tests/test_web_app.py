@@ -52,7 +52,7 @@ class WebAppTests(ServerCase):
                 return e.code, e.headers, e.read()
 
     def test_page_gets_a_nonce_and_the_policy(self):
-        for path in ("/", "/plaid/oauth", "/anything"):   # the app's own routes get its page
+        for path in ("/", "/plaid/oauth", "/anything"):
             with self.subTest(path=path):
                 status, headers, body = self.get(path)
                 self.assertEqual(status, 200)
@@ -72,14 +72,14 @@ class WebAppTests(ServerCase):
         status, headers, body = self.get("/assets/index-abc.js")
         self.assertEqual((status, body), (200, b"console.log(1)"))
         self.assertIn("immutable", headers["Cache-Control"])
-        status, headers, body = self.get("/sw.js")   # Runway's own files are checked each time
+        status, headers, body = self.get("/sw.js")
         self.assertEqual((status, body), (200, b"// service worker"))
         self.assertNotIn("immutable", headers.get("Cache-Control") or "")
 
     def test_never_outside_static(self):
         status, _, body = self.get("/../../server.py")
         self.assertNotIn(b"def serve", body)
-        self.assertEqual(status, 200)   # just the app's page
+        self.assertEqual(status, 200)
 
     def test_not_built(self):
         with tempfile.TemporaryDirectory() as empty:
@@ -96,7 +96,7 @@ class ContentTypeTests(unittest.TestCase):
     def guessed(path: str) -> str:
         """What the server sent before: mimetypes' guess, with the three types it added, else octet-stream."""
         for t, ext in (("image/svg+xml", ".svg"), ("font/woff2", ".woff2"), ("application/manifest+json", ".webmanifest")):
-            mimetypes.add_type(t, ext)   # (as the server did, on the same module-wide table)
+            mimetypes.add_type(t, ext)
         return mimetypes.guess_type(path)[0] or "application/octet-stream"
 
     def test_every_shipped_file(self):
@@ -104,7 +104,7 @@ class ContentTypeTests(unittest.TestCase):
         self.assertTrue(any(f.endswith(".woff2") for f in shipped))
         built = ["index.html", "assets/index-abc.js", "assets/index-abc.css", "assets/logo-abc.svg", "assets/a.png", "favicon.ico",
                  "assets/x.json", "assets/x.js.map", "robots.txt", "assets/font.woff", "assets/m.mjs", "assets/w.wasm",
-                 "assets/p.jpg", "assets/p.webp", "assets/p.gif", "assets/f.ttf", "sitemap.xml"]   # what a build can hold
+                 "assets/p.jpg", "assets/p.webp", "assets/p.gif", "assets/f.ttf", "sitemap.xml"]
         for path in shipped + built:
             with self.subTest(path=path):
                 self.assertEqual(server.static.content_type(path), self.guessed(path))

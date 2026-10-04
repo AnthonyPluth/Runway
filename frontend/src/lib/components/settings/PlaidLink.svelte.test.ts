@@ -34,7 +34,7 @@ describe("Settings → Accounts: investment accounts from Plaid", () => {
     const selects = within(group).getAllByRole("combobox");
     expect(selects).toHaveLength(2);
     expect(within(selects[1]).getAllByRole("option").map((o) => o.textContent))
-      .toEqual(["Add as a new account", "Same as My Roth ($5,000.00)", "Don't count it"]);   // "Taken" is linked to another
+      .toEqual(["Add as a new account", "Same as My Roth ($5,000.00)", "Don't count it"]);
   });
 
   it("matches it through POST /api/plaid/match with the investment toast", async () => {
@@ -106,13 +106,13 @@ describe("Settings → Accounts: linking from an account row", () => {
 
   it("links an unlinked account to one of the unmatched Plaid accounts", async () => {
     show(card, st);
-    expect(screen.queryByText("not linked to Plaid")).toBeNull();   // a card needs a statement, not Plaid
+    expect(screen.queryByText("not linked to Plaid")).toBeNull();
     expect(screen.getByText("no statement")).toBeInTheDocument();
     const select = screen.getByRole("combobox", { name: "Link to a Plaid account" });
     const options = within(select).getAllByRole("option").map((o) => o.textContent);
     expect(options).toEqual(expect.arrayContaining(["Choose…"]));
     expect(options.some((o) => o?.startsWith("Chase Freedom ••4242"))).toBe(true);
-    expect(options.some((o) => o?.includes("Total Checking"))).toBe(false);   // already linked to another account
+    expect(options.some((o) => o?.includes("Total Checking"))).toBe(false);
     expect(options).toContain("Connect a new bank through Plaid…");
     await userEvent.selectOptions(select, "pa1");
     await waitFor(() => expect(matchCall()).toBeTruthy());
@@ -128,7 +128,7 @@ describe("Settings → Accounts: linking from an account row", () => {
     await waitFor(() => expect(details.open).toBe(true));
     const section = screen.getByRole("region", { name: "Statement" });
     expect(document.activeElement).toBe(within(section).getByLabelText("Closing date"));
-    expect(screen.getByRole("region", { name: "Data source" })).toBeInTheDocument();   // linking is still offered
+    expect(screen.getByRole("region", { name: "Data source" })).toBeInTheDocument();
   });
 
   it("says why a linked card's bank sends no statement, and offers to enter it", () => {

@@ -9,14 +9,11 @@ from runway import settings_keys as sk
 
 def card_setup(self):
     self.acct("chk", "checking", 5000.0)
-    # Card owes 900 now (negative = owed). Its last statement: $800, closed Sep 10, due Oct 5.
     self.acct("cc", "credit", -900.0, pay_from="chk")
     self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=40.0)
-    # Since the Sep 10 close: 300 of new charges and a 200 payment toward the Aug statement.
     self.tx("cc", "2026-09-12", -100.0, "COFFEE", "Restaurants")
     self.tx("cc", "2026-09-20", -200.0, "GROCER", "Groceries")
     self.tx("cc", "2026-09-15", 200.0, "PAYMENT THANK YOU", "Credit Card Payment")
-    # Before the close (part of the statement)
     self.tx("cc", "2026-09-01", -800.0, "STUFF", "Shopping")
 
 

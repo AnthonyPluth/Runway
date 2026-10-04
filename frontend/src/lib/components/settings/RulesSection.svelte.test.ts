@@ -37,7 +37,7 @@ describe("Rules → Apply", () => {
     expect(dialog).toHaveTextContent("This changes 7 transactions");
     expect(dialog).toHaveTextContent("Groceries · rename to Whole Foods");
     expect(posts("/api/rules/preview")[0][1]).toMatchObject({ body: { match: "whole foods", category: "Groceries", rename: "Whole Foods" } });
-    expect(posts("/api/rules/4/apply")).toHaveLength(0);   // not until it's confirmed
+    expect(posts("/api/rules/4/apply")).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole("button", { name: "Change 7 transactions" }));
     await waitFor(() => expect(posts("/api/rules/4/apply")).toHaveLength(1));
   });
@@ -90,7 +90,7 @@ describe("Rules → Remove", () => {
   it("removes a rule at once, and Undo adds it back as it was", async () => {
     const split = { ...rule, id: 5, category: null, rename: null, amount_min: 10, direction: "out" as const, split: [{ category: "Groceries", percent: 60 }, { category: "Coffee", percent: 40 }] };
     vi.mocked(api).mockResolvedValue({ ok: true, id: 6 } as never);
-    cleanup();   // this one, not the list beforeEach drew
+    cleanup();
     render(RulesSection, { rules: [split], accounts });
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/rules/5", { method: "DELETE" }));

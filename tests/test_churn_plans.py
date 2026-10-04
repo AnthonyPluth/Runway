@@ -41,7 +41,7 @@ class PortalRankTests(unittest.TestCase):
         self.assertEqual(vx["portal_option"]["return_pct"], 14.0)
         self.assertEqual(vx["portal_option"]["value"], 14.0)
         self.assertEqual(vx["note"], "10x if booked through Capital One Travel")
-        self.assertEqual(got[0]["note"], "8x if booked through Chase Travel")   # the parent's portal rate
+        self.assertEqual(got[0]["note"], "8x if booked through Chase Travel")
         self.assertIsNone(got[2]["portal_option"])
 
     def test_with_the_portal_they_count(self):
@@ -51,14 +51,13 @@ class PortalRankTests(unittest.TestCase):
         self.assertEqual((got[0]["return_pct"], got[0]["value"], got[0]["note"]),
                          (14.0, 14.0, "Only when booked through Capital One Travel"))
         self.assertIsNone(got[0]["portal_option"])
-        # A category without portal rates is unchanged by the flag
         self.assertEqual([g["id"] for g in self.rank("Restaurants", portal=True)], [1, 3, 2])
 
     def test_a_portal_rate_no_better_is_ignored_and_ties_prefer_no_portal(self):
         cards = [card(1, "A Card", "cash", 5, portal_name="Portal"), card(2, "B Card", "cash", 1, portal_name="Portal")]
         got = churning.best_cards(cards, {}, VALS, "Hotels", PARENTS, TODAY, portal_rates={1: {"Hotels": 3}, 2: {"Hotels": 5}},
                                   portal=True)
-        self.assertEqual([(g["id"], g["needs_portal"]) for g in got], [(1, False), (2, True)])   # 5% each: no portal first
+        self.assertEqual([(g["id"], g["needs_portal"]) for g in got], [(1, False), (2, True)])
         self.assertIsNone(got[0]["portal_option"])
         unnamed = churning.best_cards([card(1, "X", "cash", 1)], {}, VALS, "Hotels", PARENTS, TODAY,
                                       portal_rates={1: {"Travel": 4}})
@@ -88,7 +87,6 @@ class ChurnDbTests(DbCase):
         best = churning.best(self.c, TODAY, "Hotels")
         self.assertEqual((best[0]["multiplier"], best[0]["portal_option"]["multiplier"]), (2.0, 10.0))
         self.assertEqual(churning.best(self.c, TODAY, "Hotels", portal=True)[0]["multiplier"], 10.0)
-        # the same category as a normal and a portal rate is fine; twice as either is not
         churning.save_card(self.c, {"rates": [{"category": "Hotels", "multiplier": 2},
                                               {"category": "Hotels", "multiplier": 10, "portal_only": "1"}]}, vx)
         self.assertEqual(len(self.out()["cards"][0]["rates"]), 2)
@@ -103,14 +101,13 @@ class ChurnDbTests(DbCase):
                 churning.save_card(self.c, {"product": "Renamed", "rates": bad}, vx)
             with self.subTest(new=bad), self.assertRaisesRegex(ChurnError, msg):
                 self.add(product="Never added", rates=bad)
-        # nothing was written by the failed requests
         self.assertEqual([c["product"] for c in self.out()["cards"]], ["Venture X"])
         self.assertEqual(len(self.out()["cards"][0]["rates"]), 2)
         with self.assertRaisesRegex(ChurnError, "given twice"):
             churning.save_card(self.c, {"base_rate": 1, "rates": [{"category": "*", "multiplier": 2}]}, vx)
-        churning.save_card(self.c, {"rates": []}, vx)   # an empty list clears them
+        churning.save_card(self.c, {"rates": []}, vx)
         self.assertEqual(self.out()["cards"][0]["rates"], [])
-        churning.set_rate(self.c, vx, "Hotels", 10, portal_only=True)   # the one-rate endpoint still works
+        churning.set_rate(self.c, vx, "Hotels", 10, portal_only=True)
         churning.set_rate(self.c, vx, "Hotels", 2)
         churning.set_rate(self.c, vx, "Hotels", "", portal_only=True)
         self.assertEqual(self.out()["cards"][0]["rates"], [{"category": "Hotels", "multiplier": 2.0, "portal_only": False}])
@@ -138,7 +135,6 @@ class ChurnDbTests(DbCase):
         self.assertNotIn(hidden, by_card)
         fee = by_card[csr][0]
         self.assertEqual((fee["kind"], fee["detail"], fee["warn"]), ("fee", "You're keeping it", False))
-        # The plan's day is the day before the fee, 20 days out: its reminder starts 14 days before
         self.assertEqual([(u["kind"], u["date"]) for u in by_card[aa]], [("fee", "2026-10-20")])
         self.assertEqual((by_card[aa][0]["detail"], by_card[aa][0]["warn"]),
                          ("Your plan: Product change AAdvantage Platinum to AAdvantage MileUp before it posts", False))
@@ -152,7 +148,7 @@ class ChurnDbTests(DbCase):
         p = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False,
              "sync_failed": False}
         keys = [a["key"] for a in notify.alerts(self.c, TODAY, p)]
-        self.assertEqual(keys, [f"churnfee:{undecided}:2026-10-25"])   # kept, planned and hidden cards: no fee nagging
+        self.assertEqual(keys, [f"churnfee:{undecided}:2026-10-25"])
         keys = [a["key"] for a in notify.alerts(self.c, date(2026, 10, 10), p)]
         self.assertIn(f"churnplan:{aa}:2026-10-19", keys)
         self.assertNotIn(f"churnfee:{aa}:2026-10-20", keys)
@@ -162,13 +158,12 @@ class ChurnDbTests(DbCase):
 
     def test_plan_reminder_window_and_date(self):
         aa = self.add(product="Freedom", annual_fee=0, plan="close", plan_date="2026-11-30", plan_remind_days=10)
-        self.assertEqual([u for u in self.out()["upcoming"] if u["kind"] == "plan"], [])   # not until 10 days before
+        self.assertEqual([u for u in self.out()["upcoming"] if u["kind"] == "plan"], [])
         up = [u for u in self.out(date(2026, 11, 20))["upcoming"] if u["kind"] == "plan"]
         self.assertEqual((up[0]["title"], up[0]["detail"], up[0]["warn"]), ("Close Freedom by Nov 30", "Check it off when it's done", False))
         late = [u for u in self.out(date(2026, 12, 5))["upcoming"] if u["kind"] == "plan"]
-        self.assertTrue(late[0]["warn"])   # overdue until checked off
+        self.assertTrue(late[0]["warn"])
         self.assertEqual(self.out()["cards"][0]["plan_due"], "2026-11-30")
-        # without a day or a fee there's nothing to remind about
         churning.save_card(self.c, {"plan_date": ""}, aa)
         self.assertIsNone(self.out()["cards"][0]["plan_due"])
         for bad, msg in (({"plan": "sell"}, "plan is"), ({"plan_date": "soon"}, "date"), ({"plan_remind_days": 400}, "between")):
@@ -187,7 +182,7 @@ class ChurnDbTests(DbCase):
         new = cards[r["new_card_id"]]
         self.assertEqual((new["product"], new["changed_from"], new["account_id"], new["currency"], new["annual_fee"]),
                          ("AAdvantage MileUp", aa, "cc", "aa", 0.0))
-        self.assertEqual(self.out()["five24"]["Alex"]["count"], 1)   # the change isn't a new card
+        self.assertEqual(self.out()["five24"]["Alex"]["count"], 1)
         self.assertEqual([u for u in self.out()["upcoming"] if u["card_id"] == aa], [])
         with self.assertRaisesRegex(ChurnError, "already"):
             churning.plan_done(self.c, aa, TODAY)
@@ -200,13 +195,13 @@ class ChurnDbTests(DbCase):
         gold = self.add(issuer="amex", product="Gold", plan="close")
         r = churning.plan_done(self.c, gold, TODAY, "2026-09-20")
         self.assertEqual((r["status"], r["closed_on"], r["new_card_id"]), ("closed", "2026-09-20", None))
-        self.assertEqual(self.out()["five24"]["Alex"]["count"], 2)   # closed cards still count
+        self.assertEqual(self.out()["five24"]["Alex"]["count"], 2)
         churning.plan_undo(self.c, gold)
         self.assertEqual(self.out()["cards"][1]["status"], "open")
 
         keep = self.add(product="Sapphire Reserve", plan="keep")
         self.assertEqual(churning.plan_done(self.c, keep, TODAY)["status"], "open")
-        pc = self.add(product="Ink", plan="product_change")   # no target: only marked
+        pc = self.add(product="Ink", plan="product_change")
         r = churning.plan_done(self.c, pc, TODAY)
         self.assertEqual((r["status"], r["new_card_id"]), ("product_changed", None))
         plain = self.add(product="Freedom")
@@ -225,20 +220,19 @@ class ChurnDbTests(DbCase):
         self.assertEqual(len([u for u in self.out(date(2026, 10, 6))["upcoming"] if u["kind"] == "task"]), 1)
         churning.snooze_task(self.c, t, {"until": "2026-12-01"}, TODAY)
         self.assertEqual(self.out()["tasks"][0]["snooze_until"], "2026-12-01")
-        self.assertIsNone(churning.snooze_task(self.c, t, {}, TODAY))   # woken
+        self.assertIsNone(churning.snooze_task(self.c, t, {}, TODAY))
         self.assertEqual(len([u for u in self.out()["upcoming"] if u["kind"] == "task"]), 1)
         with self.assertRaisesRegex(ChurnError, "between"):
             churning.snooze_task(self.c, t, {"days": 0}, TODAY)
         with self.assertRaisesRegex(ChurnError, "not found"):
             churning.snooze_task(self.c, 999, {"days": 1}, TODAY)
-        # a hidden card's to-dos still show: you wrote them yourself
         churning.save_card(self.c, {"hide_upcoming": True}, cid)
         self.assertEqual(len([u for u in self.out()["upcoming"] if u["kind"] == "task"]), 1)
 
     def test_currencies_old_keys_and_estimates(self):
         old = self.add(product="Old hotel card", currency="hotel")
         self.add(product="Old airline card", currency="airline")
-        churning.save_currency(self.c, {"key": "hotel", "cents": 0.7})   # a value set before the programs were listed
+        churning.save_currency(self.c, {"key": "hotel", "cents": 0.7})
         v = churning.values(self.c)
         self.assertEqual((v["hotel"]["name"], v["hotel"]["cents"], v["hotel"]["overridden"], v["hotel"]["estimate"]),
                          ("Other hotel points", 0.7, True, False))
@@ -258,7 +252,6 @@ class ChurnDbTests(DbCase):
             with self.subTest(key=key):
                 self.assertIn(cur["kind"], churning.CURRENCY_KINDS)
                 self.assertTrue(0 < cur["cents"] < 5)
-        # a currency you add can say what kind it is
         key = churning.save_currency(self.c, {"name": "Wyndham Rewards", "cents": 0.9, "kind": "hotel"})
         self.assertEqual(churning.values(self.c)[key]["kind"], "hotel")
         with self.assertRaisesRegex(ChurnError, "kind"):
@@ -268,7 +261,7 @@ class ChurnDbTests(DbCase):
         self.c.execute(insert(User).values(sub="u1", first_name="Alex", last_seen=1))
         self.c.execute(insert(Account).values(id="sam", name="Checking", kind="checking", owner="Sam"))
         cid = churning.save_card(self.c, {"owner": "sam", "issuer": "chase", "product": "Freedom", "opened_on": "2026-01-01"})
-        self.assertEqual(self.out()["cards"][0]["owner"], "Sam")   # spelled as the account has it
+        self.assertEqual(self.out()["cards"][0]["owner"], "Sam")
         churning.save_card(self.c, {"owner": "Robin"}, cid)
         self.assertEqual(churning.known_owners(self.c), ["Alex", "Sam", "Robin"])
         out = churning.overview(self.c, TODAY, ["Alex", "Sam"])

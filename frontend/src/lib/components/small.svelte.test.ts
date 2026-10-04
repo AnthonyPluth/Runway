@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// The little shared display components: an account's label, the tab strip, the "Needs attention" row.
 import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,7 +63,7 @@ describe("SubTabs", () => {
   it("fades an edge while there are more tabs past it", async () => {
     render(SubTabs, { tabs, current: "all", label: "x" });
     const nav = screen.getByRole("navigation", { name: "x" });
-    expect(nav.style.getPropertyValue("--fade-end")).toBe("0px");   // everything fits
+    expect(nav.style.getPropertyValue("--fade-end")).toBe("0px");
     Object.defineProperty(nav, "scrollWidth", { configurable: true, value: 500 });
     Object.defineProperty(nav, "clientWidth", { configurable: true, value: 300 });
     nav.scrollLeft = 0;

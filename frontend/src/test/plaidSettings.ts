@@ -1,4 +1,3 @@
-// What Settings' Plaid tests share: accounts and Plaid connections to show, and a server that answers for them.
 import { vi } from "vitest";
 import { api } from "$lib/api";
 import type { PlaidItem, PlaidStatus, SettingsAccount } from "../lib/components/settings/types";

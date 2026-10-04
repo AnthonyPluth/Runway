@@ -39,7 +39,7 @@ describe("TxRow", () => {
     render(TxRow, p);
     expect(within(row()).getByText("−$60.00")).toBeInTheDocument();
     expect(within(row()).getByText("of $100.00")).toBeInTheDocument();
-    expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();   // the other part isn't shown
+    expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();
     await pickCategory(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
     expect(p.onsave).toHaveBeenCalledWith("Coffee");
   });
@@ -72,7 +72,7 @@ describe("TxRow", () => {
     const { unmount } = render(TxRow, props(tx()));
     expect(screen.getByTitle("BLUE BOTTLE #123")).toBeInTheDocument();
     unmount();
-    render(TxRow, props(tx({ payee: "Blue Bottle", description: "BLUE  BOTTLE" })));   // same letters and digits
+    render(TxRow, props(tx({ payee: "Blue Bottle", description: "BLUE  BOTTLE" })));
     expect(screen.queryByTitle("BLUE  BOTTLE")).not.toBeInTheDocument();
   });
 
@@ -110,6 +110,21 @@ describe("TxRow", () => {
     it("shows the merchant's logo when it has one", () => {
       const { container } = render(TxRow, props(tx({ logo: "/logos/bb.png" })));
       expect(container.querySelector("img")).toHaveAttribute("src", "/logos/bb.png");
+    });
+
+    it("shows a card payment's card's bank's logo, or that bank's letter, unless it has a logo of its own", () => {
+      app.state = { connected: true, brands: { card: { institution: "Contoso Bank", initial: "C", src: "/logos/contoso.png" },
+        plain: { institution: "Fabrikam", initial: "F", src: null } } };
+      const pay = { payee: "Payment To Northwind Visa", category: null };
+      let r = render(TxRow, props(tx({ ...pay, logo: null, logo_account: "card" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toHaveAttribute("src", "/logos/contoso.png");
+      r.unmount();
+      r = render(TxRow, props(tx({ ...pay, logo: null, logo_account: "plain" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toBeNull();
+      expect(screen.getByText("F", { selector: "span[aria-hidden=true]" })).toBeInTheDocument();
+      r.unmount();
+      r = render(TxRow, props(tx({ ...pay, logo: "/logos/chosen.png", logo_account: "card" }), { oneAccount: true }));
+      expect(r.container.querySelector("img")).toHaveAttribute("src", "/logos/chosen.png");
     });
 
     it("shows the merchant's first letter when it doesn't", () => {
@@ -168,13 +183,13 @@ describe("TxRow", () => {
       render(TxRow, p);
       expect(screen.getByText("87%")).toBeInTheDocument();
       const check = screen.getByRole("button", { name: "Accept Coffee for Blue Bottle" });
-      expect(check).toHaveClass("lg:size-9", "max-md:hidden");   // 36px on a desktop, beside the amount
+      expect(check).toHaveClass("lg:size-9", "max-md:hidden");
       expect(check).toHaveAttribute("title", "Accept Coffee · set by the AI (87%)");
       await userEvent.click(check);
       await userEvent.click(screen.getByRole("button", { name: "Accept" }));
       expect(onaccept).toHaveBeenCalledTimes(2);
       expect(screen.getByRole("button", { name: "Accept" })).toHaveClass("md:hidden");
-      expect(p.onsave).not.toHaveBeenCalled();   // accepting doesn't change the category
+      expect(p.onsave).not.toHaveBeenCalled();
     });
 
     it("offers Accept for whatever set it: a rule or past choices as well as the AI", () => {
@@ -213,7 +228,7 @@ describe("TxRow", () => {
     it("lists each part's category and amount instead of a single category, without a split badge", () => {
       render(TxRow, props(split));
       expect(screen.queryByText("split")).not.toBeInTheDocument();
-      expect(screen.getByText("2 parts").closest("span")).toHaveClass("lg:hidden");   // below lg just the count
+      expect(screen.getByText("2 parts").closest("span")).toHaveClass("lg:hidden");
       expect(screen.getByText("Groceries $20.00").parentElement).toHaveClass("max-lg:hidden");
       expect(screen.getByText("Groceries $20.00")).toBeInTheDocument();
       expect(screen.getByText("Coffee $10.00")).toHaveAttribute("title", "beans");
@@ -295,12 +310,11 @@ describe("TxRow", () => {
       await userEvent.click(toggle);
       expect(toggle).toHaveAttribute("aria-expanded", "true");
       expect(api).toHaveBeenCalledWith("/api/retail/orders/o1", { keep: true });
-      await userEvent.click(toggle);   // leave it closed for other tests: open orders are remembered across rows
+      await userEvent.click(toggle);
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
   });
 
-  // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
   describe("narrow rows", () => {
     it("hides the account name and recurring name in phone landscape only below lg, not on short desktop windows", () => {
       const landscape = "max-lg:[@media(max-height:500px)]";
@@ -342,11 +356,10 @@ describe("TxRow", () => {
       const badge = row().querySelector("[data-account-badge]")!;
       expect(badge).toHaveClass("absolute");
       expect(badge).not.toHaveClass("md:hidden");
-      expect(badge.className).not.toMatch(/\bring-/);   // straight over the logo's corner, no outline
+      expect(badge.className).not.toMatch(/\bring-/);
       expect(badge).toHaveAttribute("title", "Shared Checking");
-      expect(badge).not.toHaveTextContent("Shared Checking");   // its logo (here its letter) only
+      expect(badge).not.toHaveTextContent("Shared Checking");
       expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4", "lg:size-3");
-      // the account's column names it without its logo again
       expect(within(row()).getAllByText("S").filter((e) => !badge.contains(e)).every((e) => e.classList.contains("hidden"))).toBe(true);
     });
 

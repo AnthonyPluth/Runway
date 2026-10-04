@@ -25,17 +25,16 @@ class PeriodTests(unittest.TestCase):
         self.assertEqual(per("quarterly"), ("2026-07-01", "2026-09-30"))
         self.assertEqual(per("semiannual"), ("2026-07-01", "2026-12-31"))
         self.assertEqual(per("annual"), ("2026-01-01", "2026-12-31"))
-        self.assertEqual(per("monthly", day=date(2028, 2, 10)), ("2028-02-01", "2028-02-29"))   # a leap February
+        self.assertEqual(per("monthly", day=date(2028, 2, 10)), ("2028-02-01", "2028-02-29"))
         self.assertEqual(per("quarterly", day=date(2026, 12, 31)), ("2026-10-01", "2026-12-31"))
-        self.assertEqual(per("annual", day=date(2027, 1, 1)), ("2027-01-01", "2027-12-31"))       # the year turns
-        # every 4 years: from Jan 1 of the year the card was opened
+        self.assertEqual(per("annual", day=date(2027, 1, 1)), ("2027-01-01", "2027-12-31"))
         self.assertEqual(per("every_4_years"), ("2025-01-01", "2028-12-31"))
         self.assertEqual(per("every_4_years", day=date(2029, 1, 1)), ("2029-01-01", "2032-12-31"))
 
     def test_cardmember_year(self):
         self.assertEqual(per("annual", "anniversary"), ("2026-03-15", "2027-03-14"))
         self.assertEqual(per("annual", "anniversary", day=date(2026, 3, 14)), ("2025-03-15", "2026-03-14"))
-        self.assertEqual(per("annual", "anniversary", day=date(2025, 3, 15)), ("2025-03-15", "2026-03-14"))   # opening day
+        self.assertEqual(per("annual", "anniversary", day=date(2025, 3, 15)), ("2025-03-15", "2026-03-14"))
         self.assertEqual(per("monthly", "anniversary", opened="2026-01-31", day=date(2026, 3, 5)), ("2026-02-28", "2026-03-30"))
         self.assertEqual(per("monthly", "anniversary", opened="2026-01-31", day=date(2026, 3, 31)), ("2026-03-31", "2026-04-29"))
         self.assertEqual(per("every_4_years", "anniversary"), ("2025-03-15", "2029-03-14"))
@@ -72,10 +71,9 @@ class PeriodTests(unittest.TestCase):
                 self.assertIn(p["kind"], cb.KINDS)
                 self.assertIn(p["period"], cb.PERIODS)
                 self.assertIn(p["basis"], cb.BASES)
-                self.assertNotIn("amount", p)   # amounts differ by card: you fill them in
+                self.assertNotIn("amount", p)
                 self.assertTrue(p["name"])
                 self.assertTrue(p["group"])
-        # Each lounge network is a benefit of its own, so a card with two (Priority Pass and its bank's) lists both.
         lounges = {p["key"] for p in cb.PRESETS if p["group"] == "Lounges"}
         self.assertLessEqual({"priority_pass", "capital_one_lounge", "sapphire_lounge", "centurion_lounge", "lounge"}, lounges)
         self.assertTrue(all(cb.PRESET_KEYS[k]["kind"] == "access" for k in lounges))
@@ -101,27 +99,25 @@ class BenefitDbTests(DbCase):
         self.assertEqual(b[lounge]["kind"], "access")
         self.assertIsNone(b[lounge]["remaining"])
         out = self.card_out()
-        self.assertEqual(out["benefits_value"], 180 + 200 + 100)   # the Saks credit doesn't count: you won't use it
+        self.assertEqual(out["benefits_value"], 180 + 200 + 100)
         self.assertEqual(out["net_fee"], 695 - 480)
 
         cb.use(self.c, hotel, {"amount": "120"}, TODAY)
-        cb.use(self.c, hotel, {"amount": 30, "used_on": "2026-02-01"}, TODAY)   # the same calendar year
+        cb.use(self.c, hotel, {"amount": 30, "used_on": "2026-02-01"}, TODAY)
         self.assertEqual(self.benefit(hotel)["remaining"], 50)
         with self.assertRaisesRegex(ChurnError, r"Only \$50 is left"):
             cb.use(self.c, hotel, {"amount": 60}, TODAY)
-        cb.use(self.c, hotel, {}, TODAY)   # no amount: the rest
+        cb.use(self.c, hotel, {}, TODAY)
         self.assertEqual((self.benefit(hotel)["remaining"], self.benefit(hotel)["used_count"]), (0, 3))
         with self.assertRaisesRegex(ChurnError, "all used"):
             cb.use(self.c, hotel, {}, TODAY)
-        cb.unuse(self.c, hotel, {}, TODAY)   # the latest
+        cb.unuse(self.c, hotel, {}, TODAY)
         self.assertEqual(self.benefit(hotel)["remaining"], 50)
-        first = self.benefit(hotel)["uses"][0]["id"]   # the earliest: $30 in February
+        first = self.benefit(hotel)["uses"][0]["id"]
         cb.unuse(self.c, hotel, {"use_id": first}, TODAY)
         self.assertEqual(self.benefit(hotel)["remaining"], 80)
-        # last year's credit is last year's
         cb.use(self.c, hotel, {"used_on": "2025-12-01"}, TODAY)
         self.assertEqual(self.benefit(hotel)["remaining"], 80)
-        # access: used, without an amount
         cb.use(self.c, lounge, {}, TODAY)
         self.assertEqual(self.benefit(lounge)["used_count"], 1)
         with self.assertRaisesRegex(ChurnError, "before the card was opened"):
@@ -143,13 +139,12 @@ class BenefitDbTests(DbCase):
         quiet = cb.save(self.c, {"name": "Digital credit", "amount": 20, "period": "monthly", "remind": False}, self.card)
         cb.save(self.c, {"preset": "lounge"}, self.card)
         up = [u for u in churning.overview(self.c, TODAY)["upcoming"] if u["kind"] == "benefit"]
-        self.assertEqual([(u["benefit_id"], u["date"]) for u in up], [(uber, "2026-09-30")])   # airline: Dec 31, not yet
+        self.assertEqual([(u["benefit_id"], u["date"]) for u in up], [(uber, "2026-09-30")])
         self.assertEqual(up[0]["title"], "Use your $15 Uber / Uber Eats credit by Sep 30 ($15 left)")
         self.assertTrue(up[0]["warn"])
         cb.use(self.c, uber, {"amount": 5}, TODAY)
         up = [u for u in churning.overview(self.c, TODAY)["upcoming"] if u["kind"] == "benefit"]
         self.assertEqual(up[0]["title"], "Use your $15 Uber / Uber Eats credit by Sep 30 ($10 left)")
-        # December: the airline credit's 30 days, Uber's 14
         dec = [u["benefit_id"] for u in churning.overview(self.c, date(2026, 12, 10))["upcoming"] if u["kind"] == "benefit"]
         self.assertEqual(sorted(dec), sorted([airline]))
         dec = [u["benefit_id"] for u in churning.overview(self.c, date(2026, 12, 20))["upcoming"] if u["kind"] == "benefit"]
@@ -160,7 +155,6 @@ class BenefitDbTests(DbCase):
         keys = [a["key"] for a in notify.alerts(self.c, TODAY, p)]
         self.assertEqual(keys, [f"churnbenefit:{uber}:2026-09-30"])
         self.assertEqual(notify.alerts(self.c, TODAY, {**p, "churn_benefit": False}), [])
-        # a card hidden from Upcoming: nothing
         churning.save_card(self.c, {"hide_upcoming": True}, self.card)
         self.assertEqual([u for u in churning.overview(self.c, TODAY)["upcoming"] if u["kind"] == "benefit"], [])
         self.assertEqual(notify.alerts(self.c, TODAY, p), [])
@@ -186,7 +180,7 @@ class BenefitDbTests(DbCase):
         self.assertEqual(tuple(row), ("Resy credit", "credit", "quarterly", "calendar", "dining", 1, 1, 1))
         cb.save(self.c, {"active": False, "amount": 60}, None, bid)
         out = self.card_out()
-        self.assertEqual(out["benefits_value"], 0)   # inactive: not counted
+        self.assertEqual(out["benefits_value"], 0)
         self.assertEqual(out["benefits"][0]["amount"], 60)
 
     def test_lounge_guests(self):
@@ -194,12 +188,11 @@ class BenefitDbTests(DbCase):
         c1 = cb.save(self.c, {"preset": "capital_one_lounge", "guests": 0}, self.card)
         other = cb.save(self.c, {"preset": "lounge"}, self.card)
         guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
-        self.assertEqual((guests[pp], guests[c1], guests[other]), (2, 0, None))   # 0: just you; None: not set
+        self.assertEqual((guests[pp], guests[c1], guests[other]), (2, 0, None))
         cb.save(self.c, {"guests": None}, None, pp)
         cb.save(self.c, {"guests": "1"}, None, c1)
         guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
         self.assertEqual((guests[pp], guests[c1]), (None, 1))
-        # Only access keeps guests: a credit sent with some, or a lounge switched to a credit, has none.
         credit = cb.save(self.c, {"name": "Travel credit", "kind": "credit", "amount": 300, "guests": 2}, self.card)
         cb.save(self.c, {"kind": "credit"}, None, c1)
         cb.save(self.c, {"guests": 3}, None, credit)

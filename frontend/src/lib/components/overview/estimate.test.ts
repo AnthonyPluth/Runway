@@ -3,7 +3,6 @@ import type { StatementEstimate } from "$lib/types";
 import { estimateLines, estimateText, estimateTitle } from "./estimate";
 
 const base = { close: "2026-11-01", due: "2026-11-26" } as const;
-// (dates keep their no-break space)
 const text = (est: StatementEstimate) => estimateLines(est).map((l) => estimateText(l).replace(/\u00a0/g, " "));
 
 describe("estimate breakdown", () => {
@@ -49,7 +48,6 @@ describe("estimate breakdown", () => {
     const cents = (v: string) => Math.round(Number(v.replace(/[^0-9.]/g, "")) * 100);
     const parts = lines.filter((l) => !l.sum).reduce((sum, l) => sum + cents(l.value), 0);
     expect(parts).toBe(cents(lines.at(-1)!.value));
-    // two fees on one statement: one line, each named under it
     expect(text({ ...est, fees: [{ name: "Sapphire annual fee", amount: 95 }, { name: "Gold annual fee", amount: 250 }], fees_total: 345,
       statement: 1106.29, total: 1106.29 })[2]).toBe("Annual fees · $345.00 (Sapphire annual fee $95.00, Gold annual fee $250.00)");
   });

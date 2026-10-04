@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.orm import aliased
 
-from ... import categories, categorize, db, merchants, retail, splits, validate
+from ... import categories, categorize, db, forecast, merchants, retail, splits, validate
 from ... import settings_keys as sk
 from ...models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
 from ..common import ApiError, _month_range, query_int, row_id, text
@@ -18,12 +18,16 @@ from ..common import ApiError, _month_range, query_int, row_id, text
 MANUAL = "|manual:"
 
 
-def tx_logos(conn, items: list[dict]) -> dict[str, str]:
+def tx_logos(conn, items: list[dict], paid: dict[str, str] | None = None) -> dict[str, str]:
     """{transaction id: the URL of its merchant's logo}: Logo.dev's (by the merchant's website or name; a sync, or adding
     the key, fetches it), else Plaid's, and a logo you chose for the merchant over both (or none at all). Logo.dev's
-    come first because they're fetched for a dark background; Plaid's are opaque squares, often dark on white."""
-    logos = merchants.logo_dev_logos(conn, items)
-    logos.update(merchants.for_transactions(conn, [t for t in items if t["id"] not in logos]))
+    come first because they're fetched for a dark background; Plaid's are opaque squares, often dark on white.
+    A card's payment (`paid`: forecast.paid_cards) has no merchant: it shows its card's bank's logo (the app has those),
+    unless you chose one for it."""
+    paid = forecast.paid_cards(conn, items) if paid is None else paid
+    auto = [t for t in items if t["id"] not in paid]
+    logos = merchants.logo_dev_logos(conn, auto)
+    logos.update(merchants.for_transactions(conn, [t for t in auto if t["id"] not in logos]))
     for tid, mid in merchants.chosen_for(conn, items).items():
         if mid:
             logos[tid] = mid
@@ -169,13 +173,18 @@ def api_transactions(conn, q, _b):
         .where(*where).order_by(T.posted.desc(), T.id).limit(limit).offset(offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
-    logos = tx_logos(conn, items)
+    paid = forecast.paid_cards(conn, items)   # card payments: the card's bank's logo, from the app's brands
+    logos = tx_logos(conn, items, paid)
+    for tid, mid in merchants.chosen_for(conn, [t for t in items if t["id"] in paid]).items():
+        if not mid:
+            paid.pop(tid)   # you chose no logo for it: its letter, not the bank's
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         if family and t["splits"]:   # filtered by a category: the part of a split one that's in it (see _match)
             t["match"] = _match(t["splits"], family)
         t["retail"] = orders.get(t["id"])
         t["logo"] = logos.get(t["id"])
+        t["logo_account"] = paid.get(t["id"])   # whose institution's logo (or letter) stands in for a merchant's
         t["brand"] = categorize.brand_choice(t)
         t["source"] = source_of(t["id"])
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]

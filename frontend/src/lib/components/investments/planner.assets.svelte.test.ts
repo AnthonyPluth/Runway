@@ -26,7 +26,7 @@ describe("RetirementPlanner", () => {
       setup(data({ assets: [home] }));
       expect(screen.getByText(/\$300,000 after the loan/)).toBeInTheDocument();
       await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));
-      expect(screen.getByDisplayValue("2051")).toBeInTheDocument();   // the first person retires at 65 (born 1986)
+      expect(screen.getByDisplayValue("2051")).toBeInTheDocument();
       expect(screen.getByText(/^≈ \$/)).toBeInTheDocument();
       await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));
       expect(screen.queryByText(/^Sell in/)).not.toBeInTheDocument();
@@ -36,7 +36,6 @@ describe("RetirementPlanner", () => {
       const paying = { ...home, yearly_change: 0.025, owed_by_year: Array.from({ length: 26 }, (_, k) => 200000 - k * 8000),
         loan: { rate: 6.25, payment: 1840, source: "inferred" as const, note: null } };
       setup(data({ assets: [paying] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
-      // 2036: worth 500k (it keeps pace with inflation), 120k still owed in 2036's dollars = 120k / 1.025^10 today
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title",
         "Home worth $500,000 in 2036, less $93,744 still owed on the loan at 6.25% and $1,840 a month from recent payments. In today’s dollars.");
       expect(screen.queryByText(/to project it/)).not.toBeInTheDocument();
@@ -71,22 +70,21 @@ describe("RetirementPlanner", () => {
       const done = { ...acme, key: "equity:done", name: "Doneco", value: 5000, value_by_year: [5000] };
       setup(data({ assets: [acme, done] }));
       expect(screen.getByText("$10,000 vested today · $40,000 once all vested")).toBeInTheDocument();
-      expect(screen.getByText("$5,000")).toBeInTheDocument();   // all vested already: just what it's worth
+      expect(screen.getByText("$5,000")).toBeInTheDocument();
     });
 
     it("doesn’t spell out the rules for selling and loans", () => {
       setup(data({ assets: [home] }));
       expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
+      expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();
     });
 
     it("says in plain words when a loan's payment in spending ends, and when the plan takes it off", async () => {
-      // $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045
       setup(data({ assets: [repaying()] }));
       expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2045; from 2046 the plan takes it off."))
         .toBeInTheDocument();
-      await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));   // sold in 2051: paid off before then
+      await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));
       expect(screen.getByText(/until it’s paid off in 2045; from 2046 the plan takes it off/)).toBeInTheDocument();
       const year = screen.getByDisplayValue("2051");
       await userEvent.clear(year);
@@ -172,7 +170,7 @@ describe("RetirementPlanner", () => {
     });
 
     it("says a payment that outlasts the plan stays in spending", () => {
-      setup(data({ assets: [repaying({ payoff_year: null })] }));   // projected, but not paid off within the plan's reach
+      setup(data({ assets: [repaying({ payoff_year: null })] }));
       expect(screen.getByText("Its $1,500/month loan payment is already in your spending, and stays in it.")).toBeInTheDocument();
       expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
     });
@@ -182,7 +180,7 @@ describe("RetirementPlanner", () => {
       setup(data({ assets: [{ ...car, key: "asset:car", name: "Car", kind: "vehicle", value: 30000 }] }));
       expect(screen.queryByText("Car")).not.toBeInTheDocument();
       expect(screen.queryByText("Vehicle")).not.toBeInTheDocument();
-      expect(screen.queryByText("Homes & other assets")).not.toBeInTheDocument();   // nothing else to list
+      expect(screen.queryByText("Homes & other assets")).not.toBeInTheDocument();
     });
 
     it("lists a loan against nothing for its payment, with what's owed: it isn't sold", () => {
@@ -196,7 +194,7 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
       expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
         .toBeInTheDocument();
-      expect(screen.getAllByText(/loan payment/)).toHaveLength(1);   // no payment known for the new one: nothing to say
+      expect(screen.getAllByText(/loan payment/)).toHaveLength(1);
     });
 
     it("won't take a sale year before this one, and says when a kept one has passed", async () => {
@@ -210,7 +208,7 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/now past/)).not.toBeInTheDocument();
       expect(screen.getByText("Sell in 2026 or later.")).toBeInTheDocument();
       expect(year).toHaveAttribute("aria-invalid", "true");
-      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");   // counted this year: today's value less today's loan
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");
     });
 
     describe("in future dollars", () => {
@@ -220,9 +218,8 @@ describe("RetirementPlanner", () => {
         const paying = { ...home, yearly_change: 0.025, owed_by_year: Array.from({ length: 26 }, (_, k) => 200000 - k * 8000),
           loan: { rate: 6.25, payment: 1840, source: "inferred" as const, note: null } };
         setup(data({ assets: [paying] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $406,256");   // 500k less 93,744 today
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $406,256");
         await future();
-        // 500k × 1.025^10, less the 120k the loan's schedule says is owed in 2036
         expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $520,042");
         expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Home worth $640,042 in 2036, less $120,000 still owed on the loan at 6.25% and "
           + "$1,840 a month from recent payments. In 2036 dollars, at 2.5% a year inflation.");
@@ -232,7 +229,7 @@ describe("RetirementPlanner", () => {
         const unknown = { ...home, yearly_change: 0.025, owed_by_year: [200000], loan: { rate: null, payment: null, source: null, note: "no_rate" as const } };
         setup(data({ assets: [unknown] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
         await future();
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $384,025");   // (500k − 200k) × 1.025^10
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $384,025");
         expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less the \$200,000 owed on the loan today \(\$256,017 in 2036 dollars\)\. In 2036 dollars/);
       });
 
@@ -240,9 +237,9 @@ describe("RetirementPlanner", () => {
         const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: null, owed: 0,
           value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
         setup(data({ assets: [acme] }, { assets: [{ key: "equity:acme", sell_year: 2030 }] }));
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");   // level in today's dollars, not shrinking
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
         await future();
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $44,153");   // 40k × 1.025^4
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $44,153");
         expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title",
           "Acme: $44,153 vested by 2030, at today’s share price grown with inflation. In 2030 dollars, at 2.5% a year inflation.");
       });

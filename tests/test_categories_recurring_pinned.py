@@ -80,7 +80,7 @@ class CategoryCascadeTests(Base):
         self.assertEqual(self.col(select(TxSplit.category).order_by(TxSplit.id)), ["Groceries", "Medical"])
         self.assertEqual(self.col(select(RetailItem.category)), ["Medical"])
         self.assertEqual(self.col(select(RetailItemMemory.category)), ["Medical"])
-        self.assertEqual(self.col(select(Budget.category)), [])   # its budget goes; Medical keeps its own
+        self.assertEqual(self.col(select(Budget.category)), [])
         self.assertEqual(self.col(select(Rule.category).order_by(Rule.id)), ["Medical", None, "Medical"])
         self.assertEqual(json.loads(self.col(select(Rule.split)
                                              .where(Rule.match == "costco"))[0])[1]["category"], "Medical")
@@ -95,7 +95,7 @@ class CategoryCascadeTests(Base):
         self.assertEqual(self.col(select(RetailItemMemory.category)), ["Health"])
         self.assertEqual(self.col(select(Budget.category)), ["Health"])
         self.assertEqual(self.col(select(Rule.category).order_by(Rule.id)), ["Health", None, "Health"])
-        categories.rename(self.c, "Health", "health")   # only the case changes: allowed
+        categories.rename(self.c, "Health", "health")
         self.assertEqual(self.col(select(Budget.category)), ["health"])
 
     def test_errors(self):
@@ -143,7 +143,6 @@ class CategoryCascadeTests(Base):
         categories.set_look(self.c, "Pets", "", "")
         self.assertEqual(tuple(self.one(select(Category.icon, Category.color)
                                         .where(Category.name == "Pets"))), (None, None))
-        # an orphan (its parent removed by hand) shows at the top level (deeper nesting: migration 0039, test_migrations.py)
         self.c.execute(insert(Category), [{"name": "Lost", "is_transfer": 0, "is_income": 0, "parent": "Gone"}])
         categories.add(self.c, "Vitamins", "Pharmacy")
         lost = next(c for c in categories.all_categories(self.c) if c["name"] == "Lost")
@@ -155,7 +154,6 @@ class CategoryCascadeTests(Base):
 
     def test_category_list_says_what_else_removing_one_changes(self):
         cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
-        # Pharmacy: two rules set it and one splits into it, it has a budget, and an order item is in it
         self.assertEqual((cats["Pharmacy"]["rules"], cats["Pharmacy"]["budgeted"], cats["Pharmacy"]["items"]), (3, True, 1))
         self.assertEqual((cats["Groceries"]["rules"], cats["Groceries"]["budgeted"], cats["Groceries"]["items"]), (1, False, 0))
         self.assertEqual((cats["Travel"]["rules"], cats["Travel"]["budgeted"], cats["Travel"]["items"]), (0, False, 0))
@@ -164,14 +162,13 @@ class CategoryCascadeTests(Base):
         categories.add(self.c, "Dentist", "Pharmacy")
         recent = (freeze_today(self) - timedelta(days=3)).isoformat()
         self.tx(-4000, "DENTAL CARE", acct="cc", posted=recent, category="Dentist")
-        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": "chk"})   # nested, no budget
+        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": "chk"})
         api_categories.api_category_pay_with(self.c, None, {"name": "Travel", "pay_with": "cc"})
         cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
         self.assertEqual((cats["Dentist"]["pay_with"], cats["Travel"]["pay_with"], cats["Groceries"]["pay_with"]), ("chk", "cc", None))
-        # what it goes on without a choice: the account used most lately, its subcategories' spending included
         self.assertEqual((cats["Dentist"]["usual_account"], cats["Pharmacy"]["usual_account"], cats["Travel"]["usual_account"]),
                          ("cc", "cc", None))
-        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": ""})   # back to automatic
+        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": ""})
         self.assertIsNone(self.one(select(Category.pay_with).where(Category.name == "Dentist"))[0])
         for body, error in (({"name": "Nope", "pay_with": "cc"}, "Category not found"),
                             ({"name": "Travel", "pay_with": "nope"}, "Account not found"),
@@ -179,8 +176,8 @@ class CategoryCascadeTests(Base):
             with self.assertRaises(ApiError) as e:
                 api_categories.api_category_pay_with(self.c, None, body)
             self.assertEqual(str(e.exception), error)
-        self.assertEqual(self.one(select(Category.pay_with).where(Category.name == "Travel"))[0], "cc")   # untouched
-        categories.rename(self.c, "Travel", "Trips")   # a rename keeps it
+        self.assertEqual(self.one(select(Category.pay_with).where(Category.name == "Travel"))[0], "cc")
+        categories.rename(self.c, "Travel", "Trips")
         self.assertEqual(self.one(select(Category.pay_with).where(Category.name == "Trips"))[0], "cc")
 
     def test_rule_list_and_delete(self):
@@ -213,14 +210,14 @@ class CategorizePinnedTests(Base):
                          [("Travel", "New Name", 0, "manual"), ("Travel", "New Name", 0, "manual")])
         self.assertEqual(self.col(select(func.count()).select_from(TxSplit)), [0])
         ids = [f"x{i}" for i in range(700)] + [a]
-        self.assertEqual(categorize.bulk_update(self.c, ids, payee="Z"), 1)   # more than one chunk
+        self.assertEqual(categorize.bulk_update(self.c, ids, payee="Z"), 1)
 
     def test_remember_updates_matching_open_transactions(self):
         a = self.tx(-5, "BLUE BOTTLE 1", review=1, payee="Blue Bottle")
         b = self.tx(-6, "x", payee="Cafe", review=0, category="Coffee & Snacks", source="ai")
         self.c.execute(update(Transaction).where(Transaction.id == b).values(description="SQ *BLUE BOTTLE 2"))
         c = self.tx(-7, "BLUE BOTTLE 3", category="Shopping", source="manual")
-        d = self.tx(-8, "BLUE_BOTTLE 4", review=1)   # '_' isn't a wildcard
+        d = self.tx(-8, "BLUE_BOTTLE 4", review=1)
         e = self.tx(-9, "BLUE BOTTLE 5", review=1)
         self.c.execute(update(Transaction).where(Transaction.id == e).values(category="Shopping", category_source="ai"))
         f = self.tx(-9, "PAID blue bottle xx", review=1, payee="Other")
@@ -284,19 +281,18 @@ class RecurringPinnedTests(Base):
                                             "anchor_date": "2026-06-07", "match": "ax", "amount_mode": "fixed"}])
         self.c.execute(insert(Recurring).values(name="Off", account_id="chk", amount=-100, frequency="monthly",
                                                 anchor_date="2026-06-07", match="streamflix gift", active=0))
-        self.c.execute(update(Recurring).where(Recurring.id == 1).values(amount_min=10, amount_max=20))   # not the gift cards
+        self.c.execute(update(Recurring).where(Recurring.id == 1).values(amount_min=10, amount_max=20))
 
     def ids(self, rid):
         return self.col(select(Transaction.id).where(Transaction.recurring_id == rid).order_by(Transaction.id))
 
     def test_auto_match_edges(self):
         self.assertEqual(recurring.auto_match(self.c), 5)
-        self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4"])   # not the other account, the refund, the gift cards
-        self.assertEqual(self.ids(2), ["chk|8"])                               # literal text, no wildcards
-        self.assertEqual(self.ids(3), [])                                     # too short to match on
-        self.assertEqual(self.ids(4), [])                                     # inactive
+        self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4"])
+        self.assertEqual(self.ids(2), ["chk|8"])
+        self.assertEqual(self.ids(3), [])
+        self.assertEqual(self.ids(4), [])
         self.assertEqual(recurring.auto_match(self.c), 0)
-        # Without its amount range, any amount with its text is a payment for it: the gift cards too.
         self.c.execute(update(Recurring).where(Recurring.id == 1).values(amount_min=None, amount_max=None))
         self.assertEqual(recurring.auto_match(self.c), 1)
         self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4", "chk|7"])
@@ -314,7 +310,6 @@ class RecurringPinnedTests(Base):
         self.assertEqual((s["account_name"], s["matched_count"], s["last_matched"]["posted"], s["expected_amount"]),
                          ("Checking (Sam)", 4, "2026-09-03", -15.49))
         self.assertEqual([i["name"] for i in api_recurring.api_recurring(self.c, None, None)], ["Odd", "Short", "Streaming", "Ten", "Off"])
-        # changing the merchant text drops links that no longer fit
         body = {"name": "Streaming", "account_id": "chk", "amount": -15.49, "anchor_date": "2026-06-03", "match": "Streamflix 55"}
         self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 0, "amount_min": None, "amount_max": None})
         self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4"])
@@ -371,7 +366,7 @@ class RulesPinnedTests(Base):
         self.assertEqual(categorize.rule_offer(self.c, t, "Coffee & Snacks"),
                          {"merchant": "Blue Bottle", "match": "blue bottle", "replaces": None, "also_updated": 0})
         self.c.execute(insert(Rule).values(match="blue bottle", match_mode="exact", category="Shopping"))
-        rules.remember(self.c, "blue bottle", "Coffee & Snacks")   # not the exact-text rule: a new one
+        rules.remember(self.c, "blue bottle", "Coffee & Snacks")
         self.assertEqual([tuple(r) for r in self.c.execute(select(Rule.match, Rule.match_mode, Rule.category)
                                                            .order_by(Rule.id))],
                          [("blue bottle", "exact", "Shopping"), ("blue bottle", "contains", "Coffee & Snacks")])

@@ -30,7 +30,7 @@ describe("a bank's icon", () => {
     const on = render(BankIcon, { name: "Fidelity" });
     const img = on.container.querySelector("img")!;
     expect(img).toHaveAttribute("src", "/api/merchants/brand%3Afidelity/logo");
-    await fireEvent.error(img);                                          // not fetched yet
+    await fireEvent.error(img);
     expect(on.container.querySelector("img")).toBeNull();
     expect(on.container).toHaveTextContent("F");
   });

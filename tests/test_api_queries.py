@@ -20,7 +20,6 @@ from tests.shared import TODAY, DbCase, freeze_today
 # (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
 
 
-# ------------------------------------------------------------------------------------------ the pages as they were
 
 def old_card_statement(conn, card, institution, today=None):
     today = today or date.today()
@@ -174,7 +173,6 @@ def old_setup_steps(conn):
     }
 
 
-# ------------------------------------------------------------------------------------------ the tests
 
 class Queries:
     """Counts the statements a connection runs."""
@@ -275,7 +273,7 @@ class SettingsTests(DbCase):
 
     def test_get_settings_is_get_setting_for_each(self):
         db.set_setting(self.c, sk.HORIZON_DAYS, "45")
-        db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-secret")   # kept encrypted
+        db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-secret")
         db.set_setting(self.c, sk.LAST_LLM_ERROR, "")
         keys = [sk.HORIZON_DAYS, sk.OPENROUTER_API_KEY, sk.LAST_LLM_ERROR, sk.PRIMARY_ACCOUNT]
         self.assertEqual(db.get_settings(self.c, keys), {k: db.get_setting(self.c, k) for k in keys})
@@ -283,14 +281,13 @@ class SettingsTests(DbCase):
         self.assertEqual(db.get_settings(self.c, []), {})
 
     def test_a_secret_counts_as_set_only_if_it_can_be_read(self):
-        # Saved under another RUNWAY_SECRET_KEY (a backup restored from elsewhere): not set, so Settings asks for it again.
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machines-key-abcdefghijklmnopqrstuvwxyz"}):
             db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-elsewhere")
             db.set_setting(self.c, sk.FINNHUB_API_KEY, "finnhub-elsewhere")
-        db.set_setting(self.c, sk.SIMPLEFIN_ACCESS_URL, "https://u:p@bridge.example/simplefin")   # readable here
+        db.set_setting(self.c, sk.SIMPLEFIN_ACCESS_URL, "https://u:p@bridge.example/simplefin")
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_readable_here")
         self.c.commit()
-        with mock.patch("builtins.print"):   # (each unreadable one is logged as a warning)
+        with mock.patch("builtins.print"):
             got = routes.dispatch(routes.match("GET", "/api/state"), {}, {})
         self.assertEqual((got["has_api_key"], got["finnhub_configured"], got["simplefin"], got["logodev_configured"],
                           got["realie_configured"], got["connected"]), (False, False, True, True, False, True))

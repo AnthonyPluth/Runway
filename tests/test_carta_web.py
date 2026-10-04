@@ -8,8 +8,6 @@ from runway import carta, carta_web, equity
 from runway.models import EquityCompany, EquityGrant
 from tests.shared import DbCase
 
-# Two made-up shapes, since Carta's web app isn't documented: a snake_case one with the company around its
-# securities, and a camelCase one with the company inside each security.
 HOLDINGS = {
     "portfolio": {"id": 7, "holdings": [{
         "issuer_id": 42, "issuer_name": "Acme Robotics, Inc.", "fair_market_value": {"amount": "4.25"},
@@ -27,8 +25,6 @@ OTHER = {"results": [{"id": "r1", "label": "RSU-3", "type": "RSU", "quantity": 1
                       "company": {"name": "Beta Labs", "id": "b9", "fmvPerShare": 12.5}}]}
 
 
-# The shapes carta.com's portfolio pages actually load (September 2026), trimmed and with made-up names and numbers:
-# the securities replies give only the issuer's number, and the company's name is in the list of your companies.
 PK = 5550001
 WEB = [
     {"url": f"https://app.carta.com/investors/individual/{PK}/portfolio/#embedded-0",
@@ -75,7 +71,7 @@ class ReadTests(unittest.TestCase):
         cid, og = grants["carta-web:option:11"]
         self.assertEqual((cid, og["kind"], og["quantity"], og["strike"], og["vest_months"], og["cliff_months"], og["vested_reported"]),
                          ("carta:42", "iso", 48000.0, 1.0, 48, 12, 33000.0))
-        cid, cs = grants["carta-web:shares:11"]   # same number as the option: kept apart
+        cid, cs = grants["carta-web:shares:11"]
         self.assertEqual((cid, cs["kind"], cs["quantity"]), ("carta:42", "shares", 500.0))
         cid, rsu = grants["carta-web:rsu:r1"]
         self.assertEqual((cid, rsu["kind"], rsu["vest_months"], rsu["vest_every"]), ("carta:b9", "rsu", 48, 3))
@@ -83,9 +79,9 @@ class ReadTests(unittest.TestCase):
     def test_carta_web_app_shapes(self):
         found = carta_web.read(WEB)
         self.assertEqual([(c["id"], c["name"], c["price"]) for c in found["companies"]],
-                         [("carta:900", "Northwind Payments, Inc.", 4.78)])   # not the portfolio, nor a company with nothing left
+                         [("carta:900", "Northwind Payments, Inc.", 4.78)])
         grants = {g["id"]: (cid, g) for cid, g, _ in found["grants"]}
-        self.assertEqual(sorted(grants), ["carta-web:option:1901", "carta-web:option:1902"])   # canceled ones left out
+        self.assertEqual(sorted(grants), ["carta-web:option:1901", "carta-web:option:1902"])
         cid, g = grants["carta-web:option:1901"]
         self.assertEqual((cid, g["kind"], g["label"], g["quantity"], g["strike"], g["vested_reported"], g["exercised"]),
                          ("carta:900", "iso", "ES-452", 20619.0, 3.5, 10739.0, 0.0))
@@ -102,7 +98,6 @@ class ImportTests(DbCase):
     def test_import(self):
         self.assertEqual(carta_web.start(self.c)["start_url"], "https://app.carta.com/")
         r = carta_web.ingest(self.c, "https://app.carta.com/api/portfolio/7/", HOLDINGS)
-        # Carta links worth reading next; never other sites or sign-out
         self.assertEqual(r["follow"], ["https://app.carta.com/api/portfolio/7/fmv-history/",
                                        "https://app.carta.com/api/portfolio/7/issuers/42/securities/"])
         carta_web.ingest(self.c, "https://app.carta.com/api/other/", OTHER)
@@ -113,7 +108,6 @@ class ImportTests(DbCase):
         acme = next(c for c in o["companies"] if c["name"].startswith("Acme"))
         self.assertEqual((acme["source"], acme["share_price"]), ("carta", 4.25))
         self.assertEqual(acme["vested_value"], round(33000 * 3.25 + 500 * 4.25, 2))
-        # Importing again updates rather than duplicates, and a new import starts afresh.
         carta_web.start(self.c)
         carta_web.ingest(self.c, "https://app.carta.com/api/portfolio/7/", HOLDINGS)
         carta_web.finish(self.c)
@@ -132,7 +126,6 @@ class ImportTests(DbCase):
         self.assertEqual(carta_web.finish(self.c), {"companies": 1, "grants": 2, "pages": len(WEB)})
         o = equity.overview(self.c, date(2026, 9, 28))
         self.assertEqual([c["name"] for c in o["companies"]], ["Northwind Payments, Inc."])
-        # A grant canceled since the last import goes away.
         self.c.execute(insert(EquityGrant).values(id="carta-web:option:1801", company_id="carta:900", kind="iso",
                                                   quantity=8000, source="carta"))
         carta_web.start(self.c)
@@ -163,7 +156,7 @@ class ImportTests(DbCase):
         for found in (first, again):
             with mock.patch.object(carta_web, "read", return_value=found):
                 carta_web.finish(self.c)
-            if found is first:   # a grant you add yourself to the company, between imports
+            if found is first:
                 self.c.execute(insert(EquityGrant).values(id="m1", company_id="carta:42", kind="rsu", quantity=5,
                                                           source="manual"))
         company = dict(self.c.execute(select(EquityCompany.id, EquityCompany.name, EquityCompany.share_price,

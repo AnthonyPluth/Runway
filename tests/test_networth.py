@@ -32,19 +32,17 @@ class NetWorthTests(Base):
         g = {x["key"]: x for x in s["groups"]}
         self.assertEqual(g["cash"]["total"], 4561.10)
         self.assertEqual(g["investments"]["total"], 98250.35)
-        self.assertEqual(g["credit"]["total"], 1275.40)                  # hidden card left out
-        self.assertEqual(g["loan"]["total"], 262000.0)                   # both sign conventions read as amounts owed
-        self.assertAlmostEqual(g["vehicle"]["total"], 25500.0, delta=15)  # a year at -15%
+        self.assertEqual(g["credit"]["total"], 1275.40)
+        self.assertEqual(g["loan"]["total"], 262000.0)
+        self.assertAlmostEqual(g["vehicle"]["total"], 25500.0, delta=15)
         self.assertAlmostEqual(s["net"], 4561.10 + 98250.35 + 425000 + g["vehicle"]["total"] - 1275.40 - 262000, places=2)
         house = g["home"]["items"][0]
         self.assertEqual((house["equity"], house["loan"]["name"]), (175000.0, "Mortgage"))
-        # a snapshot per day; change since 30 days needs an older snapshot
         self.assertIsNone(s["change"]["30d"])
         self.c.execute(insert(NetworthSnapshot).values(date="2026-08-20", assets=0, liabilities=0, net=300000))
         s2 = networth.summary(self.c, TODAY)
         self.assertEqual(s2["change"]["30d"], round(s2["net"] - 300000, 2))
         self.assertEqual(len(s2["history"]), 2)
-        # updating the value keeps a history
         networth.save_asset(self.c, {"value": 440000}, home, today=date(2026, 10, 1))
         vals = self.c.execute(select(AssetValue.date, AssetValue.value)
                               .where(AssetValue.asset_id == home).order_by(AssetValue.date)).fetchall()
@@ -61,7 +59,6 @@ class NetWorthTests(Base):
         self.assertNotIn("investments", {g["key"] for g in after["groups"]})
         self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment", "balance": 98250.35}])
         self.assertEqual(before["excluded"], [])
-        # balances read like the groups: a liability is a positive amount owed, whichever sign convention the account uses
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "auto")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "chk")
@@ -71,23 +68,19 @@ class NetWorthTests(Base):
         api_account_update(self.c, {}, {"networth_hidden": 0}, "chk")
         api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
         after = networth.summary(self.c, TODAY, save=False)
-        # a liability left out makes net worth go up; the account is still there for everything else
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1275.40)
         self.assertEqual(self.c.execute(select(Account.hidden).where(Account.id == "cc")).fetchone()[0], 0)
-        # a hidden account isn't offered to bring back (Settings hides it everywhere)
         api_account_update(self.c, {}, {"networth_hidden": 1}, "old")
         self.assertEqual({a["id"] for a in networth.summary(self.c, TODAY, save=False)["excluded"]}, {"brk", "cc"})
-        # counted again
         api_account_update(self.c, {}, {"networth_hidden": 0}, "brk")
         api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
         self.assertEqual(networth.summary(self.c, TODAY, save=False)["net"], before["net"])
 
     def test_change_says_which_snapshot_it_is_measured_from(self):
-        # opened 44 days ago and not since: "30 days" is really since then, and the page is told so
         self.c.execute(insert(NetworthSnapshot).values(date="2026-08-10", assets=0, liabilities=0, net=100000))
         s = networth.summary(self.c, TODAY, save=False)
-        self.assertEqual(s["change"]["30d"], round(s["net"] - 100000, 2))   # still a number, as before
+        self.assertEqual(s["change"]["30d"], round(s["net"] - 100000, 2))
         self.assertEqual(s["change_since"], {"30d": "2026-08-10", "90d": None, "1y": None})
         self.assertEqual(s["change"]["90d"], None)
 
@@ -119,12 +112,11 @@ class LoanTests(Base):
     def test_amortizes_from_the_balance_date(self):
         a, t = self.loan(), self.terms(6.0, 1199.10)
         self.assertAlmostEqual(loans.owed_on(a, t, TODAY), self.by_hand(200000, 6.0, 1199.10, 12), delta=0.01)
-        self.assertEqual(loans.owed_on(a, t, date(2025, 9, 23)), 200000.0)        # nothing paid yet
-        self.assertEqual(loans.owed_on(a, t, date(2025, 10, 22)), 200000.0)       # the first payment is on the 23rd
+        self.assertEqual(loans.owed_on(a, t, date(2025, 9, 23)), 200000.0)
+        self.assertEqual(loans.owed_on(a, t, date(2025, 10, 22)), 200000.0)
         self.assertAlmostEqual(loans.owed_on(a, t, date(2025, 10, 23)), self.by_hand(200000, 6.0, 1199.10, 1), delta=0.01)
-        self.assertEqual(loans.owed_on(a, t, date(2056, 1, 1)), 0.0)              # paid off, never below zero
-        self.assertEqual(loans.owed_on(a, t, date(2025, 1, 1)), 200000.0)         # before the balance: as it is
-        # month by month, as loans.project() has it a year at a time
+        self.assertEqual(loans.owed_on(a, t, date(2056, 1, 1)), 0.0)
+        self.assertEqual(loans.owed_on(a, t, date(2025, 1, 1)), 200000.0)
         self.assertAlmostEqual(loans.amortize(200000, 6.0, 1199.10, 12), loans.project(200000, 6.0, 1199.10)[0][1], delta=0.01)
 
     def test_a_payment_on_the_31st_is_made_at_the_end_of_a_shorter_month(self):
@@ -135,16 +127,14 @@ class LoanTests(Base):
         self.assertEqual(loans.months_between(date(2026, 3, 15), date(2026, 1, 15)), 0)
 
     def test_without_a_rate_or_payment(self):
-        self.assertEqual(loans.owed_on(self.loan(), self.terms(None, 1000), TODAY), 200000.0)   # no rate: nothing guessed
-        self.assertEqual(loans.owed_on(self.loan(), self.terms(0, 1000), TODAY), 188000.0)      # 0%: straight-line
-        self.assertEqual(loans.owed_on(self.loan(), self.terms(6.0, None), TODAY), 200000.0)    # no payment: as it is
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(None, 1000), TODAY), 200000.0)
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(0, 1000), TODAY), 188000.0)
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(6.0, None), TODAY), 200000.0)
         self.assertEqual(loans.owed_on(self.loan(), None, TODAY), 200000.0)
         self.assertEqual(loans.owed_on(self.loan(balance_date=None), self.terms(6.0, 1000), TODAY), 200000.0)
         self.assertEqual(loans.owed_on(self.loan(balance_date="garbled"), self.terms(6.0, 1000), TODAY), 200000.0)
-        # a payment that doesn’t cover the interest ($900 a month; $200,000 at 6% is $1,000 of interest) doesn’t shrink it, or grow it
         self.assertEqual(loans.owed_on(self.loan(), self.terms(6.0, 900), TODAY), 200000.0)
         self.assertEqual(loans.owed_on(self.loan(balance=12000.0, owed_positive=1), self.terms(0, 500), TODAY), 6000.0)
-        # a card's balance is never paid down
         self.assertEqual(loans.owed_on({**self.loan(), "kind": "credit"}, self.terms(0, 500), TODAY), 200000.0)
 
     def test_net_worth_and_equity_use_the_paid_down_balance(self):
@@ -156,7 +146,7 @@ class LoanTests(Base):
         owed = round(self.by_hand(250000, 6.0, 1500, 6), 2)
         mtg = next(i for i in g["loan"]["items"] if i["id"] == "mtg")
         self.assertEqual((mtg["value"], mtg["synced"]), (owed, 250000.0))
-        self.assertNotIn("synced", next(i for i in g["loan"]["items"] if i["id"] == "auto"))   # no terms: as synced
+        self.assertNotIn("synced", next(i for i in g["loan"]["items"] if i["id"] == "auto"))
         self.assertEqual(g["home"]["items"][0]["equity"], round(425000 - owed, 2))
         self.assertEqual(g["loan"]["total"], round(owed + 12000, 2))
         from runway.server.api.accounts import api_account_update
@@ -165,7 +155,6 @@ class LoanTests(Base):
         self.assertEqual(next(a["balance"] for a in left_out if a["id"] == "mtg"), owed)
 
     def test_plaids_terms_and_inferred_payments_count_too(self):
-        # Plaid's rate and payment, over a rate and payment you set
         self.c.execute(update(Account).where(Account.id == "mtg").values(
             balance_date="2026-06-23", plaid_account_id="p-mtg", interest_rate=3.0, monthly_payment=900))
         self.c.execute(insert(LoanTerms).values(plaid_account_id="p-mtg", item_id="item", kind="mortgage", interest_rate=6.0,
@@ -174,17 +163,16 @@ class LoanTests(Base):
                             if i["id"] == "auto")
         mtg = next(i for i in networth.summary(self.c, TODAY, save=False)["groups"] if i["key"] == "loan")["items"]
         self.assertEqual(next(i for i in mtg if i["id"] == "mtg")["value"], round(self.by_hand(250000, 6.0, 1500, 3), 2))
-        # the auto loan: a rate you set and no payment, so the payment is worked out from recent payments into it
         self.c.execute(update(Account).where(Account.id == "auto").values(balance_date="2026-07-23", interest_rate=0))
-        self.assertNotIn("synced", loan())   # no payment yet: as synced
+        self.assertNotIn("synced", loan())
         self.c.execute(insert(Transaction), [{"id": f"pay{m}", "account_id": "auto", "posted": f"2026-0{m}-05", "amount": 400}
                                              for m in (6, 7, 8)])
-        self.assertEqual((loan()["value"], loan()["synced"]), (11200.0, 12000.0))   # two $400 payments since July 23
+        self.assertEqual((loan()["value"], loan()["synced"]), (11200.0, 12000.0))
 
 
 class MockRealie(BaseHTTPRequestHandler):
     calls = []
-    nested = False   # answer in Realie's newer nested shape
+    nested = False
 
     def log_message(self, *a):
         pass
@@ -202,7 +190,7 @@ class MockRealie(BaseHTTPRequestHandler):
         elif MockRealie.nested:
             code, body = 200, {"property": {"realieValuation": {"ml": {"value": 445000}},
                                             "propertyLocation": {"city": "SPRINGFIELD", "zipCode": "62701"}}}
-        else:   # the same street in two towns: the address's city and zip pick the right one
+        else:
             code, body = 200, {"property": [{"modelValue": 199000, "city": "CHICAGO", "zipCode": "60601"},
                                             {"modelValue": 431000, "city": "SPRINGFIELD", "zipCode": "62701-1234"}]}
         b = json.dumps(body).encode()
@@ -237,7 +225,7 @@ class RealieTests(Base):
         home = networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000,
                                             "address": "1 Main St, Springfield, IL 62701", "auto_update": True}, today=date(2026, 8, 1))
         with self.assertRaises(realie.RealieError):
-            realie.refresh_asset(self.c, home, TODAY)           # no key yet
+            realie.refresh_asset(self.c, home, TODAY)
         db.set_setting(self.c, "realie_api_key", "rl-key")
         est = realie.refresh_asset(self.c, home, TODAY)
         self.assertEqual((est["value"], est["low"], est["high"]), (431000.0, None, None))
@@ -246,18 +234,15 @@ class RealieTests(Base):
         self.assertIn("address=1+Main+St&state=IL", MockRealie.calls[-1][0])
         self.assertEqual(MockRealie.calls[-1][1], "rl-key")
         self.assertEqual(realie.used_this_month(self.c, TODAY), 1)
-        # once a week per home, asked for or automatic: nothing more until 7 days later
         n = len(MockRealie.calls)
         with self.assertRaises(realie.RealieError) as cm:
             realie.refresh_asset(self.c, home, date(2026, 9, 29))
         self.assertIn("next lookup is Sep 30", str(cm.exception))
         self.assertEqual(realie.refresh_due(self.c, date(2026, 9, 29)), 0)
         self.assertEqual(len(MockRealie.calls), n)
-        # the newer nested reply, a week on
         MockRealie.nested = True
         self.assertEqual(realie.refresh_due(self.c, date(2026, 9, 30)), 1)
         self.assertEqual(self.c.execute(select(Asset.value).where(Asset.id == home)).fetchone()[0], 445000.0)
-        # bad address, another town, no estimate, and the free-plan cap (lookups on later days)
         TODAY2 = date(2026, 9, 30)
         self.c.execute(update(Asset).where(Asset.id == home).values(last_lookup=None))
         networth.save_asset(self.c, {"address": "Nowhere, Springfield, IL"}, home, today=TODAY)
@@ -278,7 +263,7 @@ class RealieTests(Base):
         with self.assertRaises(realie.RealieError) as cm:
             realie.refresh_asset(self.c, home, TODAY2)
         self.assertIn("25 free Realie lookups", str(cm.exception))
-        self.assertEqual(len(MockRealie.calls), n)              # never called past the limit
+        self.assertEqual(len(MockRealie.calls), n)
 
     def test_a_home_realie_values_isnt_valued_by_hand(self):
         from runway.server.api.networth import api_asset_update, api_networth
@@ -288,25 +273,23 @@ class RealieTests(Base):
                                             "auto_update": True}, today=TODAY)
         car = networth.save_asset(self.c, {"name": "Car", "kind": "vehicle", "value": 30000}, today=TODAY)
         valued = lambda: {a["name"]: a["realie_valued"] for a in api_networth(self.c, {}, {})["assets_list"]}
-        self.assertEqual(valued(), {"House": False, "Car": False})   # no key: everything's yours to value
+        self.assertEqual(valued(), {"House": False, "Car": False})
         db.set_setting(self.c, "realie_api_key", "rl-key")
-        self.assertEqual(valued(), {"House": False, "Car": False})   # not looked up yet: still your value
+        self.assertEqual(valued(), {"House": False, "Car": False})
         realie.refresh_asset(self.c, home, TODAY)
         self.assertEqual(valued(), {"House": True, "Car": False})
         with self.assertRaisesRegex(ApiError, "Realie values this home"):
             api_asset_update(self.c, {}, {"value": 500000}, str(home))
         self.assertEqual(self.c.execute(select(Asset.value).where(Asset.id == home)).scalar(), 431000.0)
-        api_asset_update(self.c, {}, {"name": "Our house"}, str(home))   # its other details are still yours
-        # with Realie's updates off, a value from it once is yours to correct (in the same change, or after)
+        api_asset_update(self.c, {}, {"name": "Our house"}, str(home))
         api_asset_update(self.c, {}, {"auto_update": False, "value": 433000}, str(home))
         self.assertEqual((valued()["Our house"], self.c.execute(select(Asset.value).where(Asset.id == home)).scalar()),
                          (False, 433000.0))
         api_asset_update(self.c, {}, {"auto_update": True}, str(home))
-        self.assertFalse(valued()["Our house"])                 # your value, until Realie's next lookup
+        self.assertFalse(valued()["Our house"])
         realie.refresh_asset(self.c, home, TODAY + timedelta(days=7))
         self.assertTrue(valued()["Our house"])
-        api_asset_update(self.c, {}, {"value": 28000}, str(car))         # a vehicle is always valued by hand
-        # without an address Realie can use (no state), or without the key, the value is yours again
+        api_asset_update(self.c, {}, {"value": 28000}, str(car))
         api_asset_update(self.c, {}, {"address": "1 Main St"}, str(home))
         self.assertFalse(valued()["Our house"])
         api_asset_update(self.c, {}, {"value": 440000}, str(home))
@@ -353,16 +336,15 @@ class NewCategoryTests(Base):
 
         sug = {x["merchant"]: x for x in categorize.suggest_for_review(self.c, caller=fake)}
         self.assertIn("new_category", seen["prompt"])
-        self.assertEqual(sug["Petsmart"]["new_category"], {"name": "Pets", "parent": None})   # unknown parent dropped
-        self.assertEqual((sug["Starbucks"]["category"], sug["Starbucks"]["new_category"]), ("Groceries", None))  # already exists
+        self.assertEqual(sug["Petsmart"]["new_category"], {"name": "Pets", "parent": None})
+        self.assertEqual((sug["Starbucks"]["category"], sug["Starbucks"]["new_category"]), ("Groceries", None))
         r = server.api_ai_apply(self.c, None, {"tx_ids": sug["Petsmart"]["tx_ids"], "new_category": sug["Petsmart"]["new_category"], "direction": "out"})
         self.assertEqual((r["category"], r["created"], r["updated"]), ("Pets", True, 1))
         r2 = server.api_ai_apply(self.c, None, {"tx_ids": sug["Chewy"]["tx_ids"], "new_category": sug["Chewy"]["new_category"], "direction": "out"})
-        self.assertEqual((r2["category"], r2["created"]), ("Pets", False))                   # second proposal reuses it
+        self.assertEqual((r2["category"], r2["created"]), ("Pets", False))
         self.assertEqual(self.c.execute(select(func.count())
                                         .select_from(Transaction)
                                         .where(Transaction.category == "Pets")).fetchone()[0], 2)
-        # the automatic path during sync never gets to create categories
         self.assertNotIn("new_category", categorize.build_prompt(["A"], [], []))
 
 

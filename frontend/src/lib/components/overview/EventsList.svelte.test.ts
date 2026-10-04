@@ -18,7 +18,6 @@ type Ev = ForecastEvent & { late_from?: string | null };
 const estimate = (): StatementEstimate => ({ close: "2026-03-01", due: "2026-03-26", charged_so_far: 300,
   budgets: [{ category: "Groceries", amount: 500 }, { category: "Dining", amount: 266.67 }], budgets_total: 766.67, statement: 1066.67, total: 1066.67 });
 const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
-// `events` is also a Testing Library mount option, so props go under `props`.
 const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, onchanged: vi.fn(), ...extra } });
 
 beforeEach(() => {
@@ -88,7 +87,6 @@ describe("EventsList", () => {
 
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01" })]);
-      // an estimate is an asterisk right after the amount, not a word or a badge
       const mark = screen.getByRole("img", { name: "estimate" });
       expect(mark).toHaveTextContent("*");
       expect(mark.parentElement).toHaveTextContent(/1,500\.00\*$/);
@@ -97,7 +95,6 @@ describe("EventsList", () => {
     });
 
     it("drops the asterisk once you've changed the amount: it's yours, not an estimate", () => {
-      // (the forecast doesn't mark an edited one as an estimate; this holds even if it did)
       show([ev({ estimated: true, overridden: true, original_amount: -1400, kind: "card", estimate: estimate() })]);
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
       expect(screen.queryByRole("img", { name: "estimate" })).toBeNull();
@@ -129,13 +126,13 @@ describe("EventsList", () => {
       expect(mark.title.split("\n")).toEqual(["Estimate for the Mar 1 statement", "Charged so far · $300.00",
         "Budgets on this card to Mar 1 · $766.67 (Groceries $500.00, Dining $266.67)", "= $1,066.67"].map((l) => l.replace(/Mar 1/g, "Mar\u00a01")));
       expect(mark).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByText("Charged so far")).toBeNull();   // collapsed by default
+      expect(screen.queryByText("Charged so far")).toBeNull();
       await userEvent.click(mark);
       expect(mark).toHaveAttribute("aria-expanded", "true");
       const breakdown = document.getElementById(mark.getAttribute("aria-controls")!)!;
       expect(breakdown).toHaveTextContent(/Charged so far \$300\.00\s*Budgets on this card to/);
       expect(breakdown).toHaveTextContent("= $1,066.67");
-      expect(api).not.toHaveBeenCalled();   // a tap on the asterisk doesn't edit the amount
+      expect(api).not.toHaveBeenCalled();
       await userEvent.click(mark);
       expect(screen.queryByText("Charged so far")).toBeNull();
     });
@@ -196,9 +193,9 @@ describe("EventsList", () => {
     app.state = { connected: true, brands: { chk: { institution: "Chase", initial: "C" } } };
     const { container } = show([ev({ account: "Checking", account_id: "chk" })], { accounts: true });
     const badge = container.querySelector("[data-account-badge]");
-    expect(badge).toHaveAttribute("title", "Checking");                                      // on the logo's corner, as Transactions does
-    expect(screen.queryByText("Checking", { selector: "div" })).toBeNull();                  // not a line of its own under the name
-    expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
+    expect(badge).toHaveAttribute("title", "Checking");
+    expect(screen.queryByText("Checking", { selector: "div" })).toBeNull();
+    expect(screen.getByText("Checking ·")).toBeInTheDocument();
   });
 
   it("groups items by day under the date, with no dividers inside a day, and the projected balance once a day per account", () => {
@@ -211,7 +208,6 @@ describe("EventsList", () => {
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent!.replace(/\s/g, " "))).toEqual(["Sun, Mar 15", "Mon, Mar 16"]);
     expect(screen.getAllByText(/^projected balance /).map((b) => b.textContent))
       .toEqual(["projected balance $2,000.00", "projected balance $700.00", "projected balance $5,000.00"]);
-    // a day is one block of the grouped list (its hairlines fall between blocks): the items of Mar 15 share one
     const day = document.querySelector("[data-day='2026-03-15']")!;
     expect(day.parentElement!.querySelectorAll(":scope > [data-day]")).toHaveLength(2);
     expect(day.textContent).toContain("Taxes");
@@ -254,7 +250,7 @@ describe("EventsList", () => {
       expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: -1400 } });
       const [msg, opts] = lastToast();
       expect(msg).toBe("Changed for Mar\u00a015 only");
-      expect(opts.action.label).toBe("Undo");   // not a recurring item's date: nothing to change from now on
+      expect(opts.action.label).toBe("Undo");
       expect(opts.cancel).toBeUndefined();
     });
 
@@ -302,7 +298,7 @@ describe("EventsList", () => {
       const [msg, opts] = lastToast();
       expect(msg).toBe("Rent is $1,400.00 from now on");
       expect(opts.description).toBe("A fixed amount now, not one from recent payments");
-      await opts.action.onClick();   // Undo
+      await opts.action.onClick();
       expect(api).toHaveBeenCalledWith("/api/recurring/3/amount", { method: "POST", body: { restore: prev } });
       expect(api).toHaveBeenLastCalledWith("/api/overrides", { method: "POST", body: { key: "rec:3:2026-03-15", amount: -1400 } });
       expect(onchanged).toHaveBeenCalledTimes(3);

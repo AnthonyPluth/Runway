@@ -83,7 +83,7 @@ class IssuerTests(unittest.TestCase):
         self.assertEqual(self.issuer("evil.example", "https://runway.example.com/"), "https://runway.example.com")
         self.assertEqual(self.issuer("127.0.0.1:8765", "https://runway.example.com"), "https://runway.example.com")
         self.assertEqual(self.issuer("x", "http://nas.local:8765"), "http://nas.local:8765")
-        self.assertIsNone(self.issuer("127.0.0.1", "http://runway.example.com"))   # plain http on the internet: no
+        self.assertIsNone(self.issuer("127.0.0.1", "http://runway.example.com"))
         for odd in ('https://runway.example.com/"x', "https://runway.example.com/a b", "https://user@runway.example.com", "ftp://x.example"):
             with self.subTest(public=odd):
                 self.assertIsNone(self.issuer("127.0.0.1", odd))
@@ -127,7 +127,7 @@ class ValueTests(unittest.TestCase):
     def test_redirect_matching(self):
         reg = ["https://claude.ai/cb", "http://127.0.0.1:1234/callback"]
         self.assertTrue(mcp_oauth.redirect_matches(reg, "https://claude.ai/cb"))
-        self.assertTrue(mcp_oauth.redirect_matches(reg, "http://127.0.0.1:5555/callback"))    # a loopback port may differ
+        self.assertTrue(mcp_oauth.redirect_matches(reg, "http://127.0.0.1:5555/callback"))
         self.assertTrue(mcp_oauth.redirect_matches(reg, "http://127.0.0.1/callback"))
         for bad in ("https://claude.ai/cb/", "https://claude.ai/cb?x=1", "https://claude.ai:443/cb", "https://CLAUDE.ai/cb",
                     "http://localhost:1234/callback", "http://127.0.0.1:1234/callback/x", "http://127.0.0.1:1234/callback#x",
@@ -165,7 +165,7 @@ class ValueTests(unittest.TestCase):
     def test_pkce(self):
         self.assertTrue(mcp_oauth.pkce_ok(VERIFIER, CHALLENGE))
         self.assertFalse(mcp_oauth.pkce_ok("w" * 50, CHALLENGE))
-        self.assertFalse(mcp_oauth.pkce_ok("short", challenge("short")))           # under 43 characters
+        self.assertFalse(mcp_oauth.pkce_ok("short", challenge("short")))
         self.assertFalse(mcp_oauth.pkce_ok(None, CHALLENGE))
 
     def test_with_params_keeps_the_query(self):
@@ -218,20 +218,16 @@ class RegistrationTests(Db):
         gid = self.conn.execute(insert(OAuthGrant).values(client_id=approved["client_id"], scope="read", resource=RES,
                                                           created=1001)).lastrowid
         self.conn.execute(insert(OAuthToken).values(token_hash="h", kind="refresh", grant_id=gid, created=1001, expires=9e12))
-        # A burst of registrations while an app is connecting (registered, waiting for the consent page) can't push
-        # it out: apps registered within CONSENT_TTL are all kept.
         burst = 1000 + mcp_oauth.CONSENT_TTL + 10
         for i in range(60):
             mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=burst + i / 100)
         self.assertEqual(self.count(OAuthClient), 62)
         self.assertIsNotNone(mcp_oauth.get_client(self.conn, first["client_id"]))
-        # Once they've had their chance, at most fifty of them stay.
         later = burst + mcp_oauth.CONSENT_TTL + 10
         mcp_oauth.register(self.conn, {"redirect_uris": ["https://d.example/cb"]}, now=later)
-        self.assertEqual(self.count(OAuthClient), 51)                         # 50 waiting (the new one among them), and the approved one
-        self.assertIsNone(mcp_oauth.get_client(self.conn, first["client_id"]))    # the oldest went first
+        self.assertEqual(self.count(OAuthClient), 51)
+        self.assertIsNone(mcp_oauth.get_client(self.conn, first["client_id"]))
         self.assertIsNotNone(mcp_oauth.get_client(self.conn, approved["client_id"]))
-        # ... and the burst itself is bounded, however fresh.
         with mock.patch.object(mcp_oauth, "MAX_UNCONSENTED_ALL", 70):
             for i in range(30):
                 mcp_oauth.register(self.conn, {"redirect_uris": ["https://e.example/cb"]}, now=later + 1 + i / 100)
@@ -262,7 +258,7 @@ class ClientAuthTests(Db):
         self.assertTrue(self.auth({"client_id": basic["client_id"]}, self.basic(basic["client_id"], basic["client_secret"])))
         for form, header in (({"client_id": post["client_id"], "client_secret": "wrong"}, None),
                              ({"client_id": post["client_id"]}, None),
-                             ({}, self.basic(post["client_id"], post["client_secret"])),          # not the way it registered
+                             ({}, self.basic(post["client_id"], post["client_secret"])),
                              ({"client_id": basic["client_id"], "client_secret": basic["client_secret"]}, None),
                              ({}, self.basic(basic["client_id"], "wrong")),
                              ({"client_id": post["client_id"]}, self.basic(basic["client_id"], basic["client_secret"])),
@@ -270,7 +266,7 @@ class ClientAuthTests(Db):
             with self.subTest(form=form, header=header), self.assertRaises(OAuthError) as e:
                 self.auth(form, header)
             self.assertEqual(e.exception.status, 401)
-        with self.assertRaises(OAuthError) as e:   # two ways at once
+        with self.assertRaises(OAuthError) as e:
             self.auth({"client_secret": basic["client_secret"]}, self.basic(basic["client_id"], basic["client_secret"]))
         self.assertEqual(e.exception.error, "invalid_request")
 
@@ -287,7 +283,7 @@ class AuthorizeTests(Db):
                      {"redirect_uri": None}, {"redirect_uri": "https://claude.ai/api/mcp/auth_callback/"}):
             with self.subTest(over=over), self.assertRaises(PageError):
                 self.request(c, **over)
-        with self.assertRaises(PageError):   # a parameter twice
+        with self.assertRaises(PageError):
             mcp_oauth.check_authorize(self.conn, {"client_id": [c["client_id"]] * 2}, ISS)
 
     def test_other_mistakes_go_back_to_the_app(self):
@@ -302,7 +298,7 @@ class AuthorizeTests(Db):
 
     def test_consent_is_taken_once_and_expires(self):
         token = mcp_oauth.start_consent(self.conn, {"a": 1}, now=1000)
-        self.assertNotIn(token, json.dumps([dict(r) for r in self.conn.execute(select(OAuthConsent))]))   # a hash
+        self.assertNotIn(token, json.dumps([dict(r) for r in self.conn.execute(select(OAuthConsent))]))
         self.assertIsNone(mcp_oauth.take_consent(self.conn, token + "x", now=1001))
         self.assertEqual(mcp_oauth.take_consent(self.conn, token, now=1001), {"a": 1})
         self.assertIsNone(mcp_oauth.take_consent(self.conn, token, now=1001))
@@ -326,7 +322,7 @@ class TokenTests(Db):
         self.assertTrue(out["access_token"].startswith("rwa_") and out["refresh_token"].startswith("rwr_"))
         stored = json.dumps([list(r) for r in self.conn.execute(select(OAuthToken))] + [list(r) for r in self.conn.execute(select(OAuthCode))])
         for secret in (out["access_token"], out["refresh_token"], code):
-            self.assertNotIn(secret, stored)                                      # only hashes are kept
+            self.assertNotIn(secret, stored)
         access = mcp_access.resolve_bearer(self.conn, "Bearer " + out["access_token"], RES)
         self.assertEqual((access.scopes, access.who), ({"read", "churning:write"}, "me@example.com"))
 
@@ -342,7 +338,7 @@ class TokenTests(Db):
                 self.assertIn(e.exception.error, ("invalid_grant", "invalid_target"))
         code, _ = self.code(c)
         with self.assertRaises(OAuthError) as e:
-            self.exchange(other["client_id"], code)                              # another app's code
+            self.exchange(other["client_id"], code)
         self.assertEqual(e.exception.error, "invalid_grant")
         code, _ = self.code(c)
         with self.assertRaises(OAuthError) as e:
@@ -382,7 +378,7 @@ class TokenTests(Db):
         third = self.refresh(c["client_id"], second["refresh_token"])
         self.assertIsNotNone(mcp_access.resolve_bearer(self.conn, "Bearer " + third["access_token"], RES))
         with self.assertRaises(OAuthError) as e:
-            self.refresh(c["client_id"], first["refresh_token"])                 # replayed: someone else has it
+            self.refresh(c["client_id"], first["refresh_token"])
         self.assertEqual(e.exception.error, "invalid_grant")
         self.assertEqual(self.conn.execute(select(OAuthGrant.revoked_reason)).fetchone()[0], "refresh_reuse")
         self.assertIsNone(mcp_access.resolve_bearer(self.conn, "Bearer " + third["access_token"], RES))
@@ -397,11 +393,11 @@ class TokenTests(Db):
                                 (c["client_id"], {"refresh_token": out["access_token"]})):
             with self.subTest(over=over), self.assertRaises(OAuthError):
                 self.refresh(client_id, out["refresh_token"], **over)
-        again = self.refresh(c["client_id"], out["refresh_token"], scope="read")   # still good after all that
+        again = self.refresh(c["client_id"], out["refresh_token"], scope="read")
         self.conn.execute(update(OAuthToken)
                           .where(OAuthToken.consumed.is_(None), OAuthToken.kind == "refresh").values(expires=1))
         with self.assertRaises(OAuthError) as e:
-            self.refresh(c["client_id"], again["refresh_token"])                  # expired
+            self.refresh(c["client_id"], again["refresh_token"])
         self.assertEqual(e.exception.error, "invalid_grant")
 
     def test_access_tokens_expire_and_belong_to_one_resource(self):
@@ -428,7 +424,7 @@ class TokenTests(Db):
         c, other = self.client(), self.client()
         out = self.tokens(c)
         client = mcp_oauth.get_client(self.conn, c["client_id"])
-        mcp_oauth.revoke(self.conn, mcp_oauth.get_client(self.conn, other["client_id"]), out["refresh_token"])   # not its token
+        mcp_oauth.revoke(self.conn, mcp_oauth.get_client(self.conn, other["client_id"]), out["refresh_token"])
         mcp_oauth.revoke(self.conn, client, "rwr_unknown")
         mcp_oauth.revoke(self.conn, client, None)
         self.assertIsNotNone(mcp_access.resolve_bearer(self.conn, "Bearer " + out["access_token"], RES))
@@ -441,7 +437,7 @@ class TokenTests(Db):
     def test_connections(self):
         c = self.client()
         self.tokens(c, frozenset({"read", "churning:write"}))
-        self.code(c)                                                              # approved, but never traded for tokens
+        self.code(c)
         got = mcp_oauth.connections(self.conn)
         self.assertEqual([(g["client"], g["who"], g["scope"]) for g in got], [("Claude", "me@example.com", ["read", "churning:write"])])
         self.assertTrue(mcp_oauth.revoke_grant(self.conn, got[0]["id"], "revoked_in_settings"))
@@ -494,17 +490,17 @@ class ApproverTests(Db):
         theirs, theirs_out = self.connect("sub-partner", "partner@example.com")
         self.assertTrue(self.works(mine_out) and self.works(theirs_out))
         os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
-        self.assertFalse(self.works(mine_out))                                     # the very next request
+        self.assertFalse(self.works(mine_out))
         self.assertEqual(self.reason(mine), "user_removed")
-        self.assertTrue(self.works(theirs_out))                                    # still allowed: untouched
+        self.assertTrue(self.works(theirs_out))
         self.assertIsNone(self.reason(theirs))
-        with self.assertRaises(OAuthError) as e:                                   # and no new tokens
+        with self.assertRaises(OAuthError) as e:
             mcp_oauth.token(self.conn, mcp_oauth.get_client(self.conn, mine["client_id"]),
                             {"grant_type": "refresh_token", "refresh_token": mine_out["refresh_token"]}, ISS)
         self.assertEqual(e.exception.error, "invalid_grant")
         self.assertEqual(self.tokens_of(mine), 0)
         self.assertEqual([c["who"] for c in mcp_oauth.connections(self.conn)], ["partner@example.com"])
-        os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com,partner@example.com"   # put back: still ended (reconnect)
+        os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com,partner@example.com"
         self.assertFalse(self.works(mine_out))
 
     def test_refresh_is_refused_even_before_the_next_request(self):
@@ -512,7 +508,7 @@ class ApproverTests(Db):
         os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
         with self.assertRaises(OAuthError) as e:
             mcp_oauth._refresh(self.conn, mcp_oauth.get_client(self.conn, mine["client_id"]),
-                               {"refresh_token": out["refresh_token"]}, RES, time.time())   # straight to the check, without the sweep
+                               {"refresh_token": out["refresh_token"]}, RES, time.time())
         self.assertEqual(e.exception.error, "invalid_grant")
         self.assertEqual((self.reason(mine), self.tokens_of(mine)), ("user_removed", 0))
 
@@ -535,7 +531,7 @@ class ApproverTests(Db):
         self.assertEqual(self.count(OAuthGrant, OAuthGrant.revoked_reason == "user_removed"), 1)
 
     def test_without_sign_in_grants_keep_working(self):
-        self.addCleanup(sign_in().stop)                                            # no OIDC at all ("local")
+        self.addCleanup(sign_in().stop)
         c, out = self.connect(None, None)
         self.assertTrue(self.works(out))
         mcp_oauth.housekeeping(self.conn)
@@ -546,7 +542,7 @@ class ApproverTests(Db):
         self.addCleanup(sign_in().stop)
         c, out = self.connect(None, None)
         self.addCleanup(sign_in(**OIDC, OIDC_ALLOWED_EMAILS="me@example.com").stop)
-        self.assertFalse(self.works(out))                                          # nobody on the list approved it
+        self.assertFalse(self.works(out))
         self.assertEqual(self.reason(c), "user_removed")
 
     def test_anyone_allowed_means_nobody_is_cut_off(self):
@@ -555,22 +551,20 @@ class ApproverTests(Db):
         self.assertTrue(self.works(out))
 
     def test_with_groups_an_approval_lasts_as_long_as_a_sign_in(self):
-        # Groups are known only at sign-in, so like a browser session the approval ends RUNWAY_SESSION_DAYS after its
-        # approver last signed in: someone taken out of the group can't keep an assistant going.
         self.addCleanup(sign_in(**OIDC, OIDC_ALLOWED_GROUPS="finance", RUNWAY_SESSION_DAYS="14").stop)
         now = time.time()
-        for sub in ("recent", "lapsed", "gone"):                                  # all signed in when they approved
+        for sub in ("recent", "lapsed", "gone"):
             self.conn.execute(insert(User).values(sub=sub, email=sub + "@example.com", last_seen=now - 60))
         outs = {sub: self.connect(sub, sub + "@example.com") for sub in ("recent", "lapsed", "gone")}
         self.assertTrue(all(self.works(out) for _c, out in outs.values()))
         self.conn.execute(update(User).where(User.sub == "recent").values(last_seen=now - 13 * 86400))
-        self.conn.execute(update(User).where(User.sub == "lapsed").values(last_seen=now - 15 * 86400))   # no sign-in since
+        self.conn.execute(update(User).where(User.sub == "lapsed").values(last_seen=now - 15 * 86400))
         self.conn.execute(delete(User).where(User.sub == "gone"))
         self.assertTrue(self.works(outs["recent"][1]))
         self.assertFalse(self.works(outs["lapsed"][1]))
         self.assertFalse(self.works(outs["gone"][1]))
         self.assertEqual([self.reason(outs[s][0]) for s in ("recent", "lapsed", "gone")], [None, "sign_in_lapsed", "sign_in_lapsed"])
-        with self.assertRaises(OAuthError):                                        # nor a new code, for someone lapsed
+        with self.assertRaises(OAuthError):
             self.connect("lapsed", "lapsed@example.com")
 
 
@@ -583,7 +577,7 @@ class HousekeepingTests(Db):
         fresh = mcp_oauth.register(self.conn, {"redirect_uris": ["https://b.example/cb"]}, now=now - 60)
         waiting = mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=now - 20 * 3600)
         stale = mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=now - 25 * 3600)
-        unused_code, _ = self.code(fresh, now=now - 3600)                          # approved an hour ago, never exchanged
+        unused_code, _ = self.code(fresh, now=now - 3600)
         mcp_oauth.start_consent(self.conn, {}, now=now - 3600)
         mcp_oauth.start_consent(self.conn, {}, now=now - 60)
         spent = self.tokens(mcp_oauth.register(self.conn, {"redirect_uris": ["https://d.example/cb"]}, now=now - 100 * day), now=now - 40 * day)
@@ -592,12 +586,12 @@ class HousekeepingTests(Db):
         ids = {r[0] for r in self.conn.execute(select(OAuthClient.id))}
         self.assertIn(live["client_id"], ids)
         self.assertIn(fresh["client_id"], ids)
-        self.assertIn(waiting["client_id"], ids)                                  # never approved, but under a day old: you can come back
-        self.assertNotIn(stale["client_id"], ids)                                 # never approved, over a day old
-        self.assertEqual(self.count(OAuthCode), 0)                            # the expired code
+        self.assertIn(waiting["client_id"], ids)
+        self.assertNotIn(stale["client_id"], ids)
+        self.assertEqual(self.count(OAuthCode), 0)
         self.assertEqual(self.count(OAuthConsent), 1)
-        self.assertEqual(self.count(OAuthGrant), 2)                           # the live one; the old unexchanged one went (fresh's)
-        self.assertEqual(self.count(OAuthToken), 3)                           # the 40-day-old access token went, its refresh stays
+        self.assertEqual(self.count(OAuthGrant), 2)
+        self.assertEqual(self.count(OAuthToken), 3)
         self.assertEqual(self.count(OAuthToken, OAuthToken.kind == "access"), 1)
 
 

@@ -129,7 +129,7 @@ describe("card form", () => {
   it("offers portal-only just for travel rates", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
-    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();   // no category yet
+    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Restaurants");
     expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Travel");
@@ -149,7 +149,7 @@ describe("card form", () => {
     const body = bodyOf(calls("/api/churning/cards")[0])!;
     expect(body).toMatchObject({ owner: "Alex", product: "Venture X", portal_name: "Capital One Travel" });
     expect(body.rates).toEqual([{ category: "*", multiplier: 1, portal_only: false }, { category: "Hotels", multiplier: 10, portal_only: true }]);
-    expect(body).not.toHaveProperty("base_rate");   // it travels inside rates
+    expect(body).not.toHaveProperty("base_rate");
   });
 
   it("shows the server's message when the rates are refused", async () => {
@@ -158,7 +158,7 @@ describe("card form", () => {
     await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a category for each earning rate");   // by the Add button
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a category for each earning rate");
     expect(toast.error).not.toHaveBeenCalled();
   });
 
@@ -241,10 +241,10 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
       const button = screen.getByRole("button", { name: "Fill in the rest with AI" });
-      expect(button).toBeDisabled();   // it needs a name to ask about
+      expect(button).toBeDisabled();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(button);
-      expect(bodyOf(calls("/api/churning/suggest")[0])).toEqual({ issuer: "chase", product: "Sapphire Reserve" });   // the bank and the name only
+      expect(bodyOf(calls("/api/churning/suggest")[0])).toEqual({ issuer: "chase", product: "Sapphire Reserve" });
       expect(await screen.findByTestId("ai-marked")).toHaveTextContent("Suggested by AI, check before saving");
       expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire");
       expect(screen.getByLabelText("Earns")).toHaveValue("ur");
@@ -252,17 +252,17 @@ describe("card form", () => {
       expect(screen.getByLabelText("Category of rate 1")).toHaveValue("Travel");
       expect(screen.getByLabelText("The portal's name")).toHaveValue("Chase Travel");
       expect(screen.getByLabelText("Suggested benefit 1")).toHaveValue("Travel credit");
-      expect(screen.getAllByText(/Suggested by AI, check before saving/).length).toBeGreaterThan(1);   // the banner, and the benefit
-      for (const id of ["rates", "benefits", "more"]) expect((screen.getByTestId(`section-${id}`) as HTMLDetailsElement).open).toBe(true);   // the ones that got values
+      expect(screen.getAllByText(/Suggested by AI, check before saving/).length).toBeGreaterThan(1);
+      for (const id of ["rates", "benefits", "more"]) expect((screen.getByTestId(`section-${id}`) as HTMLDetailsElement).open).toBe(true);
       expect((screen.getByTestId("section-bonus") as HTMLDetailsElement).open).toBe(false);
-      expect(calls("/api/churning/cards")).toHaveLength(0);   // nothing saved yet
+      expect(calls("/api/churning/cards")).toHaveLength(0);
       await userEvent.clear(screen.getByLabelText("Amount of Travel credit"));
-      await userEvent.type(screen.getByLabelText("Amount of Travel credit"), "250");   // editable
+      await userEvent.type(screen.getByLabelText("Amount of Travel credit"), "250");
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
       await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
       const body = bodyOf(calls("/api/churning/cards")[0])!;
       expect(body).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: "550", portal_name: "Chase Travel" });
-      expect(body.benefits).toEqual([{ name: "Travel credit", kind: "credit", amount: 250, period: "annual" }]);   // with the card, not after it
+      expect(body.benefits).toEqual([{ name: "Travel credit", kind: "credit", amount: 250, period: "annual" }]);
       expect(calls("/api/churning/cards/7/benefits")).toHaveLength(0);
     });
 
@@ -298,13 +298,13 @@ describe("card form", () => {
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
-      await userEvent.type(screen.getByLabelText(/^Bonus \(/), "60000");   // typed after the fill
+      await userEvent.type(screen.getByLabelText(/^Bonus \(/), "60000");
       await userEvent.clear(screen.getByLabelText(/Family/));
-      await userEvent.type(screen.getByLabelText(/Family/), "Sapphire cards");   // an AI field you corrected
+      await userEvent.type(screen.getByLabelText(/Family/), "Sapphire cards");
       await userEvent.click(screen.getByRole("button", { name: "Discard" }));
       expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("60000");
       expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire cards");
-      expect(screen.getByLabelText("Earns")).toHaveValue("cash");   // untouched AI fields go back
+      expect(screen.getByLabelText("Earns")).toHaveValue("cash");
       expect(screen.getByLabelText("Annual fee")).toHaveValue("");
       expect(screen.queryByLabelText("Category of rate 1")).toBeNull();
     });
@@ -327,7 +327,7 @@ describe("card form", () => {
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
       await userEvent.clear(screen.getByLabelText("Annual fee"));
-      await userEvent.type(screen.getByLabelText("Annual fee"), "95");   // the AI said 550
+      await userEvent.type(screen.getByLabelText("Annual fee"), "95");
       await userEvent.click(screen.getByRole("button", { name: "Save these" }));
       await waitFor(() => expect(calls("/api/churning/cards/1/benefits")).toHaveLength(1));
       const saved = calls("/api/churning/cards/1").map(bodyOf).find((b) => "family" in (b as object));
@@ -402,7 +402,7 @@ describe("card form", () => {
       expect(screen.getByText("Enter the day it was opened.")).toBeInTheDocument();
       expect(product).toHaveFocus();
       expect(calls("/api/churning/cards")).toHaveLength(0);
-      await userEvent.type(product, "Venture X");   // fixing a field clears its note
+      await userEvent.type(product, "Venture X");
       expect(product).not.toHaveAttribute("aria-invalid");
       expect(screen.queryByText(/Enter the card’s name/)).toBeNull();
     });
@@ -422,7 +422,7 @@ describe("card form", () => {
       await waitFor(() => expect(section("rates").open).toBe(true));
       expect(screen.getByTestId("error-rates")).toHaveTextContent("Enter the points per dollar on Travel");
       expect(screen.getByTestId("flagged-rates")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();   // try again
+      expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
       vi.mocked(api).mockResolvedValue({ id: 3 } as never);
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
       await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
@@ -451,7 +451,7 @@ describe("card form", () => {
       expect(calls(/remove/)).toHaveLength(0);
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
       expect(calls(/remove/)).toHaveLength(0);
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());   // closed, and the page clickable again
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
       await userEvent.click(screen.getByRole("button", { name: "Delete card" }));
       await userEvent.click(within(await screen.findByRole("dialog", { name: "Delete Venture X?" })).getByRole("button", { name: "Delete card" }));

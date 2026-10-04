@@ -45,7 +45,7 @@ describe("undoable", () => {
     undoable("Done", async () => { throw new Error("Already gone"); });
     await shown()[1].action.onClick();
     expect(toast.error).toHaveBeenCalledWith("Already gone");
-    expect(toast).toHaveBeenCalledTimes(1);   // only the original toast
+    expect(toast).toHaveBeenCalledTimes(1);
   });
 
   it("has words for a failure that has none", async () => {

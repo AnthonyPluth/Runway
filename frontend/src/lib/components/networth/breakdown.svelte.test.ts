@@ -54,7 +54,6 @@ describe("the breakdown", () => {
     await user.click(await screen.findByRole("button", { name: /^House, / }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).getByText(/\$340,000\.00 equity after Mortgage/)).toBeInTheDocument();
-    // The kind shows once, in the header; the value is one editable field, not a figure plus an "Update value" button.
     expect(within(dialog).getAllByText(/Home \/ property/)).toHaveLength(1);
     expect(within(dialog).queryByText(/\$540,000/)).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText(/^Value/)).toHaveValue("540000");
@@ -63,7 +62,7 @@ describe("the breakdown", () => {
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
     const confirm = await screen.findByRole("dialog", { name: "Remove House?" });
     expect(confirm).toHaveTextContent("Its value history goes with it");
-    expect(calls("/api/assets/7/remove")).toHaveLength(0);   // nothing happens until it's confirmed
+    expect(calls("/api/assets/7/remove")).toHaveLength(0);
     await user.click(within(confirm).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(calls("/api/assets/7/remove")).toHaveLength(1));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -92,7 +91,7 @@ describe("the breakdown", () => {
     await user.click(await screen.findByRole("button", { name: /^House, / }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).queryByLabelText(/^Value/)).not.toBeInTheDocument();
-    expect(within(dialog).getByText("$540,000.00")).toBeInTheDocument();   // the figure, not a field
+    expect(within(dialog).getByText("$540,000.00")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Update from Realie" })).toBeInTheDocument();
   });
 

@@ -10,10 +10,8 @@ import { benefit, card } from "./fixtures";
 import type { BankBonus, Benefit, ChurnCard, Currency, Eligibility, Five24, Wish } from "./types";
 
 const TODAY = "2026-09-29";
-// Dates in this year come without it, so the clock is fixed.
 beforeAll(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(`${TODAY}T12:00:00`)); });
 afterAll(() => vi.useRealTimers());
-// Dates come with non-breaking spaces (so they never wrap); compare them as plain text.
 const sp = (s: string) => s.replace(/\u00a0/g, " ");
 const e = (x: Partial<Eligibility>): Eligibility => ({ status: "now", on: null, why: "", override: false, ...x });
 
@@ -33,7 +31,7 @@ describe("churning helpers", () => {
 
   it("counts days and writes points one way", () => {
     expect(daysUntil("2026-10-01", TODAY)).toBe(2);
-    expect(daysUntil("2027-03-29", TODAY)).toBe(181);   // across a DST change, still whole days
+    expect(daysUntil("2027-03-29", TODAY)).toBe(181);
     expect(points(60000)).toBe("60,000");
     expect(points(75000.4)).toBe("75,000");
     expect(points(1250)).toBe("1,250");
@@ -112,7 +110,6 @@ describe("churning 2 helpers", () => {
     expect(ownerChoices(["Alex"], "Pat")).toEqual(["Alex", "Pat"]);
     expect(ownerChoices(["Alex", "Joint"], "Joint")).toEqual(["Alex"]);
     expect(ownerChoices(["Alex"], "Joint", true)).toEqual(["Alex", "Joint"]);
-    // alphabetical whatever order people signed in, an old name slotted in, and Joint still last
     expect(ownerChoices(["Sam", "alex", "Pat"], "Chris", true)).toEqual(["alex", "Chris", "Pat", "Sam", "Joint"]);
   });
 
@@ -123,7 +120,7 @@ describe("churning 2 helpers", () => {
     const g = currencyGroups(d as never);
     expect(g.map((x) => [x.label, x.currencies.map((c) => c.key)])).toEqual([["Bank points", ["ur"]], ["Airlines", ["aa", "ua"]], ["Other", ["mine"]]]);
     expect(sp(valueSource(cur("ur"), "2026-06-15"))).toBe("estimate (as of Jun 2026)");
-    expect(sp(valueSource(cur("ur"), "2026-09"))).toBe("estimate (as of Sep 2026)");   // the server dates them by month
+    expect(sp(valueSource(cur("ur"), "2026-09"))).toBe("estimate (as of Sep 2026)");
     expect(valueSource(cur("ur", { overridden: true }), "2026-06-15")).toBe("your value");
     expect(valueSource(cur("mine", { custom: true }), "2026-06-15")).toBe("your currency");
   });
@@ -135,15 +132,14 @@ describe("churning 2 helpers", () => {
     expect(benefitState(b({ kind: "other", amount: null, period_end: null }))).toBe("Not used this period");
     expect(benefitState(b({ kind: "other", amount: null, period_end: null, used_count: 3 }))).toBe("Used 3 times this period");
     expect(sp(benefitState(b({ kind: "other", amount: null, used_count: 1 })))).toBe("Used once this period · resets Dec 31");
-    // A perk: who gets in, and how often you've been; never "not used".
     expect(benefitState(b({ kind: "access", amount: null, guests: 2 }))).toBe("Cardholder + 2 guests");
     expect(benefitState(b({ kind: "access", amount: null, guests: 0, used_count: 2 }))).toBe("Cardholder only · used twice this period");
     expect(benefitState(b({ kind: "access", amount: null, guests: null, used_count: 1 }))).toBe("Used once this period");
-    expect(benefitState(b({ kind: "status", amount: null, guests: 1 }))).toBe("Included");   // guests are a lounge's, not status's
+    expect(benefitState(b({ kind: "status", amount: null, guests: 1 }))).toBe("Included");
     expect(canUse(b({}))).toBe(true);
     expect(canUse(b({ used: 300, remaining: 0 }))).toBe(false);
     expect(canUse(b({ kind: "other", amount: null, used_count: 1 }))).toBe(false);
-    expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(true);   // another lounge visit
+    expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(true);
   });
 
   it("words guests and uses, and orders a card's benefits credits first", () => {
@@ -166,11 +162,11 @@ describe("churning 2 helpers", () => {
     const c1 = benefit({ id: 8, name: "Capital One Lounges", kind: "access", amount: null, used: null, remaining: null, value_per_year: 0, used_count: 1 });
     const closedCard = card({ id: 2, status: "closed", benefits: [benefit({ id: 6, name: "Gone" })] });
     const b = benefitBoard([card({ benefits: [soon, later, open, done, off, pp, c1] }), closedCard]);
-    expect(b.expiring.map((r) => r.b.name)).toEqual(["Uber", "Lyft"]);   // soonest first
+    expect(b.expiring.map((r) => r.b.name)).toEqual(["Uber", "Lyft"]);
     expect(b.available.map((r) => r.b.name)).toEqual(["Hotel"]);
     expect(b.used.map((r) => r.b.name)).toEqual(["Dining"]);
-    expect(b.perks.map((r) => r.b.name)).toEqual(["Capital One Lounges", "Priority Pass lounges"]);   // on all year, used or not
-    expect([b.left, b.usedAmount, b.value]).toEqual([460, 250, 1000]);   // left 10+300+150; used 150+100; worth 300×3+100
+    expect(b.perks.map((r) => r.b.name)).toEqual(["Capital One Lounges", "Priority Pass lounges"]);
+    expect([b.left, b.usedAmount, b.value]).toEqual([460, 250, 1000]);
   });
 
   it("shows a score against what a planned item wants, and reorders everyone's plans as one list", () => {
@@ -180,16 +176,13 @@ describe("churning 2 helpers", () => {
     expect(scoreProgress(w(1, "Sam", 1, { min_score: 740 }), scores)).toBe("740 wanted · no score entered");
     expect(scoreProgress(w(1, "Alex", 1), scores)).toBeNull();
     const open = [w(1, "Alex", 1), w(2, "Sam", 2), w(3, "Alex", 3), w(4, "Alex", 4)];
-    expect(reorder(open, 3, -1)).toEqual([{ id: 3, priority: 2 }, { id: 2, priority: 3 }]);   // past Sam's: people alternate
+    expect(reorder(open, 3, -1)).toEqual([{ id: 3, priority: 2 }, { id: 2, priority: 3 }]);
     expect(reorder(open, 1, -1)).toEqual([]);
     expect(reorder(open, 4, 1)).toEqual([]);
     expect(splitWishes([w(1, "A", 1), w(2, "A", 2, { status: "applied" }), w(3, "A", 3, { status: "dropped" }), w(4, "A", 4, { status: "ready" })]).open.map((x) => x.id)).toEqual([1, 4]);
-    // Everyone's in one list, in the server's order, not grouped by person.
     expect(splitWishes([w(1, "Alex", 1), w(2, "Sam", 2), w(3, "Alex", 3)]).open.map((x) => x.id)).toEqual([1, 2, 3]);
-    // Only Alex's shown: moving one past the other of Alex's keeps Sam's where it is in the shared order.
     const alex = open.filter((x) => x.owner === "Alex");
     expect(reorder(open, 3, -1, alex)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 3 }]);
-    // Priorities from before (each person's own 1, 2…) are numbered afresh on the first move.
     expect(reorder([w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2)], 2, 1)).toEqual([{ id: 2, priority: 3 }]);
     expect(balanceText(1234567)).toBe("1,234,567");
     expect(balanceText(0)).toBe("0");
@@ -251,7 +244,7 @@ describe("urgency", () => {
   });
 
   it("works out the spending a bonus still needs each day, rounded up, and nothing once it is done or late", () => {
-    expect(perDayNeeded(1000, "2026-10-09", TODAY)).toBe("$100/day needed");   // 10 days
+    expect(perDayNeeded(1000, "2026-10-09", TODAY)).toBe("$100/day needed");
     expect(perDayNeeded(1001, "2026-10-09", TODAY)).toBe("$101/day needed");
     expect(perDayNeeded(0, "2026-10-09", TODAY)).toBe("");
     expect(perDayNeeded(500, TODAY, TODAY)).toBe("");
@@ -260,14 +253,14 @@ describe("urgency", () => {
 
   it("counts annual fees within 30 days, as the rows do", () => {
     const fee = (id: number, due: string) => card({ id, fee_due: due, annual_fee: 100 });
-    expect(feesDue([fee(1, "2026-10-29"), fee(2, "2026-10-30"), fee(3, "2026-09-01")], TODAY)).toEqual({ total: 200, count: 2 });   // day 30 counts, day 31 doesn't, a late one does
+    expect(feesDue([fee(1, "2026-10-29"), fee(2, "2026-10-30"), fee(3, "2026-09-01")], TODAY)).toEqual({ total: 200, count: 2 });
   });
 });
 
 describe("small helpers", () => {
   it("says the year against the server's day when it is given, else the browser's", () => {
-    expect(sp(fullDate("2027-02-03", "2027-01-02"))).toBe("Feb 3");           // the server's day is already in 2027
-    expect(sp(fullDate("2027-02-03"))).toBe("Feb 3, 2027");                   // the browser's clock is still in 2026
+    expect(sp(fullDate("2027-02-03", "2027-01-02"))).toBe("Feb 3");
+    expect(sp(fullDate("2027-02-03"))).toBe("Feb 3, 2027");
     expect(sp(fullDate("2026-12-03", "2027-01-02"))).toBe("Dec 3, 2026");
     expect(sp(fullDate("2026-12-03", "2026-09-30"))).toBe("Dec 3");
     expect(sp(five24Line({ count: 3, under: true, under_on: null, next_fall_off: "2027-03-02" } as Five24, "2027-01-02").next)).toBe("2/24 on Mar 2");
@@ -290,7 +283,7 @@ describe("small helpers", () => {
     const [a, b] = [{ name: "a" }, { name: "b" }];
     const [ka, kb] = [rowKey(a), rowKey(b)];
     expect(ka).not.toBe(kb);
-    expect(rowKey(a)).toBe(ka);   // the same row, after the one before it was removed
+    expect(rowKey(a)).toBe(ka);
   });
 
   it("gives a status a tone and an attribute none", () => {

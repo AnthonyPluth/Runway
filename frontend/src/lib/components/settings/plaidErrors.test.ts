@@ -20,6 +20,6 @@ describe("a Plaid connection's error, in words", () => {
   it("says anything else plainly, keeping what Plaid said as the detail", () => {
     expect(plaidProblem("SOMETHING_NEW")).toEqual({ text: "Couldn’t sync; Runway will try again", reconnect: false, detail: "SOMETHING_NEW" });
     expect(plaidProblem("Couldn't reach Plaid: timed out").detail).toBe("Couldn't reach Plaid: timed out");
-    expect(plaidProblem("toString").reconnect).toBe(false);          // not mistaken for something on the object
+    expect(plaidProblem("toString").reconnect).toBe(false);
   });
 });

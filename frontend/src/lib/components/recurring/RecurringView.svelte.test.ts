@@ -30,11 +30,9 @@ const serve = (items: RecurringItem[], suggestions: Suggestion[] = [], more: Rec
     return { linked: 0 } as never;
   });
 
-// Today is Friday Mar 20, 2026 (only the date is faked: timers stay real for the events the tests fire).
 beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 2, 20, 12)); });
 afterEach(() => { vi.useRealTimers(); });
 
-// The amount field (other labels say "Amount" too); a text box with commas until you're in it, so found by its label.
 const AMOUNT = { selector: 'input[name="amount"]' };
 
 describe("Recurring page", () => {
@@ -160,7 +158,7 @@ describe("Recurring page", () => {
     serve([]);
     render(Recurring);
     expect(await screen.findByRole("heading", { name: "Add a recurring item" })).toBeInTheDocument();
-    expect(screen.queryByText(/No recurring items yet/)).not.toBeInTheDocument();   // no empty-state prose: the form is the empty state
+    expect(screen.queryByText(/No recurring items yet/)).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
@@ -228,7 +226,6 @@ describe("Recurring page", () => {
       const { container } = render(Recurring);
       await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
       expect(container.querySelector("details")).not.toHaveAttribute("open");
-      // The panel isn't inside the item's summary, so clicking its text doesn't open the item (or close the panel).
       const panel = await screen.findByRole("dialog", { name: "Logo for Rent" });
       expect(container.querySelector("summary")!.contains(panel)).toBe(false);
       await userEvent.click(within(panel).getByText("Logo for Rent"));
@@ -250,7 +247,7 @@ describe("Recurring page", () => {
       await screen.findByRole("heading", { name: "Add a recurring item" });
     };
     const posted = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/recurring" && (c[1] as { method?: string } | undefined)?.method === "POST");
-    const addButton = () => screen.getAllByRole("button", { name: /^(Add|Adding…)$/ }).at(-1)!;   // the form's; the page header has one too
+    const addButton = () => screen.getAllByRole("button", { name: /^(Add|Adding…)$/ }).at(-1)!;
 
     it("adds an item and says how many past transactions it matched; money out is the default, stored negative", async () => {
       await open();
@@ -307,7 +304,6 @@ describe("Recurring page", () => {
       await open();
       expect(screen.getByText("More options")).toBeInTheDocument();
       expect(screen.getByText("Checking · always the amount above · matches the name")).toBeInTheDocument();
-      // What the merchant text is, in its placeholder rather than a tooltip.
       expect(screen.getByRole("textbox", { name: /Merchant text/ })).toHaveAttribute("placeholder", "Text in the bank’s description");
       expect(screen.getByRole("textbox", { name: /Merchant text/ })).not.toHaveAttribute("title");
       expect(screen.getByLabelText("Ends on")).toHaveValue("");
@@ -332,7 +328,7 @@ describe("Recurring page", () => {
       expect(name).toHaveFocus();
       expect(posted()).toHaveLength(0);
       await userEvent.type(name, "Gym");
-      expect(name).not.toHaveAttribute("aria-invalid");   // and it clears as you fix it
+      expect(name).not.toHaveAttribute("aria-invalid");
     });
 
     it("needs the dates for a schedule of specific dates", async () => {
@@ -382,7 +378,6 @@ describe("Recurring page", () => {
     const form = () => within(screen.getByRole("heading", { name: "Add a recurring item" }).closest<HTMLElement>("section")!);
     const posts = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { method?: string } | undefined)?.method === "POST");
 
-    // With items, suggestions sit below them, collapsed to a line.
     const showSpotted = async () => userEvent.click(await screen.findByRole("button", { name: "Show" }));
 
     it("collapses what's spotted to a line under the items, and Show lists them", async () => {
@@ -498,7 +493,7 @@ describe("Recurring page", () => {
       await userEvent.click(screen.getByRole("button", { name: "Show" }));
       expect(screen.getByText("monthly · Checking")).toBeInTheDocument();
       expect(screen.getByText("weekly · Checking")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Restore Gym" })).toBeInTheDocument();   // by its name, when its transactions still give one
+      expect(screen.getByRole("button", { name: "Restore Gym" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Restore hulu" }));
       expect(await screen.findByText(/1 spotted in your history/)).toBeInTheDocument();
       expect(posts("/api/recurring/suggestions/restore")[0][1]).toMatchObject({ body: { key: "a1|hulu|monthly" } });
@@ -744,7 +739,7 @@ describe("Recurring page", () => {
       await userEvent.tab();
       await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(1));
       expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { end_date: "2026-12-31" } });
-      await fireEvent.input(ends, { target: { value: "2026-01-01" } });   // as a date picker sets it
+      await fireEvent.input(ends, { target: { value: "2026-01-01" } });
       await fireEvent.change(ends);
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not saved yet. It ends before it starts."));
       expect(ends).toHaveAttribute("aria-invalid", "true");
@@ -771,7 +766,7 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
       await userEvent.click(screen.getByText("Paycheck"));
-      const [pay, rent] = screen.getAllByLabelText(/Amount/, AMOUNT);   // money in is listed first
+      const [pay, rent] = screen.getAllByLabelText(/Amount/, AMOUNT);
       expect(rent).toHaveValue("1500");
       expect(pay).toHaveValue("3000");
       const [payOut, rentOut] = screen.getAllByRole("radio", { name: "Money out" });
@@ -818,7 +813,7 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
       expect(screen.getByText("The last payments were about $2,100.47, not $5,000.00.")).toBeInTheDocument();
-      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());   // nothing changes until you say so
+      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());
       await userEvent.click(screen.getByRole("button", { name: "Use $2,100.47" }));
       await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ method: "POST", body: expect.objectContaining({ amount: 2100.47, amount_mode: "fixed" }) })));
       expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("2100.47");
@@ -843,7 +838,7 @@ describe("Recurring page", () => {
       const amount = screen.getByLabelText(/Amount/, AMOUNT);
       await userEvent.clear(amount);
       await userEvent.type(amount, "2500");
-      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();   // not "about $2,100, not $2,500"
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
       await userEvent.clear(amount);
       await userEvent.type(amount, "5000");
       expect(screen.getByText("The last payments were about $2,100.47, not $5,000.00.")).toBeInTheDocument();
@@ -879,7 +874,7 @@ describe("Recurring page", () => {
       expect(hi).toHaveAttribute("aria-invalid", "true");
       expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());
       await userEvent.clear(hi);
-      await userEvent.tab();   // blank: any amount up from $1,500
+      await userEvent.tab();
       await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ body: expect.objectContaining({ amount_min: 1500, amount_max: null }) })));
     });
 
@@ -935,7 +930,6 @@ describe("Recurring page", () => {
       await userEvent.click(await screen.findByText("Rent"));
       await userEvent.click(screen.getByRole("button", { name: "Show matched transactions" }));
       expect(await screen.findByText("RENT PAYMENT")).toBeInTheDocument();
-      // How each got linked (nothing for one from before Runway kept it).
       const rows = screen.getAllByRole("row");
       expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining("RENT PAYMENTlinked by you"),
         expect.stringContaining("RENT PMTmatched automatically"), expect.stringMatching(/OLD RENT-?\$1,500/)]);

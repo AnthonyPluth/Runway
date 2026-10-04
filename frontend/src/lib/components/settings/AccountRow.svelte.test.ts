@@ -44,7 +44,7 @@ describe("choosing the forecast's account, from Settings", () => {
     render(AccountRow, { a: acct(), cash: [chk, acct()], byName: {} });
     expect(screen.queryByText("Forecast")).toBeNull();
     const button = within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Use for the forecast" });
-    expect(button.closest("summary")).toBeNull();   // in the opened row, not on its line
+    expect(button.closest("summary")).toBeNull();
     await userEvent.click(button);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { primary_account: "sav" } }));
     expect(refreshState).toHaveBeenCalled();
@@ -114,14 +114,13 @@ describe("a card's statement, from Settings", () => {
     const section = screen.getByRole("region", { name: "Statement" });
     expect(section).toHaveTextContent("$500.00 · closed Sep 10 · due Oct 21");
     expect(section).toHaveTextContent("Entered by you");
-    expect(within(section).queryByRole("form")).toBeNull();     // behind "Enter the next statement"
+    expect(within(section).queryByRole("form")).toBeNull();
     await userEvent.click(within(section).getByRole("button", { name: "Enter the next statement" }));
     expect(within(section).getByRole("form", { name: "Enter a statement" })).toBeInTheDocument();
     const earlier = within(section).getByRole("list", { name: "Earlier statements" });
     expect(earlier).toHaveTextContent("$300.00 · closed Aug 10 · due Sep 21 · min $25.00");
     await userEvent.click(within(earlier).getByRole("button", { name: /^Delete the statement that closed Aug.10$/ }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/cc/statements/2026-08-10/remove", { method: "POST" }));
-    // Undo enters it again as it was
     expect(toast).toHaveBeenCalledWith("Statement deleted", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
     await undoOf()();
     expect(api).toHaveBeenLastCalledWith("/api/accounts/cc/statements", { method: "POST",
@@ -173,7 +172,6 @@ describe("deleting an account, from Settings", () => {
     expect(dialog).toHaveTextContent("SimpleFIN and Plaid leave it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.");
     expect(dialog).not.toHaveTextContent("can’t be undone");
     expect(within(dialog).getByRole("link", { name: "Download a backup first" })).toHaveAttribute("href", "#setup/advanced");
-    // more than 50 transactions: the name, typed
     const confirm = within(dialog).getByRole("button", { name: "Delete" });
     expect(confirm).toBeDisabled();
     await userEvent.type(within(dialog).getByRole("textbox"), "Savings");
@@ -275,6 +273,6 @@ describe("the expanded row", () => {
     show(acct());
     const box = screen.getByRole("region", { name: "Options" });
     expect(within(box).getByRole("checkbox", { name: "Count in net worth" })).toBeInTheDocument();
-    expect(within(box).queryByRole("checkbox", { name: /Hide/ })).toBeNull();   // Hide is an action at the top
+    expect(within(box).queryByRole("checkbox", { name: /Hide/ })).toBeNull();
   });
 });

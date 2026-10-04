@@ -55,7 +55,7 @@ class Pinned(unittest.TestCase):
     maxDiff = None
     @classmethod
     def setUpClass(cls):
-        own_database(cls)   # (OIDC is off here: everyone is "local"; SignInTests turn it on)
+        own_database(cls)
         for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER"):
             os.environ.pop(k, None)
         cls.static_dir = tempfile.TemporaryDirectory()
@@ -94,7 +94,6 @@ class Pinned(unittest.TestCase):
         self.assertEqual((code, json.loads(data)), (status, reply))
         self.assertEqual(heads, json_answer(len(data), *extra))
 
-    # ------------------------------------------------------------------------------------------ the API
 
     def test_a_json_answer(self):
         code, heads, data = self.send("GET", "/api/accounts")
@@ -111,14 +110,14 @@ class Pinned(unittest.TestCase):
         self.assertEqual(heads, [("Server", "Runway "), ("Content-Type", "application/gzip"),
                                  ("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"'),
                                  ("Content-Length", str(len(data))), ("Cache-Control", "no-store"), *security()])
-        self.assertTrue(self.last_backup())   # "Last backup" in Settings → Data, once it's sent
+        self.assertTrue(self.last_backup())
         with db.session() as conn:
             db.set_setting(conn, sk.LAST_BACKUP, None)
         code, heads, data = self.send("HEAD", "/api/backup")
         self.assertEqual((code, data), (200, b""))
         self.assertIsNone(self.last_backup(wait=0.5))
         with db.session() as conn:
-            self.assertIsNone(db.get_setting(conn, sk.LAST_BACKUP))   # nothing was downloaded
+            self.assertIsNone(db.get_setting(conn, sk.LAST_BACKUP))
 
     @staticmethod
     def last_backup(wait: float = 5.0) -> str | None:
@@ -175,7 +174,7 @@ class Pinned(unittest.TestCase):
         self.assertEqual((code, data), (304, b""))
         self.assertEqual(heads, [("Server", "Runway "), ("ETag", etag), *security()])
         self.assertEqual(self.send("HEAD", "/api/merchants/pin%3Apng/logo")[2], b"")
-        for path in ("/api/merchants/pin%3Asvg/logo", "/api/merchants/nope/logo"):   # only ever an image
+        for path in ("/api/merchants/pin%3Asvg/logo", "/api/merchants/nope/logo"):
             code, heads, data = self.send("GET", path)
             self.assertEqual((code, data), (404, b""))
             self.assertEqual(heads, [("Server", "Runway "), ("Content-Type", "text/plain"), ("Content-Length", "0"),
@@ -241,7 +240,7 @@ class Pinned(unittest.TestCase):
         with mock.patch.object(prices, "quote_stream") as stream:
             code, heads, data = self.send("HEAD", "/api/investments/stream")
         self.assertEqual((code, data), (200, b""))
-        stream.assert_not_called()   # a HEAD never opens the stream
+        stream.assert_not_called()
 
     def test_changes_need_the_app_header_and_this_site(self):
         for method, path in (("POST", "/api/restore"), ("POST", "/api/backup/inspect"), ("POST", "/api/sync"),
@@ -273,7 +272,6 @@ class Pinned(unittest.TestCase):
         with mock.patch("runway.retail.token_check", return_value=None):
             code, _h, data = self.send("POST", "/api/ext/start", nested)
         self.assertEqual((code, json.loads(data)), (400, {"error": "Bad JSON"}))
-        # (Registration takes 8 KB at most, too little to nest that deep: as deep as it goes, it's still a 400.)
         code, _h, data = self.send("POST", "/oauth/register", b"[" * 4000 + b"]" * 4000, {"Content-Type": "application/json"})
         self.assertEqual((code, json.loads(data)["error"]), (400, "invalid_client_metadata"))
 
@@ -291,7 +289,6 @@ class Pinned(unittest.TestCase):
             ("Server", "Runway "), ("Content-Type", "text/plain"), ("Allow", "POST"), ("Content-Length", "0"),
             ("Cache-Control", "no-store"), *security()]))
 
-    # ------------------------------------------------------------------------------------------ pages and files
 
     def test_the_web_apps_page_and_files(self):
         code, heads, data = self.send("GET", "/")
@@ -351,7 +348,7 @@ class SignInTests(unittest.TestCase):
                      OIDC_ALLOWED_EMAILS="pin@example.com")
         session_user = mock.patch.object(oidc, "session_user", side_effect=lambda _c, token: USER if token == "good" else None)
         renew = mock.patch.object(oidc, "renew_session", return_value=None)
-        hosts = mock.patch.object(common, "EXTRA_HOSTS", {"runway.example"})   # (read from RUNWAY_PUBLIC_URL at start)
+        hosts = mock.patch.object(common, "EXTRA_HOSTS", {"runway.example"})
         for p in (session_user, renew, hosts):
             p.start()
             cls.addClassCleanup(p.stop)
@@ -388,7 +385,7 @@ class SignInTests(unittest.TestCase):
                                                ("Content-Length", "0"), ("Cache-Control", "no-store"), *security(), hsts]))
         code, heads, _ = self.send("GET", "/oauth/authorize?client_id=x")
         self.assertEqual((code, dict(heads)["Location"]), (302, "/auth/login?next=%2Foauth%2Fauthorize%3Fclient_id%3Dx"))
-        self.assertEqual(self.send("GET", "/logo.svg")[0], 200)   # the sign-in page's look is public
+        self.assertEqual(self.send("GET", "/logo.svg")[0], 200)
 
     def test_signed_in(self):
         signed_in = {"Cookie": "runway_session=good", "X-Runway": "1"}
@@ -423,7 +420,6 @@ class SignInTests(unittest.TestCase):
         self.assertIn('<form method="post" action="/oauth/authorize">', page)
         token = re.search(r'name="consent" value="([^"]+)"', page).group(1)
         self.assertTrue(cookie.startswith(f"runway_consent={token};"))
-        # The answer: from Runway's own page, with the cookie, as the person who was asked.
         answer = urllib.parse.urlencode({"consent": token, "decision": "deny"}).encode()
         code, heads, _ = self.send("POST", "/oauth/authorize", answer, {
             "Cookie": f"runway_session=good; runway_consent={token}", "Host": "runway.example", "Origin": "null",

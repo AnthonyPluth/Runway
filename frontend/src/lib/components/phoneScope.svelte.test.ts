@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// What a phone leaves to a computer: each place says so in a muted note, and a computer's version is as it was.
 import { cleanup, render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

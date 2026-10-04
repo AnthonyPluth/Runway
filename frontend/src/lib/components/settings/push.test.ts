@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { b64uToBytes, currentSubscription, deviceName, isIOS, pushSupported } from "./push";
 
 const setUA = (ua: string, platform = "", touch = 0) => {
-  // (jsdom lacks maxTouchPoints, so define all three rather than spy on getters)
   for (const [k, value] of Object.entries({ userAgent: ua, platform, maxTouchPoints: touch })) Object.defineProperty(navigator, k, { value, configurable: true });
 };
 const standalone = (on: boolean) => vi.stubGlobal("matchMedia", () => ({ matches: on }));
@@ -11,7 +10,6 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("b64uToBytes", () => {
   it("decodes URL-safe base64 without padding (a VAPID key)", () => {
-    // "hello?>" is "aGVsbG8/Pg" in url-safe base64 with the padding dropped
     expect(Array.from(b64uToBytes("aGVsbG8_Pg"))).toEqual([..."hello?>"].map((c) => c.charCodeAt(0)));
   });
 });
@@ -45,7 +43,7 @@ describe("deviceName", () => {
 
 describe("push support", () => {
   it("isn't supported where there's no service worker, push manager or notifications", async () => {
-    expect(pushSupported()).toBe(false);   // jsdom has none of them
+    expect(pushSupported()).toBe(false);
     expect(await currentSubscription()).toEqual({ reg: null, sub: null });
   });
 

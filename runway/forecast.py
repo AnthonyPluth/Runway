@@ -243,10 +243,7 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     counted when that account pays no other card, so a payment can't be mistaken for another card's (a card that
     hasn't been given a paying account yet could be paid from it too)."""
     payer = card.get("pay_from")
-    if not payer or conn.execute(
-            select(func.count()).select_from(Account)
-            .where(Account.kind == "credit", Account.hidden == 0, or_(Account.pay_from == payer, Account.pay_from.is_(None)),
-                   Account.id != card["id"])).fetchone()[0]:
+    if not payer or not pays_only(conn, payer, card["id"]):
         return 0.0
     T = Transaction
     sent = conn.execute(select(T.posted, T.amount)
@@ -257,18 +254,85 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     # The card's payments, from a little before the close: one can reach the card before it leaves the bank.
     unclaimed = db.rows(conn.execute(
         select(T.posted, T.amount)
-        .where(T.account_id == card["id"], T.amount > 0, T.posted > (last_close - timedelta(days=5)).isoformat(),
+        .where(T.account_id == card["id"], T.amount > 0, T.posted > (last_close - timedelta(days=PAID_EARLY)).isoformat(),
                T.category.in_(select(Category.name).where(Category.is_transfer == 1))).order_by(T.posted)))
     total = 0.0
     for s in sent:
-        # The card's credit for it: the same amount, from a few days before to a couple of weeks after it left.
-        lo, hi = (parse_day(s["posted"]) - timedelta(days=5)).isoformat(), (parse_day(s["posted"]) + timedelta(days=14)).isoformat()
-        hit = next((c for c in unclaimed if abs(c["amount"] + s["amount"]) <= CENT and lo <= c["posted"][:10] <= hi), None)
+        hit = next((c for c in unclaimed if credits_for(s, c)), None)
         if hit:
             unclaimed.remove(hit)
         else:
             total += -s["amount"]
     return total
+
+
+PAID_EARLY, PAID_LATE = 5, 14   # a card's credit for a payment posts from this many days before it left the bank to this many after
+
+
+def credits_for(sent: dict, credit: dict) -> bool:
+    """Whether `credit` (money into a card) can be the card's credit for `sent` (a payment out of a bank account): the
+    same amount, from a few days before to a couple of weeks after it left."""
+    day = parse_day(sent["posted"])
+    lo, hi = (day - timedelta(days=PAID_EARLY)).isoformat(), (day + timedelta(days=PAID_LATE)).isoformat()
+    return abs(credit["amount"] + sent["amount"]) <= CENT and lo <= credit["posted"][:10] <= hi
+
+
+def pays_only(conn, payer: str, card_id: str) -> bool:
+    """Whether `card_id` is the only card account `payer` can be paying: no other card (that isn't hidden) is paid from
+    it, and none is without a paying account (it could be paid from this one too)."""
+    return not conn.execute(
+        select(func.count()).select_from(Account)
+        .where(Account.kind == "credit", Account.hidden == 0, or_(Account.pay_from == payer, Account.pay_from.is_(None)),
+               Account.id != card_id)).fetchone()[0]
+
+
+def paid_cards(conn, txs: list[dict]) -> dict[str, str]:
+    """{transaction id: the card account it pays} for the card payments among these transactions (each with id,
+    account_id, amount, posted and category), as far as Runway can tell, for showing the card's bank's logo on it:
+
+    - money into a card that's a transfer (its "Payment Thank You"), or a Credit Card Payment on a card: that card;
+    - a transfer out of another account: the card with a credit for it (credits_for), when exactly one card has one;
+      else, for a Credit Card Payment, the card it's paid from in Settings → Accounts when that's the only card it can
+      be (pays_only, as the forecast counts payments in transit), else the paying account itself (its bank's logo).
+
+    A transfer out that no card has a credit for isn't a card payment (to savings, say) and isn't here. Nothing is
+    guessed from the text: what the payee says isn't which card it pays."""
+    ignore = {"Ignore", *catmod.descendants(conn, "Ignore")}
+    moves = _transfer_categories(conn) - ignore
+    txs = [t for t in txs if t.get("category") in moves and t.get("account_id")]
+    if not txs:
+        return {}
+    kinds = {r["id"]: r["kind"] for r in conn.execute(
+        select(Account.id, Account.kind).where(Account.id.in_(sorted({t["account_id"] for t in txs}))))}
+    out: dict[str, str] = {}
+    sent = []
+    for t in txs:
+        if kinds.get(t["account_id"]) == "credit":
+            if (t["amount"] or 0) > 0 or t["category"] == "Credit Card Payment":
+                out[t["id"]] = t["account_id"]
+        elif (t["amount"] or 0) < 0:
+            sent.append(t)
+    if not sent:
+        return out
+    T = Transaction
+    days = [parse_day(t["posted"]) for t in sent]
+    credits = db.rows(conn.execute(
+        select(T.account_id, T.posted, T.amount).join(Account, Account.id == T.account_id)
+        .where(Account.kind == "credit", T.amount > 0, T.category.in_(sorted(moves)),
+               T.posted >= (min(days) - timedelta(days=PAID_EARLY)).isoformat(),
+               T.posted < (max(days) + timedelta(days=PAID_LATE + 1)).isoformat())))
+    cards: dict[str, list[str]] = {}   # paying account -> the cards paid from it
+    for r in conn.execute(select(Account.id, Account.pay_from).where(Account.kind == "credit", Account.hidden == 0,
+                                                                    Account.pay_from.is_not(None))):
+        cards.setdefault(r["pay_from"], []).append(r["id"])
+    for t in sent:
+        hits = {c["account_id"] for c in credits if credits_for(t, c)}
+        if len(hits) == 1:
+            out[t["id"]] = hits.pop()
+        elif t["category"] == "Credit Card Payment":
+            mine = cards.get(t["account_id"], [])
+            out[t["id"]] = mine[0] if len(mine) == 1 and pays_only(conn, t["account_id"], mine[0]) else t["account_id"]
+    return out
 
 
 def _amount(value: str | None) -> float | None:
@@ -1280,7 +1344,7 @@ def list_dismissed_suggestions(conn) -> list[dict]:
 
 
 def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150) -> list[dict]:
-    """Payees on cash accounts that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
+    """Payees on cash accounts and credit cards that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
@@ -1290,7 +1354,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)
-        .where(Account.kind.in_(["checking", "savings"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
+        .where(Account.kind.in_(["checking", "savings", "credit"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
                T.posted > (today - timedelta(days=lookback_days)).isoformat())
     ))
     groups: dict[tuple, list[dict]] = {}

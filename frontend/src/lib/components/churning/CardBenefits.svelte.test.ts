@@ -33,9 +33,8 @@ describe("benefits", () => {
     expect(screen.getByText(/Benefits \$300\/yr · net fee \$95/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Mark Travel credit used" }));
     await waitFor(() => expect(calls("/api/churning/benefits/1/use")).toHaveLength(1));
-    expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({});   // no amount: the rest
+    expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({});
     expect(onchanged).toHaveBeenCalled();
-    // The toast's Undo removes that very use.
     const opts = vi.mocked(toast).mock.calls.at(-1)![1] as { action: { label: string; onClick: () => void } };
     expect(opts.action.label).toBe("Undo");
     opts.action.onClick();
@@ -49,8 +48,7 @@ describe("benefits", () => {
     await userEvent.click(screen.getByRole("button", { name: "Mark Travel credit used" }));
     await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({ amount: 50 }));
     await userEvent.click(screen.getByRole("button", { name: "Undo the last use of Travel credit" }));
-    await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/unuse")[0])).toEqual({ use_id: 3 }));   // the latest this period
-    // Taking it off says so, and its toast puts the same use back (same amount, same day).
+    await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/unuse")[0])).toEqual({ use_id: 3 }));
     const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => void } }];
     expect(msg).toBe("Took the use off Travel credit");
     opts.action.onClick();

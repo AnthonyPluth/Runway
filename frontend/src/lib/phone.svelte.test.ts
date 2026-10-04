@@ -2,8 +2,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// A matchMedia that can be flipped: `fire` changes what the query matches and tells whoever listens, as the browser does
-// when you rotate the phone.
 function media(initial: boolean) {
   const listeners: ((e: { matches: boolean }) => void)[] = [];
   const mq = { matches: initial, addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.push(fn) };
@@ -11,7 +9,6 @@ function media(initial: boolean) {
   vi.stubGlobal("matchMedia", matchMedia);
   return { matchMedia, fire: (matches: boolean) => { mq.matches = matches; listeners.forEach((fn) => fn({ matches })); } };
 }
-// A fresh copy of the module, so it reads the query again.
 const load = async () => { vi.resetModules(); return import("./phone.svelte"); };
 
 afterEach(() => { vi.unstubAllGlobals(); });

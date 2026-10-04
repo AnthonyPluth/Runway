@@ -9,7 +9,6 @@ import BankList from "./BankList.svelte";
 import { bankBonus, churning } from "./fixtures";
 import type { BankBonus } from "./types";
 
-// d.today is 2026-09-30 in the fixtures.
 const setup = (over: Partial<BankBonus> = {}, d = churning()) => render(BankList, { bonuses: [bankBonus({ progress: { dd_total: 100, dd_count: 0, debits: 0, balance: null, balance_ok: null, met: false, source: "account" }, ...over })], d, showOwner: false, onedit: vi.fn() });
 const bar = () => screen.getByRole("progressbar").firstElementChild as HTMLElement;
 

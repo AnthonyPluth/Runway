@@ -30,7 +30,7 @@ describe("the bank bonus form", () => {
   it("has no blank leftover lines between its title and its first row", () => {
     setup();
     const title = screen.getByRole("heading", { name: "Add a bank bonus" });
-    expect(title.nextElementSibling!.className).toContain("mt-3");   // the first row follows the title directly
+    expect(title.nextElementSibling!.className).toContain("mt-3");
   });
 
   it("asks for the bank and the bonus, marks them, focuses the first and sends nothing", async () => {
@@ -73,7 +73,7 @@ describe("the bank bonus form", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(section("received").open).toBe(true));
     expect(screen.getByTestId("flagged-received")).toBeInTheDocument();
-    expect(screen.queryByTestId("flagged-fees")).toBeNull();   // moved on to the new refusal's section
+    expect(screen.queryByTestId("flagged-fees")).toBeNull();
   });
 
   it("closes an edited bonus with Close, and deleting asks first", async () => {
@@ -111,7 +111,7 @@ describe("the plan form", () => {
     expect(screen.getByLabelText(/^Card/)).toHaveAccessibleDescription("Enter the card’s name, like Sapphire Preferred.");
     expect(screen.getByLabelText(/^Card/)).toHaveFocus();
     await userEvent.selectOptions(screen.getByLabelText("What"), "bank_bonus");
-    expect(screen.getByLabelText(/^Bank/)).toHaveAccessibleDescription("Enter the bank, like Chase.");   // the error follows the kind
+    expect(screen.getByLabelText(/^Bank/)).toHaveAccessibleDescription("Enter the bank, like Chase.");
     expect(calls("/api/churning/wishlist")).toHaveLength(0);
   });
 
@@ -185,7 +185,7 @@ describe("lists a form edits", () => {
     render(Harness, { d: churning(), which: "benefits" });
     const second = screen.getByLabelText("Benefit 2");
     await userEvent.click(screen.getByRole("button", { name: "Remove Lyft credit" }));
-    expect(screen.getByLabelText("Benefit 1")).toBe(second);   // the same field, now first: not redrawn with its neighbor's text
+    expect(screen.getByLabelText("Benefit 1")).toBe(second);
     expect(second).toHaveValue("Lounge access");
   });
 

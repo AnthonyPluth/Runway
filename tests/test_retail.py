@@ -5,7 +5,7 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, retail, splits
+from runway import categorize, db, monitoring, retail, splits
 from runway.retail import store
 from runway.models import Account, AiLog, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 from runway.server.api import retail as api_retail
@@ -192,6 +192,60 @@ class SplitTests(Base):
         self.assertEqual(retail.categorize_items(self.c, caller=broken), {"memory": 0, "ai": 0, "department": 1, "left": 1})
         log = self.c.execute(select(AiLog.purpose, AiLog.ok, AiLog.message)).fetchone()
         self.assertEqual(tuple(log), ("orders", 0, "model is down"))
+
+    LEAKY = ("OpenRouter HTTP 401: bad key for https://user:hunter2@api.example.com/v1/chat?key=sk-or-v1-abc123 "
+             "while categorizing order 987654321 (card 4111111111111111)")
+
+    def assert_scrubbed(self, text):
+        for private in ("hunter2", "sk-or-v1-abc123", "987654321", "4111111111111111"):
+            self.assertNotIn(private, text)
+        self.assertIn("OpenRouter HTTP 401", text)
+
+    def test_a_failed_item_request_is_logged_scrubbed_like_the_transaction_categorizer(self):
+        oid = store.save_order(self.c, "amazon", "113-0000000-0000000", details=1)
+        store.save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0, "department": "Grocery & Gourmet Food"}])
+        db.set_setting(self.c, "openrouter_api_key", "k")
+
+        def broken(*_a):
+            raise RuntimeError(self.LEAKY)
+        retail.categorize_items(self.c, caller=broken)
+        logged = self.c.execute(select(AiLog.message)).fetchone()["message"]
+        self.assert_scrubbed(logged)
+        self.assertEqual(logged, monitoring.public_text(self.LEAKY)[:500])
+        self.c.execute(delete(AiLog))
+        group = [{"posted": "2024-09-10", "amount": -5.0, "kind": "checking", "payee": "Cafe", "description": "Cafe"}]
+        with self.assertRaises(RuntimeError):
+            categorize.ask_model(self.c, [group], caller=broken)
+        self.assertEqual(self.c.execute(select(AiLog.message)).fetchone()["message"], logged)
+
+    def test_a_failed_transaction_request_raises_scrubbed_text_but_keeps_the_status(self):
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        group = [{"posted": "2024-09-10", "amount": -5.0, "kind": "checking", "payee": "Cafe", "description": "Cafe"}]
+
+        def broken(*_a):
+            raise RuntimeError(self.LEAKY)
+        with self.assertRaises(RuntimeError) as cm:
+            categorize.ask_model(self.c, [group], caller=broken)
+        self.assertTrue(str(cm.exception).startswith("The AI request failed: "))
+        self.assert_scrubbed(str(cm.exception))
+        self.assertEqual(str(cm.exception), "The AI request failed: " + monitoring.public_text(self.LEAKY)[:300])
+
+    def test_a_failed_order_suggestion_is_scrubbed_in_the_log_and_the_error(self):
+        oid = store.save_order(self.c, "amazon", "113-0000000-0000000", details=1)
+        store.save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0}])
+        db.set_setting(self.c, "openrouter_api_key", "k")
+
+        def broken(*_a):
+            raise RuntimeError(self.LEAKY)
+        with mock.patch.object(monitoring, "public_text", wraps=monitoring.public_text) as scrub:
+            with self.assertRaises(retail.RetailError) as cm:
+                retail.suggest_for_order(self.c, oid, caller=broken)
+        scrub.assert_called_once_with(self.LEAKY)
+        self.assertTrue(str(cm.exception).startswith("The AI request failed: "))
+        self.assert_scrubbed(str(cm.exception))
+        logged = self.c.execute(select(AiLog.message, AiLog.ok)).fetchone()
+        self.assertEqual(logged["ok"], 0)
+        self.assert_scrubbed(logged["message"])
 
     def test_item_category_is_remembered_and_resplits(self):
         self.amazon_order_with_charge()

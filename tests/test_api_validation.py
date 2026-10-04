@@ -38,19 +38,18 @@ class FlagTests(DbCase):
             self.assertTrue(validate.on(on))
 
     def test_remembering_a_category(self):
-        # "remember": "false" doesn't add a rule for the merchant (bool("false") would).
         rules = lambda: self.c.execute(select(Rule.id)).scalars()
         before = rules()
         for off in ("false", "0", "no"):
             out = transactions.api_tx_category(self.c, {}, {"category": "Shopping", "remember": off}, self.tx)
-            self.assertIsNotNone(out["offer_rule"])   # not remembered: the app asks
+            self.assertIsNotNone(out["offer_rule"])
         self.assertEqual(rules(), before)
         transactions.api_tx_category(self.c, {}, {"category": "Shopping", "remember": "true"}, self.tx)
         self.assertEqual(len(rules()), len(before) + 1)
 
     def test_bulk_reviewed(self):
         self.c.execute(Transaction.__table__.update().where(Transaction.id == self.tx).values(needs_review=1))
-        with self.assertRaisesRegex(ApiError, "Choose what to change"):   # "false" isn't a change to make
+        with self.assertRaisesRegex(ApiError, "Choose what to change"):
             transactions.api_tx_bulk(self.c, {}, {"ids": [self.tx], "reviewed": "false"})
         transactions.api_tx_bulk(self.c, {}, {"ids": [self.tx], "reviewed": "1"})
         self.assertEqual(self.c.execute(select(Transaction.needs_review).where(Transaction.id == self.tx)).scalar(), 0)
@@ -84,7 +83,7 @@ class FlagTests(DbCase):
         self.assertEqual(tuple(row), (0, 1, 0))
 
     def test_hiding_a_merchants_logo(self):
-        merchants.api_merchant_logo(self.c, {}, {"name": "Fit Club", "hidden": "false"})   # neither: Runway's own pick
+        merchants.api_merchant_logo(self.c, {}, {"name": "Fit Club", "hidden": "false"})
         self.assertIsNone(merchants.api_merchant_logo_options(self.c, q(name="Fit Club"), {})["choice"])
 
 
@@ -100,7 +99,7 @@ class AmountTests(DbCase):
             with self.subTest(amount=bad), self.assertRaisesRegex(ApiError, "^Enter the amount as a number$"):
                 transactions.api_tx_create(self.c, {}, {**good, "amount": bad})
         out = transactions.api_tx_create(self.c, {}, {**good, "amount": "-12.345"})
-        self.assertEqual(self.c.execute(select(Transaction.amount).where(Transaction.id == out["id"])).scalar(), -12.35)  # to the cent
+        self.assertEqual(self.c.execute(select(Transaction.amount).where(Transaction.id == out["id"])).scalar(), -12.35)
         self.assertEqual(transactions.api_tx_create(self.c, {}, {**good, "amount": 999_999_999.99})["ok"], True)
 
     def test_budgets_overrides_and_recurring(self):
@@ -120,7 +119,7 @@ class AmountTests(DbCase):
                                                              "anchor_date": TODAY.isoformat(), "amount_min": bad})
         self.assertEqual(budgeted(), was)
         self.assertEqual(self.c.execute(select(Override.key)).fetchall(), [])
-        budget.api_budget_set(self.c, {}, {"category": "Groceries", "amount": "-450.5"})   # (kept as typed, unsigned)
+        budget.api_budget_set(self.c, {}, {"category": "Groceries", "amount": "-450.5"})
         self.assertEqual(budgeted(), 450.5)
 
     def test_list_filters(self):
@@ -178,7 +177,6 @@ class WholeNumberTests(DbCase):
                     reports.api_report_income(self.c, q(months=bad), {})
                 with self.assertRaisesRegex(ApiError, "^The number of days must be a whole number$"):
                     state.api_overview(self.c, q(days=bad), {})
-        # In range they're kept in, as they always were: limit 1..1000, offset from 0, months 2..36, days 14..365.
         self.assertEqual(query_int(q(limit="5000"), "limit", 200, 1, 1000), 1000)
         self.assertEqual(query_int(q(limit="-3"), "limit", 200, 1, 1000), 1)
         self.assertEqual(query_int(q(limit="3.0"), "limit", 200, 1, 1000), 3)
@@ -189,7 +187,7 @@ class WholeNumberTests(DbCase):
         for bad in ("abc", [], {}, True, "2.5", None, ""):
             with self.subTest(v=bad), self.assertRaises(ApiError):
                 state.api_settings(self.c, {}, {"horizon_days": bad, "auto_ai_on_sync": "1"})
-        self.assertIsNone(db.get_setting(self.c, sk.AUTO_AI_ON_SYNC))   # refused before anything was saved
+        self.assertIsNone(db.get_setting(self.c, sk.AUTO_AI_ON_SYNC))
         state.api_settings(self.c, {}, {"horizon_days": "1000"})
         self.assertEqual(db.get_setting(self.c, sk.HORIZON_DAYS), "365")
         self.assertEqual(clamped_int(7, "days", 90, 14, 365), 14)

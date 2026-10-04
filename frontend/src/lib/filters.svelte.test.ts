@@ -69,21 +69,21 @@ describe("isFiltered", () => {
 });
 
 describe("date ranges", () => {
-  const today = new Date(2026, 9, 3);   // Oct 3, 2026
+  const today = new Date(2026, 9, 3);
 
   it("offers this month, last month, the last 3 months, the next month and 3, this year and all time", () => {
     expect(presets(today).map((p) => [p.label, p.from, p.to])).toEqual([
       ["This month", "2026-10-01", "2026-10-31"], ["Last month", "2026-09-01", "2026-09-30"],
       ["Last 3 months", "2026-08-01", "2026-10-31"], ["Next month", "2026-11-01", "2026-11-30"], ["Next 3 months", "2026-11-01", "2027-01-31"],
       ["This year", "2026-01-01", "2026-12-31"], ["All time", "", ""]]);
-    expect(presets(new Date(2026, 0, 15))[1]).toMatchObject({ from: "2025-12-01", to: "2025-12-31" });   // across a year
-    expect(presets(new Date(2026, 11, 15))[3]).toMatchObject({ from: "2027-01-01", to: "2027-01-31" });   // next month, across a year
+    expect(presets(new Date(2026, 0, 15))[1]).toMatchObject({ from: "2025-12-01", to: "2025-12-31" });
+    expect(presets(new Date(2026, 11, 15))[3]).toMatchObject({ from: "2027-01-01", to: "2027-01-31" });
     expect(presets(new Date(2026, 11, 15))[4]).toMatchObject({ from: "2027-01-01", to: "2027-03-31" });
-    expect(presets(new Date(2026, 0, 31))[3]).toMatchObject({ from: "2026-02-01", to: "2026-02-28" });   // from a long month into a short one
+    expect(presets(new Date(2026, 0, 31))[3]).toMatchObject({ from: "2026-02-01", to: "2026-02-28" });
   });
 
   it("names the range", () => {
-    const rangeLabel = (from: string, to: string, d: Date) => label(from, to, d).replace(/\u00a0/g, " ");   // dates keep their words together
+    const rangeLabel = (from: string, to: string, d: Date) => label(from, to, d).replace(/\u00a0/g, " ");
     expect(rangeLabel("", "", today)).toBe("All dates");
     expect(rangeLabel("2026-09-01", "2026-09-30", today)).toBe("Last month");
     expect(rangeLabel("2026-03-01", "2026-03-31", today)).toBe("March 2026");
@@ -91,7 +91,7 @@ describe("date ranges", () => {
     expect(rangeLabel("2025-12-20", "2026-01-10", today)).toBe("Dec 20, 2025 – Jan 10, 2026");
     expect(rangeLabel("2026-11-01", "2026-11-30", today)).toBe("Next month");
     expect(rangeLabel("2026-11-01", "2027-01-31", today)).toBe("Next 3 months");
-    expect(rangeLabel("", "2027-02-10", today)).toBe("Until Feb 10, 2027");   // a future end alone
+    expect(rangeLabel("", "2027-02-10", today)).toBe("Until Feb 10, 2027");
     expect(rangeLabel("2026-03-05", "", today)).toBe("From Mar 5");
     expect(rangeLabel("", "2025-03-05", today)).toBe("Until Mar 5, 2025");
     expect(rangeLabel("2026-03-05", "2026-03-05", today)).toBe("Mar 5");

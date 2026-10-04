@@ -71,7 +71,7 @@ def until(cond, timeout=3.0):
 class FeedTests(unittest.TestCase):
     def setUp(self):
         self.sockets: list[FakeWS] = []
-        self.outcomes: list = []   # exceptions to raise for the next connects, before one works
+        self.outcomes: list = []
         self.keys: list[str] = []
 
         def connect(key):
@@ -95,7 +95,7 @@ class FeedTests(unittest.TestCase):
         self.feed.watch(b, ["MSFT", "VTI"], KEY)
         self.assertTrue(until(lambda: self.sockets and self.sockets[0].subscribed() == {"AAPL", "MSFT", "VTI"}))
         self.assertEqual([m for m in self.sockets[0].sent if m["symbol"] == "MSFT"], [{"type": "subscribe", "symbol": "MSFT"}])
-        self.assertEqual(self.keys, [KEY])   # one connection for everyone
+        self.assertEqual(self.keys, [KEY])
 
     def test_never_more_than_the_plans_limit(self):
         self.feed.watch(object(), [f"S{i:02d}" for i in range(60)], KEY)
@@ -111,7 +111,7 @@ class FeedTests(unittest.TestCase):
             self.assertTrue(until(lambda: self.sockets and self.sockets[0].subscribed() == {"AAPL", "MSFT"}))
             self.feed.unwatch(b)
             self.feed.watch(a, ["AAPL"], KEY)
-            self.assertEqual(self.sockets[0].subscribed(), {"AAPL", "MSFT"})   # not straight away: a reload shouldn't churn
+            self.assertEqual(self.sockets[0].subscribed(), {"AAPL", "MSFT"})
             self.assertTrue(until(lambda: self.sockets[0].subscribed() == {"AAPL"}))
 
     def test_keeps_the_latest_trade_and_ignores_the_rest(self):
@@ -120,11 +120,11 @@ class FeedTests(unittest.TestCase):
         ws = self.sockets[0]
         seen = self.feed.version()
         ws.trade("AAPL", 190.5, 2_000)
-        self.assertNotEqual(self.feed.wait(seen, 2), seen)   # a trade wakes whoever is waiting
+        self.assertNotEqual(self.feed.wait(seen, 2), seen)
         self.assertEqual(self.feed.latest("AAPL"), (190.5, 2_000))
-        ws.trade("AAPL", 1.0, 1_000)      # out of order
-        ws.trade("AAPL", 0, 3_000)        # not a price
-        ws.trade("TSLA", 250, 3_000)      # not subscribed
+        ws.trade("AAPL", 1.0, 1_000)
+        ws.trade("AAPL", 0, 3_000)
+        ws.trade("TSLA", 250, 3_000)
         ws.frames.put("{not json")
         ws.frames.put(json.dumps({"type": "ping"}))
         ws.trade("AAPL", 191, 4_000)
@@ -138,7 +138,7 @@ class FeedTests(unittest.TestCase):
         self.assertTrue(until(lambda: self.sockets and self.sockets[0].subscribed() == {"AAPL"}))
         self.assertEqual(len(self.keys), 3)
         self.assertTrue(self.feed.connected)
-        self.assertIsNone(self.feed.status()["error"])                 # a good connection clears the last problem
+        self.assertIsNone(self.feed.status()["error"])
         self.sockets[0].frames.put(ConnectionResetError("dropped"))
         self.assertTrue(until(lambda: len(self.sockets) == 2 and self.sockets[1].subscribed() == {"AAPL"}))
         self.assertTrue(self.sockets[0].closed)
@@ -161,7 +161,7 @@ class FeedTests(unittest.TestCase):
         self.feed.watch(owner, ["AAPL"], KEY)
         self.assertTrue(until(lambda: "rejected" in (self.feed.status()["error"] or "") and not self.feed.status()["active"]))
         self.assertNotIn(KEY, self.feed.status()["error"])
-        self.feed.watch(owner, ["AAPL"], KEY)                 # same key on the next stream round: not tried again
+        self.feed.watch(owner, ["AAPL"], KEY)
         time.sleep(0.05)
         self.assertEqual(len(self.keys), 1)
         self.feed.watch(owner, ["AAPL"], OTHER_KEY)
@@ -183,7 +183,7 @@ class FeedTests(unittest.TestCase):
             self.feed.unwatch(owner)
             self.assertTrue(until(lambda: self.sockets[0].closed and not self.feed.status()["active"]))
         self.assertFalse(self.feed.connected)
-        self.feed.watch(owner, ["AAPL"], KEY)                 # the next stream opens it again
+        self.feed.watch(owner, ["AAPL"], KEY)
         self.assertTrue(until(lambda: len(self.sockets) == 2))
 
     def test_the_servers_error_messages_are_kept(self):
@@ -307,35 +307,35 @@ class QuoteStreamTests(unittest.TestCase):
         base = {"SPY": yq(500), "VTI": yq(250), "AAPL": yq(200), "SPAXX": yq(1, type_="MUTUALFUND")}
         out, _, ttls = self.run_stream([base] * 3, live)
         first = out[0]
-        self.assertEqual(set(first), {"quotes", "market", "as_of"})   # the same payload as ever
+        self.assertEqual(set(first), {"quotes", "market", "as_of"})
         self.assertEqual(first["market"], "open")
         self.assertEqual(first["quotes"]["VTI"], {**yq(250), "price": 251.25, "time": 1500})
-        self.assertEqual(first["quotes"]["VTI"]["prev_close"], 100.0)   # so day change stays right
-        self.assertEqual(first["quotes"]["AAPL"], yq(200))              # no trade yet: Yahoo's
+        self.assertEqual(first["quotes"]["VTI"]["prev_close"], 100.0)
+        self.assertEqual(first["quotes"]["AAPL"], yq(200))
         self.assertEqual(ttls[0], prices.LIVE_QUOTE_TTL)
-        self.assertEqual(live.watched[0], (["AAPL", "SPY", "VTI"], KEY))   # the fund isn't streamed
+        self.assertEqual(live.watched[0], (["AAPL", "SPY", "VTI"], KEY))
         self.assertEqual(live.unwatched, 1)
 
     def test_a_trade_older_than_yahoos_quote_is_ignored(self):
-        live = FakeLive(trades={"VTI": (240.0, 900_000)})   # 900s; Yahoo's is at 1000s
+        live = FakeLive(trades={"VTI": (240.0, 900_000)})
         out, _, _ = self.run_stream([{"SPY": yq(500), "VTI": yq(250)}] * 3, live)
         self.assertEqual(out[0]["quotes"]["VTI"]["price"], 250)
 
     def test_an_update_goes_out_when_a_trade_arrives_but_no_more_than_once_a_second(self):
         live = FakeLive(trades={"VTI": (251.0, 1_100_000)})
-        live.on_wait = lambda: live.trades.__setitem__("VTI", (252.0, 1_200_000))   # a trade lands 0.2s after the update
+        live.on_wait = lambda: live.trades.__setitem__("VTI", (252.0, 1_200_000))
         out, slept, _ = self.run_stream([{"SPY": yq(500), "VTI": yq(250)}] * 4, live, lifetime=1.5, tickers=("VTI",))
         self.assertEqual([u["quotes"]["VTI"]["price"] for u in out[:2]], [251.0, 252.0])
-        self.assertAlmostEqual(slept[0], prices.LIVE_THROTTLE - 0.2)   # held back to one a second, not every trade
-        self.assertNotIn(prices.STREAM_SECONDS, slept)                 # and no polling sleep
+        self.assertAlmostEqual(slept[0], prices.LIVE_THROTTLE - 0.2)
+        self.assertNotIn(prices.STREAM_SECONDS, slept)
 
     def test_polls_yahoo_as_before_while_the_feed_is_down(self):
         live = FakeLive(connected=False, trades={"VTI": (999.0, 9_000_000)})
         rounds = [{"SPY": yq(500), "VTI": yq(250)}] + [{"SPY": yq(500), "VTI": yq(251, t=1005)}] * 5
         out, _, ttls = self.run_stream(rounds, live, lifetime=2)
-        self.assertEqual(out[0]["quotes"]["VTI"]["price"], 250)          # never the feed's numbers
+        self.assertEqual(out[0]["quotes"]["VTI"]["price"], 250)
         self.assertEqual(out[1]["quotes"]["VTI"]["price"], 251)
-        self.assertEqual(ttls[0], prices.stream_interval(3) - 1)         # Yahoo's normal cadence
+        self.assertEqual(ttls[0], prices.stream_interval(3) - 1)
 
     def test_a_symbol_yahoo_has_no_quote_for_uses_finnhubs_previous_close(self):
         live = FakeLive(trades={"AAPL": (191.0, 1_500_000)}, baselines={"AAPL": {"c": 190, "pc": 188.0}})
@@ -378,7 +378,7 @@ class SettingsApiTests(DbCase):
         self.assertEqual(str(cm.exception), "Finnhub doesn't accept that key.")
         self.assertIsNone(db.get_setting(self.c, sk.FINNHUB_API_KEY))
         with self.assertRaises(ApiError):
-            investments.api_finnhub_settings(self.c, {}, {"api_key": "nope!"})   # not even asked
+            investments.api_finnhub_settings(self.c, {}, {"api_key": "nope!"})
         with self.assertRaises(ApiError):
             investments.api_finnhub_settings(self.c, {}, {})
 
@@ -396,8 +396,8 @@ class SettingsApiTests(DbCase):
         self.assertTrue(everything["finnhub_configured"])
         for text in (json.dumps(saved), json.dumps(status), json.dumps(everything, default=str), out.getvalue()):
             self.assertNotIn(KEY, text)
-        self.assertNotIn(KEY, stored)                     # encrypted at rest
-        self.assertIn(sk.FINNHUB_API_KEY, sk.SECRETS)     # and kept out of backups
+        self.assertNotIn(KEY, stored)
+        self.assertIn(sk.FINNHUB_API_KEY, sk.SECRETS)
         self.assertEqual(gone, {"ok": True, "configured": False})
         self.assertFalse(investments.api_finnhub_status(self.c, {}, {})["configured"])
 

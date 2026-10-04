@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// The sidebar (computers) and the tab bar (phones): the same destinations, the same sync line.
 import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +11,6 @@ import type { AppState } from "$lib/types";
 import MobileNav from "./MobileNav.svelte";
 import Sidebar from "./Sidebar.svelte";
 
-// A sync an hour ago: up to date.
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString(), ...extra });
 beforeEach(() => { app.state = null; route.page = "overview"; route.sub = ""; });
 
@@ -91,7 +89,6 @@ describe("Sidebar", () => {
     render(Sidebar);
     expect(screen.getByRole("status")).toHaveTextContent("Last sync failed");
     expect(screen.getByRole("status")).toHaveAttribute("title", "Bank said no");
-    // The reason is in view (not only on hover), and the status links to where it can be fixed.
     expect(screen.getByText("Bank said no")).toBeInTheDocument();
     expect(within(screen.getByRole("status")).getByRole("link", { name: "Last sync failed" })).toHaveAttribute("href", "#setup/connections");
   });

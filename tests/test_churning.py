@@ -20,19 +20,18 @@ def card(id, opened, owner="Alex", issuer="chase", product="Freedom", **kw):
 class DateTests(unittest.TestCase):
     def test_next_annual_fee(self):
         fee = lambda opened, today, **kw: churning.next_fee(card(1, opened, annual_fee=95, **kw), today)
-        self.assertEqual(fee("2025-12-15", date(2026, 12, 20)), date(2027, 12, 15))   # across the year's end
-        self.assertEqual(fee("2025-12-15", date(2026, 12, 15)), date(2026, 12, 15))   # due today
-        self.assertEqual(fee("2026-03-01", date(2026, 9, 29)), date(2027, 3, 1))       # first year: the first anniversary
-        self.assertEqual(fee("2024-02-29", date(2027, 1, 1)), date(2027, 2, 28))       # a leap day, in a common year
-        self.assertEqual(fee("2024-02-29", date(2028, 1, 1)), date(2028, 2, 29))       # ... and in a leap year
-        # The fee posts in the anniversary month: a fee_month stored by an older version is ignored.
+        self.assertEqual(fee("2025-12-15", date(2026, 12, 20)), date(2027, 12, 15))
+        self.assertEqual(fee("2025-12-15", date(2026, 12, 15)), date(2026, 12, 15))
+        self.assertEqual(fee("2026-03-01", date(2026, 9, 29)), date(2027, 3, 1))
+        self.assertEqual(fee("2024-02-29", date(2027, 1, 1)), date(2027, 2, 28))
+        self.assertEqual(fee("2024-02-29", date(2028, 1, 1)), date(2028, 2, 29))
         self.assertEqual(fee("2024-01-31", date(2026, 3, 1), fee_month=4), date(2027, 1, 31))
         self.assertEqual(fee("2024-01-31", date(2026, 1, 1)), date(2026, 1, 31))
         self.assertIsNone(churning.next_fee(card(1, "2024-01-01", annual_fee=0), TODAY))
         self.assertIsNone(churning.next_fee(card(1, "2024-01-01", annual_fee=95, status="closed"), TODAY))
 
     def test_bonus_deadline(self):
-        self.assertIsNone(churning.deadline(card(1, "2026-01-01")))   # no bonus
+        self.assertIsNone(churning.deadline(card(1, "2026-01-01")))
         self.assertEqual(churning.deadline(card(1, "2025-11-30", bonus_spend=4000)), date(2026, 2, 28))
         self.assertEqual(churning.deadline(card(1, "2026-01-15", bonus=60000, bonus_months=6)), date(2026, 7, 15))
         self.assertEqual(churning.deadline(card(1, "2026-01-15", bonus=1, bonus_deadline="2026-05-01")), date(2026, 5, 1))
@@ -51,15 +50,15 @@ class Five24Tests(unittest.TestCase):
         cards = [card(1, "2024-10-15"), card(2, "2025-01-10", status="closed"), card(3, "2025-06-01"),
                  card(4, "2025-09-01"), card(5, "2026-02-01"), card(6, "2026-05-20"),
                  card(7, "2026-01-01", authorized_user=1), card(8, "2026-01-01", business=1),
-                 card(9, "2026-03-01", changed_from=3),         # a product change: the same account
-                 card(10, "2024-09-28"),                        # opened 24 months ago yesterday: gone
+                 card(9, "2026-03-01", changed_from=3),
+                 card(10, "2024-09-28"),
                  card(11, "2026-01-01", owner="Sam")]
         f = churning.five24(cards, "Alex", TODAY)
         self.assertEqual(f["count"], 6)
         self.assertEqual([c["id"] for c in f["cards"]], [1, 2, 3, 4, 5, 6])
         self.assertEqual(f["cards"][0]["falls_off"], "2026-10-15")
         self.assertFalse(f["under"])
-        self.assertEqual(f["under_on"], "2027-01-10")   # two have to go: the second on Jan 10
+        self.assertEqual(f["under_on"], "2027-01-10")
         self.assertEqual(f["timeline"][:2], [{"date": "2026-10-15", "count": 5}, {"date": "2027-01-10", "count": 4}])
         s = churning.five24(cards, "Sam", TODAY)
         self.assertEqual((s["count"], s["under"], s["under_on"]), (1, True, None))
@@ -73,15 +72,12 @@ class EligibilityTests(unittest.TestCase):
         csr = card(2, "2023-07-01", product="Sapphire Reserve", family="Sapphire", status="closed",
                    bonus=60000, bonus_earned_on="2023-09-15", closed_on="2024-09-01")
         e = churning.eligibility(csp, [csp, csr], TODAY)
-        self.assertEqual((e["status"], e["on"]), ("later", "2027-09-15"))   # 48 months after the latest Sapphire bonus
+        self.assertEqual((e["status"], e["on"]), ("later", "2027-09-15"))
         self.assertIn("Sapphire", e["why"])
-        # Still holding a Sapphire: not until it's gone
         held = {**csr, "status": "open", "closed_on": None}
         self.assertEqual(churning.eligibility(csp, [csp, held], TODAY)["status"], "held")
-        # Over 5/24 pushes it to the day you're under
         f524 = {"under": False, "under_on": "2028-01-01"}
         self.assertEqual(churning.eligibility(csp, [csp, csr], TODAY, f524)["on"], "2028-01-01")
-        # A family never bonused: now
         freedom = card(3, "2026-01-01", product="Freedom Flex", status="closed")
         self.assertEqual(churning.eligibility(freedom, [csp, csr, freedom], TODAY)["status"], "now")
 
@@ -90,8 +86,7 @@ class EligibilityTests(unittest.TestCase):
         e = churning.eligibility(gold, [gold], TODAY)
         self.assertEqual((e["status"], e["on"]), ("never", None))
         plat = card(2, "2025-01-01", issuer="amex", product="Platinum", status="closed")
-        self.assertEqual(churning.eligibility(plat, [gold, plat], TODAY)["status"], "now")   # another product
-        # Sam's Gold is Sam's own
+        self.assertEqual(churning.eligibility(plat, [gold, plat], TODAY)["status"], "now")
         sams = card(3, "2020-01-01", owner="Sam", issuer="amex", product="Gold", status="closed")
         self.assertEqual(churning.eligibility(sams, [gold, sams], TODAY)["status"], "now")
 
@@ -108,7 +103,7 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(churning.eligibility({**venture, "_state": None, "bonus_earned_on": "2026-09-01"}, [], TODAY)["on"],
                          "2030-09-01")
         other = card(4, "2020-01-01", issuer="mystery", product="X", bonus_earned_on="2025-01-01")
-        self.assertEqual(churning.eligibility(other, [other], TODAY)["on"], "2027-01-01")   # unknown bank: the default
+        self.assertEqual(churning.eligibility(other, [other], TODAY)["on"], "2027-01-01")
 
 
 class RankTests(unittest.TestCase):
@@ -122,13 +117,13 @@ class RankTests(unittest.TestCase):
                  card(4, "2024-01-01", product="Closed", status="closed", currency="mr", base_rate=10),
                  card(5, "2024-01-01", owner="Sam", product="Savor", issuer="capital_one", currency="cash", base_rate=1)]
         rates = {2: {"Restaurants": 3}, 3: {"Restaurants": 4, "Groceries": 4}, 5: {"Restaurants": 3}}
-        got = churning.best_cards(cards, rates, vals, "Takeout", parents, TODAY, amount=100)   # a rate on the parent counts
+        got = churning.best_cards(cards, rates, vals, "Takeout", parents, TODAY, amount=100)
         self.assertEqual([g["id"] for g in got], [3, 2, 5, 1])
         self.assertEqual((got[0]["multiplier"], got[0]["return_pct"], got[0]["value"]), (4, 8.0, 8.0))
         self.assertEqual(got[0]["bonus"]["remaining"], 4500)
         self.assertIsNone(got[1]["bonus"])
         mine = churning.best_cards(cards, rates, vals, "Gas", parents, TODAY, owner="Alex")
-        self.assertEqual([g["id"] for g in mine], [3, 1, 2])   # base rates: 2c MR and 2% cash tie; the bonus card first
+        self.assertEqual([g["id"] for g in mine], [3, 1, 2])
         self.assertIsNone(mine[0]["value"])
 
 
@@ -147,13 +142,13 @@ class DbTests(DbCase):
                                            "account_id": "cc", "currency": "mr", "bonus": 60000, "bonus_spend": 6000,
                                            "base_rate": 1, "annual_fee": 325})
         churning.set_rate(self.c, gold, "Restaurants", 4)
-        self.tx("t0", "2026-07-30", -900, "Groceries")          # before it was opened
+        self.tx("t0", "2026-07-30", -900, "Groceries")
         self.tx("t1", "2026-08-05", -1000, "Groceries")
-        self.tx("t2", "2026-08-06", -200, "Takeout")            # its parent's rate: 4x
-        self.tx("t3", "2026-08-07", 50, "Groceries")            # a refund lowers it
-        self.tx("t4", "2026-08-20", 1200, "Credit Card Payment")  # a payment isn't spending
-        self.tx("t5", "2026-09-01", -300, None)                 # not categorized yet: still a purchase
-        self.tx("t6", "2026-09-02", -500, "Groceries", split=1)  # split: $400 groceries, $100 a transfer
+        self.tx("t2", "2026-08-06", -200, "Takeout")
+        self.tx("t3", "2026-08-07", 50, "Groceries")
+        self.tx("t4", "2026-08-20", 1200, "Credit Card Payment")
+        self.tx("t5", "2026-09-01", -300, None)
+        self.tx("t6", "2026-09-02", -500, "Groceries", split=1)
         self.c.execute(insert(TxSplit), [{"tx_id": "t6", "amount": -400, "category": "Groceries"},
                                          {"tx_id": "t6", "amount": -100, "category": "Transfer"}])
         s = churning.overview(self.c, TODAY, ["Alex", "Sam"])
@@ -169,7 +164,6 @@ class DbTests(DbCase):
         bonus = [u for u in s["upcoming"] if u["kind"] == "bonus"]
         self.assertEqual((bonus[0]["date"], bonus[0]["title"]), ("2026-11-01", "Spend $4,150 more on Gold"))
         self.assertEqual(s["accounts"], [{"id": "cc", "name": "Gold ••1234 (Alex)", "owner": "Alex"}])
-        # Not linked: what you entered
         churning.save_card(self.c, {"account_id": "", "manual_spend": "5,000"}, gold)
         self.assertEqual(churning.overview(self.c, TODAY)["cards"][0]["spent"], 5000)
         best = churning.best(self.c, TODAY, "Takeout", amount=50)
@@ -224,9 +218,9 @@ class DbTests(DbCase):
                                          "changed_from": csp})
         with self.assertRaisesRegex(ChurnError, "same person"):
             churning.save_card(self.c, {"owner": "Sam", "issuer": "chase", "product": "X", "opened_on": "2026-06-01", "changed_from": csp})
-        self.assertEqual(churning.overview(self.c, TODAY)["five24"]["Alex"]["count"], 1)   # the change isn't a new card
+        self.assertEqual(churning.overview(self.c, TODAY)["five24"]["Alex"]["count"], 1)
         churning.set_rate(self.c, ff, "Groceries", 5)
-        churning.set_rate(self.c, ff, "Groceries", "")   # no multiplier: removed
+        churning.set_rate(self.c, ff, "Groceries", "")
         churning.set_rate(self.c, ff, "Restaurants", 3)
         churning.save_task(self.c, {"card_id": csp, "due_on": "2026-10-01", "action": "x"})
         churning.remove_card(self.c, csp)
@@ -256,7 +250,7 @@ class DbTests(DbCase):
         r = churning.overview(self.c, TODAY)["rewards"]["Alex"]
         ur = next(x for x in r["currencies"] if x["currency"] == "ur")
         self.assertEqual((ur["balance"], ur["balance_value"], ur["as_of"]), (120000, 2460.0, "2026-09-29"))
-        churning.remove_currency(self.c, "ur")   # back to the default
+        churning.remove_currency(self.c, "ur")
         self.assertEqual(churning.values(self.c)["ur"]["cents"], 1.5)
         churning.set_balance(self.c, "Alex", "ur", "", TODAY)
         self.assertEqual(self.c.execute(select(func.count())
@@ -269,15 +263,15 @@ class DbTests(DbCase):
         gold = churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Gold", "opened_on": "2026-01-01",
                                            "account_id": "cc", "currency": "mr", "base_rate": 1})
         churning.set_rate(self.c, gold, "Restaurants", 4)
-        self.tx("t0", "2026-08-30", -1000, "Groceries")     # on the day the balance was entered: already in it
-        self.tx("t1", "2026-09-05", -100, "Groceries")      # 1x
-        self.tx("t2", "2026-09-06", -50, "Takeout")         # its parent's rate: 4x
+        self.tx("t0", "2026-08-30", -1000, "Groceries")
+        self.tx("t1", "2026-09-05", -100, "Groceries")
+        self.tx("t2", "2026-09-06", -50, "Takeout")
         churning.set_balance(self.c, "Alex", "mr", 10000, TODAY, "2026-08-30")
         mr = next(x for x in churning.overview(self.c, TODAY)["rewards"]["Alex"]["currencies"] if x["currency"] == "mr")
         self.assertEqual((mr["balance"], mr["as_of"], mr["earned_since"]), (10000, "2026-08-30", 300))
         self.assertEqual((mr["est_balance"], mr["est_value"]), (10300, round(10300 * mr["cents"] / 100, 2)))
-        self.assertEqual(mr["balance_value"], round(10000 * mr["cents"] / 100, 2))   # Worth stays the balance you entered
-        churning.set_balance(self.c, "Alex", "mr", 10300, TODAY)   # entered today: nothing to add
+        self.assertEqual(mr["balance_value"], round(10000 * mr["cents"] / 100, 2))
+        churning.set_balance(self.c, "Alex", "mr", 10300, TODAY)
         mr = next(x for x in churning.overview(self.c, TODAY)["rewards"]["Alex"]["currencies"] if x["currency"] == "mr")
         self.assertEqual((mr["as_of"], mr["est_balance"]), ("2026-09-29", None))
         with self.assertRaisesRegex(ChurnError, "future"):
@@ -294,7 +288,7 @@ class DbTests(DbCase):
         self.assertEqual([a["key"] for a in got], ["churnfee:1:2026-10-20", "churnbonus:2:2026-10-05"])
         self.assertEqual(got[1]["title"], "$3,000 to spend on Premier by Oct 5")
         self.assertEqual(notify.alerts(self.c, TODAY, {**p, "churn_fee": False, "churn_bonus": False}), [])
-        self.assertEqual(notify.alerts(self.c, date(2026, 9, 1), p), [])   # not yet within 30 and 14 days
+        self.assertEqual(notify.alerts(self.c, date(2026, 9, 1), p), [])
 
 
 if __name__ == "__main__":

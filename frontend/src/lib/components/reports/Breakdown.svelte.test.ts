@@ -60,7 +60,7 @@ describe("Breakdown", () => {
     vi.mocked(api).mockImplementation(respond as never);
     render(Breakdown);
     const row = await screen.findByRole("row", { name: /Taco Place/ });
-    expect(row).toHaveTextContent("$12.50");   // a transaction, to the cent
+    expect(row).toHaveTextContent("$12.50");
     await fireEvent.click(within(row).getByRole("button"));
     expect(showTransactions).toHaveBeenLastCalledWith({ scope: "budget", from: "2026-09-02", to: "2026-09-02", q: "Taco Place", category: "Dining" });
     await fireEvent.click(screen.getByRole("button", { name: "Transactions" }));
@@ -91,7 +91,7 @@ describe("Treemap", () => {
     const onpick = vi.fn();
     render(Treemap, { items, total: 1000, onpick });
     const tiny = screen.getByRole("button", { name: "Tiny: $10" });
-    expect(within(tiny).queryByText("Tiny", { selector: "text" })).toBeNull();   // too small for its name
+    expect(within(tiny).queryByText("Tiny", { selector: "text" })).toBeNull();
     await fireEvent.pointerDown(tiny, { pointerType: "touch" });
     await fireEvent.click(tiny);
     expect(onpick).not.toHaveBeenCalled();

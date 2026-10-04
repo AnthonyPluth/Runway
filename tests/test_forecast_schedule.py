@@ -23,7 +23,6 @@ class DateTests(unittest.TestCase):
                          [date(2026, 9, 30), date(2026, 10, 31), date(2026, 11, 30), date(2026, 12, 31)])
         b = {"anchor_date": "2026-09-18", "frequency": "biweekly", "end_date": None}
         self.assertEqual(forecast.scheduled(b, TODAY, date(2026, 10, 31)), [date(2026, 10, 2), date(2026, 10, 16), date(2026, 10, 30)])
-        # future anchor
         f = {"anchor_date": "2026-10-10", "frequency": "monthly", "end_date": "2026-11-15"}
         self.assertEqual(forecast.scheduled(f, TODAY, date(2026, 12, 31)), [date(2026, 10, 10), date(2026, 11, 10)])
         y = {"anchor_date": "2025-12-01", "frequency": "yearly", "end_date": None}
@@ -31,19 +30,15 @@ class DateTests(unittest.TestCase):
 
     def test_money_moves_on_business_days(self):
         from runway import bankdays
-        # Paychecks on the 15th and the last day: a weekend or holiday moves them to the business day before.
         pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None, "amount": 4180}
         self.assertEqual(forecast.occurrences(pay, date(2026, 1, 31), date(2026, 3, 31)),
-                         [date(2026, 2, 13), date(2026, 2, 27), date(2026, 3, 13), date(2026, 3, 31)])   # Sun 15th, Sat 28th, Sun 15th
-        # Money out moves to the business day after, skipping bank holidays (Labor Day, Columbus Day).
+                         [date(2026, 2, 13), date(2026, 2, 27), date(2026, 3, 13), date(2026, 3, 31)])
         gym = {"frequency": "monthly", "anchor_date": "2026-07-05", "end_date": None, "amount": -40}
-        self.assertEqual(forecast.occurrences(gym, date(2026, 8, 31), date(2026, 9, 30)), [date(2026, 9, 8)])   # Sat 5th, Mon 7th Labor Day
+        self.assertEqual(forecast.occurrences(gym, date(2026, 8, 31), date(2026, 9, 30)), [date(2026, 9, 8)])
         self.assertEqual(bankdays.next_business_day(date(2026, 10, 10)), date(2026, 10, 13))
-        # Federal Reserve rules: a Sunday holiday is observed Monday; a Saturday one isn't moved to Friday.
-        self.assertFalse(bankdays.is_business_day(date(2027, 7, 5)))    # July 4 2027 is a Sunday
-        self.assertTrue(bankdays.is_business_day(date(2026, 7, 3)))     # July 4 2026 is a Saturday
-        self.assertFalse(bankdays.is_business_day(date(2026, 11, 26)))  # Thanksgiving
-        # A date just outside the window can move into it: Sat Oct 31 -> Mon Nov 2.
+        self.assertFalse(bankdays.is_business_day(date(2027, 7, 5)))
+        self.assertTrue(bankdays.is_business_day(date(2026, 7, 3)))
+        self.assertFalse(bankdays.is_business_day(date(2026, 11, 26)))
         rent = {"frequency": "monthly", "anchor_date": "2026-01-31", "end_date": None, "amount": -1500}
         self.assertEqual(forecast.occurrences(rent, date(2026, 11, 1), date(2026, 11, 30)), [date(2026, 11, 2), date(2026, 11, 30)])
 
@@ -67,26 +62,19 @@ class ForecastTests(LedgerCase):
         self.assertEqual(info["new_charges"], 300.0)
 
     def test_future_statements_are_whats_charged_and_whats_scheduled(self):
-        # Spending before the close is the closed statement's, and none of it is averaged into the later ones.
         self.tx("cc", "2026-06-20", -1200.0, "TRIP", "Travel")
         self.tx("cc", "2026-08-20", -400.0, "GROCER", "Groceries")
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
-        # the cycle in progress (Sep 10 to Oct 10): the 300 charged so far, and nothing after it without budgets or
-        # recurring charges on the card
         self.assertEqual(est, {"2026-11-05": 300.0})
-        # charges since the close stay in as they are
         self.tx("cc", "2026-09-21", -2000.0, "LAPTOP", "Shopping")
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
         self.assertEqual(est, {"2026-11-05": 2300.0})
-        # a recurring charge on the card is in each statement it lands on: Sep 30 in October's, Oct 30 in November's
-        # (Dec 5 is a Saturday: paid Monday)
         self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
                                                    anchor_date="2026-09-30"))
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
         self.assertEqual(est, {"2026-11-05": 2315.0, "2026-12-07": 15.0})
 
     def test_sticking_to_the_budget(self):
-        # $500/month on Groceries, paid with the card. $200 already spent in September, so $300 over Sep 24-30.
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
@@ -95,17 +83,12 @@ class ForecastTests(LedgerCase):
         self.assertEqual((b["monthly"], [u["account_id"] for u in b["used"]], b["skipped"]), (500.0, ["cc"], []))
         self.assertEqual((b["used"][0]["category"], b["used"][0]["account"], b["used"][0]["chosen"]), ("Groceries", "cc", True))
         card = {e["date"]: -e["amount"] for e in fc["events"] if e["kind"] == "card"}
-        # Oct 5: the closed September statement ($600 left)
         self.assertEqual(card["2026-10-05"], 600.0)
-        # Nov 5: $300 charged so far this cycle + $300 (rest of Sept) + 10 days of October at 500/31
         self.assertAlmostEqual(card["2026-11-05"], 300 + 300 + 500 / 31 * 10, delta=0.01)
-        # Dec 5 (a Saturday, so paid Monday the 7th): Oct 11-31 and Nov 1-10
         self.assertAlmostEqual(card["2026-12-07"], 500 / 31 * 21 + 500 / 30 * 10, delta=0.01)
         self.assertTrue(all(e["estimated"] for e in fc["events"] if e["kind"] == "card" and e["date"] > "2026-10-05"))
-        # charged to the card, so nothing comes out of checking day by day: it only moves on the card's payment days
         self.assertEqual(fc["total"][fc["dates"].index("2026-10-20")], fc["total"][fc["dates"].index("2026-10-25")])
         self.assertAlmostEqual(self.drop(fc, "2026-11-05"), card["2026-11-05"], places=2)
-        # and the spending itself isn't listed: only the card's payments are
         self.assertEqual({e["kind"] for e in fc["events"]}, {"card"})
 
     def test_an_income_budget_changes_nothing(self):
@@ -121,54 +104,43 @@ class ForecastTests(LedgerCase):
         self.assertEqual(after["accounts"][0]["series"], before["accounts"][0]["series"])
 
     def test_a_budget_paid_from_checking_comes_out_day_by_day(self):
-        # $310/month on Groceries from checking; $200 spent in September, so $110 over Sep 24-30 ($15.71 a day)
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 40)
         self.assertEqual([(u["category"], u["account_id"]) for u in fc["budget"]["used"]], [("Groceries", "chk")])
-        self.assertEqual(fc["total"][0], 5000.0)                                    # from tomorrow
+        self.assertEqual(fc["total"][0], 5000.0)
         self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 110 / 7, delta=0.01)
-        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 10.0, delta=0.01)        # October: 310 / 31
-        # every banking day after today, in the account's series too; a weekend's or a holiday's goes out on the next one
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 10.0, delta=0.01)
         from runway import bankdays
         business = [d for d in fc["dates"][1:] if bankdays.is_business_day(date.fromisoformat(d))]
         self.assertTrue(all(self.drop(fc, d) > 0 for d in business))
         self.assertTrue(all(self.drop(fc, d) == 0 for d in fc["dates"][1:] if d not in business))
         self.assertEqual(fc["accounts"][0]["series"], fc["total"])
-        # not listed as events: the only one is the card's payment, its balance after it taking in the days before
         self.assertEqual([(e["date"], e["kind"]) for e in fc["events"]], [("2026-10-05", "card")])
         oct5 = fc["events"][0]
         self.assertAlmostEqual(oct5["balance_after"], 5000 - 110 - 310 / 31 * 5 - 600, delta=0.01)
         self.assertEqual(oct5["balance_after"], fc["total"][fc["dates"].index("2026-10-05")])
-        # the last day: what's been spent, and the card's payment
         self.assertAlmostEqual(fc["total"][-1], 5000 - 600 - 110 - 310 - 310 / 30 * 2, delta=0.02)
 
     def test_budgeted_spending_from_checking_goes_out_on_banking_days(self):
-        # $310/month on Groceries from checking: $10 a day in October. A weekend's or a bank holiday's goes out on the
-        # next business day, and the chart's readout gets each day's amount.
         from runway import bankdays
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
-        fc = forecast.build(self.conn, TODAY, 60)   # through Sunday Nov 22
+        fc = forecast.build(self.conn, TODAY, 60)
         spend = fc["spend"]
-        # Sat Oct 17 and Sun Oct 18 come out on Monday the 19th
         self.assertNotIn("2026-10-17", spend)
         self.assertNotIn("2026-10-18", spend)
         self.assertEqual((spend["2026-10-16"], spend["2026-10-19"]), (10.0, 30.0))
         self.assertEqual(self.drop(fc, "2026-10-17"), 0)
         self.assertAlmostEqual(self.drop(fc, "2026-10-19"), 30.0, places=2)
-        # Columbus Day (Monday Oct 12) is a bank holiday: Saturday through Monday go out on Tuesday the 13th
         self.assertFalse(bankdays.is_business_day(date(2026, 10, 12)))
         self.assertFalse({"2026-10-10", "2026-10-11", "2026-10-12"} & spend.keys())
         self.assertEqual(spend["2026-10-13"], 40.0)
-        # October's month is the same, less Saturday Oct 31's, which goes out on Monday Nov 2 with Nov 1's
         self.assertAlmostEqual(sum(v for d, v in spend.items() if d.startswith("2026-10")), 300.0, places=2)
         self.assertEqual(spend["2026-11-02"], round(10 + 2 * 310 / 30, 2))
-        # a weekend at the end of the chart would go out past it, so it isn't on it
         self.assertEqual(max(spend), "2026-11-20")
         self.assertAlmostEqual(sum(spend.values()), 110 + 310 + 310 / 30 * 20, places=1)
         self.assertEqual(fc["total"][-1], fc["total"][fc["dates"].index("2026-11-20")])
-        # one forecast account: its own spending is the whole of it
         self.assertEqual(fc["accounts"][0]["spend"], spend)
 
     def test_the_readout_has_each_accounts_budgeted_spending(self):
@@ -183,22 +155,18 @@ class ForecastTests(LedgerCase):
         self.assertEqual(set(fc["spend"]), set(each["chk"]) | set(each["chk2"]))
         self.assertTrue(set(fc["spend"]) <= set(fc["dates"]))
         self.assertTrue(all(v > 0 for v in fc["spend"].values()))
-        self.assertNotIn(fc["today"], fc["spend"])   # budgets are spent from tomorrow
+        self.assertNotIn(fc["today"], fc["spend"])
 
     def test_a_budget_paid_with_a_card_is_charged_any_day(self):
-        # $310/month on Groceries with the card: nothing comes out of checking day by day, and the card's charges stay
-        # on the days they're made, weekends and holidays too (Sat Oct 10 is on the statement that closes that day).
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual((fc["spend"], fc["accounts"][0]["spend"]), ({}, {}))
         card = {e["date"]: -e["amount"] for e in fc["events"] if e["kind"] == "card"}
-        self.assertAlmostEqual(card["2026-11-05"], 300 + 110 + 10 * 10, places=2)          # Sep 24-30 and Oct 1-10
-        self.assertAlmostEqual(card["2026-12-07"], 21 * 10 + 10 * 310 / 30, places=2)      # Oct 11-31 and Nov 1-10
+        self.assertAlmostEqual(card["2026-11-05"], 300 + 110 + 10 * 10, places=2)
+        self.assertAlmostEqual(card["2026-12-07"], 21 * 10 + 10 * 310 / 30, places=2)
 
     def test_balance_after_takes_in_the_days_budgeted_spending(self):
-        # $310/month on Groceries from checking ($10 a day in October) and a $50 gym on Oct 15, the day's only event:
-        # its balance after is the day's balance, with the day's $10 out before it.
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         self.conn.execute(insert(Recurring).values(name="Gym", account_id="chk", amount=-50, frequency="monthly",
@@ -221,18 +189,15 @@ class ForecastTests(LedgerCase):
                               .where(Transaction.description == "GROCERY BOX").values(recurring_id=7))
 
     def test_a_budget_counts_its_recurring_payments_once(self):
-        # $500 on Groceries from checking includes the $100 box: $400 a month more, not $500 on top of it
         self.grocery_box()
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         box = [e for e in fc["events"] if e.get("recurring_id") == 7]
         self.assertEqual([(e["date"], e["category"]) for e in box], [("2026-10-01", "Groceries"), ("2026-11-02", "Groceries")])
-        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)   # October: 500 - 100
-        self.assertAlmostEqual(self.drop(fc, "2026-11-17"), 400 / 30, delta=0.01)   # November: its box is Nov 2 (the 1st is a Sunday)
-        # September: $300 spent (the $100 box and $200 at the grocer), $200 left over Sep 24-30
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
+        self.assertAlmostEqual(self.drop(fc, "2026-11-17"), 400 / 30, delta=0.01)
         self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 200 / 7, delta=0.01)
-        # the box's own day (a Monday): the box, and the share of the rest of it and the weekend before it
         self.assertAlmostEqual(self.drop(fc, "2026-11-02"), 100 + 400 / 31 + 2 * 400 / 30, delta=0.01)
 
     def test_a_budget_its_recurring_payments_cover_adds_nothing(self):
@@ -248,7 +213,7 @@ class ForecastTests(LedgerCase):
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 7}, {"Groceries"})
-        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)   # counted once all the same
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
 
     def test_statement_you_entered_wins(self):
         key = self.cycle("cc")["statement_key"]
@@ -259,7 +224,6 @@ class ForecastTests(LedgerCase):
                          (950.0, 800.0, True, 750.0))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn(("2026-10-05", -750.0), [(e["date"], e["amount"]) for e in fc["events"] if e["kind"] == "card"])
-        # once the bank reports the next statement, the entered amount no longer applies
         self.stmt("cc", 300.0, "2026-10-10", "2026-11-05")
         info = self.cycle("cc", date(2026, 10, 12))
         self.assertEqual((info["statement_set"], info["statement_balance"]), (False, 300.0))
@@ -279,13 +243,11 @@ class ForecastTests(LedgerCase):
         self.assertIn(("2026-10-05", "cc statement", -600.0, False), names)
         self.assertIn(("2026-10-02", "Paycheck", 3000.0, False), names)
         est = [e for e in fc["events"] if e["estimated"]]
-        # Oct 10 close: the 300 charged so far, and nothing more without budgets or recurring charges on the card
         self.assertEqual([(e["date"], e["amount"]) for e in est], [("2026-11-05", -300.0)])
-        # Series arithmetic: last value = start + sum(events) (no daily spend on chk)
         self.assertAlmostEqual(fc["total"][-1], 5000 + sum(e["amount"] for e in fc["events"]), places=2)
         self.assertEqual(len(fc["total"]), 61)
         self.assertEqual(fc["warnings"], [])
-        self.assertIsNone(fc["budget"])   # no budgets
+        self.assertIsNone(fc["budget"])
 
     def test_balance_after_each_event(self):
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000,
@@ -297,7 +259,6 @@ class ForecastTests(LedgerCase):
         for e in fc["events"]:
             bal += e["amount"]
             self.assertAlmostEqual(e["balance_after"], bal, places=2, msg=e["name"])
-            # and it agrees with the chart on that day once all of the day's items are in
             same_day = [x for x in fc["events"] if x["date"] == e["date"]]
             if e is same_day[-1]:
                 self.assertAlmostEqual(fc["total"][fc["dates"].index(e["date"])], bal, places=2)
@@ -306,7 +267,7 @@ class ForecastTests(LedgerCase):
     def test_primary_only_and_flat_between_events(self):
         self.acct("sav", "savings", 20000.0)
         self.acct("chk2", "checking", 300.0)
-        for i in range(60):  # plenty of everyday spending in history
+        for i in range(60):
             self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
         db.set_setting(self.conn, "primary_account", "chk")
         fc = forecast.build(self.conn, TODAY, 30)
@@ -324,29 +285,29 @@ class ForecastTests(LedgerCase):
         self.conn.execute(delete(CardStatement))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["warnings"], ["Plaid hasn’t sent a statement for cc yet. Enter its latest statement so its "
-                                          "payment is in the forecast."])                  # linked, statement not in yet
+                                          "payment is in the forecast."])
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
-        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc", "setting": True}])   # the card's row
-        self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))                  # not linked at all
+        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc", "setting": True}])
+        self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertEqual(fc["warnings"], ["Enter cc’s latest statement so its payment is in the forecast."])   # no Plaid: not mentioned
+        self.assertEqual(fc["warnings"], ["Enter cc’s latest statement so its payment is in the forecast."])
         self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts?account=cc")
         self.conn.execute(insert(PlaidAccount).values(plaid_account_id="pcc", item_id="it", name="Visa", type="credit"))
-        with mock.patch.object(plaidapi, "configured", return_value=True):   # with Plaid set up, it's offered too
+        with mock.patch.object(plaidapi, "configured", return_value=True):
             fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["warnings"][0], "Enter cc’s latest statement (or link it through Plaid) so its payment is in the forecast.")
         self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][1])
-        self.assertEqual(fc["warning_links"][1]["href"], "#setup/accounts")      # matched under “New from Plaid”
+        self.assertEqual(fc["warning_links"][1]["href"], "#setup/accounts")
 
     def test_warnings_link_to_where_they_are_fixed(self):
         self.conn.execute(update(Account).where(Account.id == "cc").values(pay_from=None))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["warning_links"], [{"text": "cc: choose which account pays it in Settings.", "href": "#setup/accounts", "setting": True}])
-        self.assertEqual(fc["warnings"], ["cc: choose which account pays it in Settings."])   # plain text, as MCP clients read it
+        self.assertEqual(fc["warnings"], ["cc: choose which account pays it in Settings."])
 
     def test_paid_statement_no_event(self):
         self.tx("cc", "2026-09-22", 600.0, "PAYMENT", "Credit Card Payment")
-        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-300))  # the payment lowers what's owed
+        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-300))
         info = self.cycle("cc")
         self.assertEqual((info["statement_balance"], info["remaining"]), (800.0, 0.0))
         fc = forecast.build(self.conn, TODAY, 30)
@@ -371,7 +332,7 @@ class ScheduleAndMissedTests(LedgerCase):
                          ["2026-04-15", "2026-10-15", "2027-04-15", "2027-10-15"])
         pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None}
         self.assertEqual([d.isoformat() for d in forecast.scheduled(pay, date(2026, 1, 31), date(2026, 3, 1))],
-                         ["2026-02-15", "2026-02-28"])        # 31st becomes the last day of a short month
+                         ["2026-02-15", "2026-02-28"])
         q = {"frequency": "quarterly", "anchor_date": "2026-01-10", "end_date": None}
         self.assertEqual([d.isoformat() for d in forecast.scheduled(q, date(2026, 1, 1), date(2026, 12, 31))],
                          ["2026-01-10", "2026-04-10", "2026-07-10", "2026-10-10"])
@@ -393,19 +354,18 @@ class ScheduleAndMissedTests(LedgerCase):
     def test_missed_payments(self):
         from runway import recurring
         self.acct("chk", "checking", 1000.0)
-        self.tx("chk", "2026-06-01", -5.0, "OPENING", "Other")                      # history starts here
+        self.tx("chk", "2026-06-01", -5.0, "OPENING", "Other")
         self.conn.execute(insert(Recurring).values(id=1, name="Gym", account_id="chk", amount=-40, frequency="monthly",
                                                    anchor_date="2026-07-05", match="gym", active=1))
-        for d in ("2026-07-05", "2026-08-07"):                                      # paid July, August (2 days late)
+        for d in ("2026-07-05", "2026-08-07"):
             self.tx("chk", d, -40.0, "GYM MEMBERSHIP", "Other")
         recurring.auto_match(self.conn)
         today = date(2026, 9, 23)
         m = recurring.missed(self.conn, today)
-        self.assertEqual([x["date"] for x in m], ["2026-09-08"])                   # September never came (Sat 5th, then Labor Day)
-        self.assertEqual(recurring.missed(self.conn, date(2026, 9, 12)), [])       # still inside the grace window
+        self.assertEqual([x["date"] for x in m], ["2026-09-08"])
+        self.assertEqual(recurring.missed(self.conn, date(2026, 9, 12)), [])
         recurring.dismiss(self.conn, m[0]["key"])
         self.assertEqual(recurring.missed(self.conn, today), [])
-        # linking the payment that did happen also clears it
         self.conn.execute(delete(RecurringDismissed))
         self.tx("chk", "2026-09-06", -40.0, "CLUB FEE", "Other")
         tid = self.conn.execute(select(Transaction.id).where(Transaction.description == "CLUB FEE")).fetchone()[0]
@@ -422,7 +382,6 @@ class ForecastEdgeTests(LedgerCase):
         self.card_setup()
 
     def test_a_payment_pushed_past_the_last_day_is_left_off(self):
-        # Statement due Sep 5; later ones due Oct 5, Nov 5 and Dec 5, a Saturday, so paid Monday Dec 7: past the Dec 5 end.
         self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")
         today = date(2026, 9, 6)
         fc = forecast.build(self.conn, today, 90)
@@ -431,22 +390,21 @@ class ForecastEdgeTests(LedgerCase):
         self.assertNotIn("2026-12-07", [e["date"] for e in fc["events"]])
 
     def test_an_old_statement_is_a_warning_not_a_crash(self):
-        self.stmt("cc", 800.0, "2026-06-10", "2026-07-05")   # the bank hasn't sent anything since June
+        self.stmt("cc", 800.0, "2026-06-10", "2026-07-05")
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertTrue(all(e["date"] >= TODAY.isoformat() for e in fc["events"]))
         self.assertTrue(any("hasn't sent the statement after Jun 10" in w for w in fc["warnings"]), fc["warnings"])
-        # Nothing to change in Settings: the bank's still to send it (so a phone doesn't send you to a computer).
         stale = next(w for w in fc["warning_links"] if "hasn't sent the statement" in w["text"])
         self.assertEqual((stale["href"], stale["setting"]), ("#setup/connections", False))
 
     def test_a_late_payment_is_flagged_as_not_a_setting(self):
-        self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")   # due Sat Sep 5, paid Tue Sep 8 (Labor Day): nothing came
+        self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")
         fc = forecast.build(self.conn, date(2026, 9, 10), 30)
         late = next(w for w in fc["warning_links"] if "no payment has shown up yet" in w["text"])
-        self.assertEqual((late["href"], late["setting"]), ("#setup/accounts", False))   # paying the card puts it right
+        self.assertEqual((late["href"], late["setting"]), ("#setup/accounts", False))
 
     def test_a_payment_due_today_is_in_todays_balance(self):
-        today = date(2026, 10, 5)   # the $600 left on the September statement is due today
+        today = date(2026, 10, 5)
         fc = forecast.build(self.conn, today, 30)
         e = next(e for e in fc["events"] if e["kind"] == "card" and not e["estimated"])
         self.assertEqual((e["date"], e["amount"], e["balance_after"]), ("2026-10-05", -600.0, 4400.0))
@@ -462,24 +420,21 @@ class ForecastEdgeTests(LedgerCase):
 
         def rent(today):
             return [(e["date"], e.get("late_from")) for e in forecast.build(self.conn, today, 20)["events"] if e["name"] == "Rent"]
-        self.assertEqual(rent(date(2026, 10, 1)), [("2026-10-01", None)])                  # due today
-        self.assertEqual(rent(date(2026, 10, 3)), [("2026-10-03", "2026-10-01")])          # two days late: still coming
-        self.assertEqual(rent(date(2026, 10, 8)), [])                                      # past the window: missed instead
+        self.assertEqual(rent(date(2026, 10, 1)), [("2026-10-01", None)])
+        self.assertEqual(rent(date(2026, 10, 3)), [("2026-10-03", "2026-10-01")])
+        self.assertEqual(rent(date(2026, 10, 8)), [])
         self.assertEqual([m["date"] for m in recurring.missed(self.conn, date(2026, 10, 8))], ["2026-10-01"])
-        self.tx("chk", "2026-10-02", -2000.0, "LANDLORD LLC", "Rent")                       # it came, a day late
+        self.tx("chk", "2026-10-02", -2000.0, "LANDLORD LLC", "Rent")
         recurring.auto_match(self.conn)
         self.assertEqual(rent(date(2026, 10, 3)), [])
 
     def test_a_card_payment_in_transit_counts_once(self):
-        # $600 left checking after the close, but hasn't reached the card yet
         self.tx("chk", "2026-09-22", -600.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
         info = self.cycle("cc")
         self.assertEqual((info["paid_since_close"], info["remaining"]), (800.0, 0.0))
         self.assertFalse(any(e["kind"] == "card" and not e["estimated"] for e in forecast.build(self.conn, TODAY, 30)["events"]))
-        # once it reaches the card, it's still the one payment
         self.tx("cc", "2026-09-23", 600.0, "PAYMENT THANK YOU", "Credit Card Payment")
         self.assertEqual(self.cycle("cc")["paid_since_close"], 800.0)
-        # one that reached the card just before the close (and so is in the statement) isn't counted again
         self.conn.execute(update(Transaction)
                           .where(Transaction.description == "PAYMENT THANK YOU", Transaction.amount == 600)
                           .values(posted="2026-09-09"))
@@ -490,7 +445,6 @@ class ForecastEdgeTests(LedgerCase):
         self.conn.execute(update(Transaction)
                           .where(Transaction.description == "PAYMENT THANK YOU", Transaction.amount == 600)
                           .values(posted="2026-09-23"))
-        # an account that pays two cards can't tell whose it is, so it waits for the card
         self.acct("cc2", "credit", -50.0, pay_from="chk")
         self.conn.execute(delete(Transaction).where(
             Transaction.id == select(func.max(Transaction.id)).where(Transaction.account_id == "cc").scalar_subquery()))
@@ -502,13 +456,12 @@ class ForecastEdgeTests(LedgerCase):
         self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
                                                    anchor_date="2026-09-30"))
         fc = forecast.build(self.conn, TODAY, 60)
-        # on the card, with its name: in what's coming up, but not among the forecast account's events
         self.assertEqual([(e["date"], e["name"], e["amount"], e["kind"], e["account_id"], e["account"]) for e in fc["charges"]],
                          [("2026-09-30", "Streaming", -15.0, "recurring", "cc", "Travel Card"),
                           ("2026-10-30", "Streaming", -15.0, "recurring", "cc", "Travel Card")])
         self.assertNotIn("Streaming", [e["name"] for e in fc["events"]])
         self.assertEqual([(e["date"], e["name"]) for e in fc["events"]], [(e["date"], e["name"]) for e in before])
-        self.assertEqual(forecast.build(self.conn, TODAY, 5)["charges"], [])   # only what's within the horizon
+        self.assertEqual(forecast.build(self.conn, TODAY, 5)["charges"], [])
 
     def test_recurring_card_charges_count_on_a_new_card(self):
         before = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}

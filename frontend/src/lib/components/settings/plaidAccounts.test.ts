@@ -19,7 +19,7 @@ describe("sourceInfo", () => {
   it("offers linking once Plaid is set up, or a connection exists", () => {
     expect(sourceInfo(acct(), plaid()).showSource).toBe(true);
     expect(sourceInfo(acct({ kind: "investment" }), plaid()).showSource).toBe(true);
-    expect(sourceInfo(acct({ kind: "checking" }), plaid([], false)).showSource).toBe(true);   // a connection exists
+    expect(sourceInfo(acct({ kind: "checking" }), plaid([], false)).showSource).toBe(true);
   });
 
   it("says SimpleFIN + Plaid for a linked account, with the mask, and lets you switch where it comes from", () => {

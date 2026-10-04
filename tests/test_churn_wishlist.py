@@ -34,9 +34,7 @@ class WishlistTests(DbCase):
         self.assertEqual(got["earliest_apply"], "2026-11-01")
         up = [u for u in churning.overview(self.c, TODAY)["upcoming"] if u["kind"] == "apply"]
         self.assertEqual((up[0]["date"], up[0]["title"]), ("2026-11-01", "You can apply for Sapphire Preferred on Nov 1"))
-        # the 5/24 count isn't changed by a planned card
         self.assertEqual(churning.overview(self.c, TODAY)["five24"]["Alex"]["count"], 5)
-        # A Citi card isn't held back by 5/24
         citi = self.wish(issuer="citi", product="Strata Premier")
         self.assertTrue(self.items()[citi]["ready"])
 
@@ -46,19 +44,16 @@ class WishlistTests(DbCase):
         got = self.items()[gold]
         self.assertEqual((got["blockers"][0]["kind"], got["earliest_apply"], got["ready"]), ("bonus_rule", None, False))
         self.assertIn("Once per lifetime", got["blockers"][0]["text"])
-        # Chase: 48 months after the last Sapphire bonus, and not while holding one
         self.card("2024-01-01", issuer="chase", product="Sapphire Reserve", family="Sapphire", bonus=60000,
                   bonus_earned_on="2024-03-01")
         csp = self.wish(family="Sapphire")
         got = self.items()[csp]
         self.assertEqual([b["kind"] for b in got["blockers"]], ["held"])
-        # a bonus still being earned from the same issuer: a note, not a blocker
         self.card("2026-09-01", issuer="amex", product="Platinum", bonus=80000, bonus_spend=8000)
         plat = self.wish(issuer="amex", product="Business Platinum", business=True)
         got = self.items()[plat]
         self.assertTrue(got["ready"])
         self.assertEqual(got["hints"], ["Still spending toward Platinum's bonus, $8,000 left"])
-        # the date you know better, on a card of the same family
         self.card("2019-01-01", issuer="citi", product="Premier", bonus=60000, bonus_earned_on="2025-01-01",
                   eligible_on="2027-02-01", status="closed")
         prem = self.wish(issuer="citi", product="Premier")
@@ -70,18 +65,17 @@ class WishlistTests(DbCase):
         got = self.items()[w]
         self.assertEqual(got["blockers"], [{"kind": "wait", "text": "You're waiting until 2026-12-01", "date": "2026-12-01"}])
         self.assertEqual(got["hints"], ["No credit score entered for Alex to compare with 740"])
-        self.assertEqual(got["notes"], "After the move")   # yours, beside the page's hints
+        self.assertEqual(got["notes"], "After the move")
         wl.set_score(self.c, {"owner": "Alex", "score": 705, "as_of": "2026-09-01", "source": "Experian FICO 8"}, TODAY)
         got = self.items()[w]
         self.assertEqual(got["blockers"][1], {"kind": "score", "date": None, "text": "Score 705 of 740 wanted (as of 2026-09-01)"})
-        self.assertEqual(got["earliest_apply"], "2026-12-01")   # the dated blockers only
-        # an undated blocker: no "you can apply on" item
+        self.assertEqual(got["earliest_apply"], "2026-12-01")
         self.assertEqual([u for u in churning.overview(self.c, TODAY)["upcoming"] if u["kind"] == "apply"], [])
         wl.set_score(self.c, {"owner": "alex", "score": "745"}, TODAY)
         s = churning.overview(self.c, TODAY)["scores"]["Alex"]
         self.assertEqual((s["score"], s["as_of"], len(s["history"])), (745, "2026-09-29", 2))
         self.assertTrue(self.items(date(2026, 12, 1))[w]["ready"])
-        wl.set_score(self.c, {"owner": "Alex", "score": ""}, TODAY)   # removes today's
+        wl.set_score(self.c, {"owner": "Alex", "score": ""}, TODAY)
         self.assertEqual(wl.scores(self.c)["Alex"]["score"], 705)
         for bad, msg in (({"owner": "Alex", "score": 200}, "between"), ({"owner": "", "score": 700}, "person"),
                          ({"owner": "Alex", "score": 700, "as_of": "x"}, "date")):
@@ -123,14 +117,12 @@ class WishlistTests(DbCase):
         self.assertEqual([(u["kind"], u["title"], u["warn"]) for u in up], [("offer_ends", "Offer for chase ends Oct 10", True)])
         keys = [a["key"] for a in notify.alerts(self.c, TODAY, QUIET)]
         self.assertEqual(keys, [f"churnoffer:{w}:2026-10-10"])
-        # A bank whose bonus you're earning now: a note; a bank you haven't had: ready
         bank_bonuses.save(self.c, {"owner": "Alex", "bank": "Citi", "opened_on": "2026-09-01", "bonus": 200})
         citi = wl.save(self.c, {"owner": "Alex", "kind": "bank_bonus", "bank": "Citi", "bonus": 300})
         got = self.items()[citi]
         self.assertEqual((got["ready"], got["hints"]), (True, ["A Citi bonus is still being earned"]))
         ended = wl.save(self.c, {"owner": "Alex", "kind": "bank_bonus", "bank": "SoFi", "bonus": 300, "offer_expires_on": "2026-09-01"})
         self.assertEqual(self.items()[ended]["blockers"][0]["text"], "The offer ended on 2026-09-01")
-        # The rule on your last bonus from the bank applies when the plan has none
         bank_bonuses.save(self.c, {"repeat_months": ""}, b)
         self.assertEqual(self.items()[w]["hints"], ["You've had a bonus from this bank: add its rule (months between bonuses) "
                                                     "to know when"])
@@ -141,7 +133,7 @@ class WishlistTests(DbCase):
         second = self.wish(issuer="amex", product="Gold")
         self.wish(owner="Sam", issuer="amex", product="Green")
         got = churning.overview(self.c, TODAY)
-        self.assertEqual([(w["owner"], w["priority"]) for w in got["wishlist"]], [("Alex", 1), ("Alex", 2), ("Sam", 3)])   # one order for everyone
+        self.assertEqual([(w["owner"], w["priority"]) for w in got["wishlist"]], [("Alex", 1), ("Alex", 2), ("Sam", 3)])
         now = [u for u in got["upcoming"] if u["kind"] == "apply"]
         self.assertIn("You can apply for Strata Premier now", [u["title"] for u in now])
         keys = [a["key"] for a in notify.alerts(self.c, TODAY, QUIET)]
@@ -160,7 +152,7 @@ class WishlistTests(DbCase):
                          ("Strata Premier", "citi", 95.0, 60000.0, "ty", 4000.0, "2026-09-28", "Strata"))
         w = self.items()[first]
         self.assertEqual((w["status"], w["applied_id"], w["applied_on"], w["ready"]), ("applied", r["id"], "2026-09-28", False))
-        self.assertEqual(churning.overview(self.c, TODAY)["wishlist"][-1]["id"], first)   # done ones last
+        self.assertEqual(churning.overview(self.c, TODAY)["wishlist"][-1]["id"], first)
         self.assertEqual(churning.overview(self.c, TODAY)["five24"]["Alex"]["count"], 1)
         with self.assertRaisesRegex(ChurnError, "already"):
             wl.applied(self.c, first, {}, TODAY)

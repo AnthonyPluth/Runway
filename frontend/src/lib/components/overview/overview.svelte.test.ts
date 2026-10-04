@@ -118,13 +118,13 @@ describe("SetupChecklist", () => {
     vi.mocked(toast).mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast.error).toHaveBeenCalledWith("Nope");
-    expect(toast).not.toHaveBeenCalled();   // no Undo for what didn't happen
+    expect(toast).not.toHaveBeenCalled();
   });
 });
 
 describe("ThisMonth", () => {
   it("leaves ignored transactions out of Recent", () => {
-    for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));   // stays loading: only the request matters
+    for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));
     render(ThisMonth);
     expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
   });
@@ -181,15 +181,15 @@ describe("CardsTable", () => {
     expect(screen.getByText("Sapphire")).toBeInTheDocument();
     expect(screen.queryByText("Freedom")).toBeNull();
     expect(screen.getByText("Venture")).toBeInTheDocument();
-    expect(screen.queryByText("Amex")).toBeNull();   // a credit comes through as $0 owed
+    expect(screen.queryByText("Amex")).toBeNull();
   });
 
   it("lists cards in the order they're due, the paid ones last", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [
       card({ id: "c1", name: "Sapphire", due_date: "2026-03-26" }),
-      card({ id: "c2", name: "Venture", due_date: "2026-03-09" }),              // overdue: first of all
-      card({ id: "c3", name: "Amex", owed_now: 300, remaining: 0 }),            // paid: last, whatever its date
+      card({ id: "c2", name: "Venture", due_date: "2026-03-09" }),
+      card({ id: "c3", name: "Amex", owed_now: 300, remaining: 0 }),
       card({ id: "c4", name: "Freedom", due_date: "2026-03-12" }),
     ] });
     const names = screen.getAllByText(/^(Sapphire|Venture|Amex|Freedom)$/).map((el) => el.textContent);
@@ -240,11 +240,9 @@ describe("CardsTable", () => {
     const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })] });
     expect(screen.getByText(/pays \$35\.00 of \$600\.00/)).toHaveAttribute("title", "The rest, $565.00, carries into the next statement");
     unmount();
-    // more than the statement: the extra comes off the next one
     const over = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })] });
     expect(screen.getByText(/pays \$1,000\.00 of \$600\.00/)).toHaveAttribute("title", "The extra $400.00 comes off the next statement");
     over.unmount();
-    // paid in full: no "pays", as before
     render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
     expect(screen.queryByText(/pays/)).toBeNull();
   });
