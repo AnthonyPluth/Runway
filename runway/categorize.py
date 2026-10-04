@@ -185,7 +185,8 @@ def _category_names(conn) -> list[str]:
     return conn.execute(select(Category.name).order_by(Category.name)).scalars()
 
 
-def _subcategory_hints(conn) -> list[str]:
+def subcategory_hints(conn) -> list[str]:
+    """Every subcategory as its path ("parent > sub"), for the AI prompts."""
     return [" > ".join(c["path"]) for c in catmod.all_categories(conn) if c["depth"] > 0]
 
 
@@ -520,7 +521,9 @@ def create_proposed(conn, new: dict, is_income: bool = False) -> tuple[str, bool
     return name, True
 
 
-def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, message, reply):
+def log_call(conn, purpose, model, merchants, answered, new_cats, ok, seconds, message, reply):
+    """Note one request to the AI model in the AI log (Transactions shows it), keeping the newest 200. `purpose` says what
+    asked ("orders" for an order's items); the reply is cut to 1,500 characters."""
     conn.execute(insert(AiLog).values(purpose=purpose, model=model, merchants=merchants, answered=answered, new_cats=new_cats,
                                       ok=1 if ok else 0, seconds=round(seconds, 1), message=message, reply=(reply or "")[:1500]))
     newest = select(AiLog.id).order_by(AiLog.id.desc()).limit(200).correlate(None)   # its own FROM ai_log, not the DELETE's
@@ -568,7 +571,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
             ]
             began, reply = time.time(), None
             try:
-                reply = caller(api_key, model, build_prompt(categories, examples, payload, _subcategory_hints(conn), allow_new))
+                reply = caller(api_key, model, build_prompt(categories, examples, payload, subcategory_hints(conn), allow_new))
                 if extract_json_array(reply) is None:
                     snippet = " ".join((reply or "(empty reply)").split())[:160]
                     raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
@@ -577,13 +580,13 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 db.set_setting(conn, sk.LAST_LLM_ERROR, None)
                 answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
                 new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
-                _log(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
-                     f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
-                     reply)
+                log_call(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
+                         f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
+                         reply)
             except Exception as e:  # network or API error (its text quotes OpenRouter's answer: kept scrubbed)
                 said = monitoring.public_text(str(e))
                 db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
-                _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
+                log_call(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
                 conn.commit()
                 raise RuntimeError(f"The AI request failed: {e}") from e
             conn.commit()

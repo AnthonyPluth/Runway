@@ -1,4 +1,4 @@
-// The shapes of the API replies Settings uses (see runway/server.py, rules.py, plaid.py, retail.py, push.py).
+// The shapes of the API replies Settings uses (see runway/server.py, rules.py, plaid.py, retail/, push.py).
 import type { Account } from "$lib/types";
 
 /** A row of GET /api/accounts, with what Settings → Accounts edits. */

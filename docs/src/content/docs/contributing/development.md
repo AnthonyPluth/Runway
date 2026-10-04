@@ -81,6 +81,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/banktx.py` | What storing a bank transaction works the same way for with either provider: a posted one taking over its pending version, and matching up the history when an account switches |
 | `runway/tls.py`, `validate.py` | The TLS context for every outbound https request; checking numbers and other input, including numbers in a provider's reply |
 | `runway/tracked.py` | Hand-tracked holdings |
+| `runway/retail/` | Amazon, Target and Costco orders from the browser extension: `token.py` (the extension's key), `parsers/` (one module per store), `items.py` (categorizing items), `match.py` (pairing charges with bank transactions), `split.py` (splitting a transaction by its order), `undo.py` and `view.py` |
 | `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
 | `runway/dates.py`, `money.py` | Month arithmetic (a day a month doesn't have is its last) and month keys; amounts to the cent, and splitting a total into whole cents |

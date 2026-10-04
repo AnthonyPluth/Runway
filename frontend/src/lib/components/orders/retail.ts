@@ -1,4 +1,4 @@
-// Amazon and Target orders (runway/retail.py), shared by Transactions (an order under its charge) and Settings.
+// Amazon and Target orders (runway/retail/), shared by Transactions (an order under its charge) and Settings.
 
 interface RetailItem {
   id: number; title: string; quantity: number; amount: number; department?: string | null;
