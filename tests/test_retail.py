@@ -277,6 +277,18 @@ class SplitTests(Base):
             categorize.ask_model(self.c, [group], caller=broken)
         self.assertEqual(self.c.execute(select(AiLog.message)).fetchone()["message"], logged)
 
+    def test_a_failed_transaction_request_raises_scrubbed_text_but_keeps_the_status(self):
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        group = [{"posted": "2024-09-10", "amount": -5.0, "kind": "checking", "payee": "Cafe", "description": "Cafe"}]
+
+        def broken(*_a):
+            raise RuntimeError(self.LEAKY)
+        with self.assertRaises(RuntimeError) as cm:
+            categorize.ask_model(self.c, [group], caller=broken)
+        self.assertTrue(str(cm.exception).startswith("The AI request failed: "))
+        self.assert_scrubbed(str(cm.exception))
+        self.assertEqual(str(cm.exception), "The AI request failed: " + monitoring.public_text(self.LEAKY)[:300])
+
     def test_a_failed_order_suggestion_is_scrubbed_in_the_log_and_the_error(self):
         oid = store.save_order(self.c, "amazon", "113-0000000-0000000", details=1)
         store.save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0}])
