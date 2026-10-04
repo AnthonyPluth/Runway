@@ -1,0 +1,30 @@
+# Routes that have no test yet, as "METHOD /path" (see tools/feature_map.py). `make check` fails for a route with no
+# test that isn't here, and for a line here whose route has a test or is gone: this list only shrinks. Add a test and
+# delete its line; never add a line for a new route.
+GET /api/equity
+GET /api/investments
+GET /api/logodev/status
+GET /api/month_pace
+GET /api/recurring/missed
+GET /api/reports/transactions
+GET /api/retail/charges/{id}/candidates
+GET /api/retail/orders/{id}
+POST /api/ai/suggest
+POST /api/assets
+POST /api/assets/{id}/remove
+POST /api/carta/disconnect
+POST /api/carta/settings
+POST /api/equity/companies
+POST /api/equity/companies/{id}
+POST /api/equity/companies/{id}/grants
+POST /api/equity/companies/{id}/remove
+POST /api/equity/grants/{id}
+POST /api/equity/grants/{id}/remove
+POST /api/investments/plan
+POST /api/plaid/settings
+POST /api/push/subscribe
+POST /api/retail/charges/{id}/link
+POST /api/retail/orders/{id}/suggest
+POST /api/rules/preview
+POST /api/tracked/{id}
+POST /api/transactions/{id}/split

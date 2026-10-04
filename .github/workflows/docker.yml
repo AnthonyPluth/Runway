@@ -170,6 +170,18 @@ jobs:
         if: matrix.database == 'sqlite'
         run: poetry run mypy
 
+  # The feature map (docs/feature-map.json and its docs page) is generated from the routes, the web app, the tests and
+  # the docs, so any of them can make it stale; it runs on every change. Standard library only: no setup beyond Python.
+  feature-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the feature map is up to date and every route has a test
+        run: python3 tools/feature_map.py --check
+
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and build it (reporting its bundle sizes to Codecov).
   web:
