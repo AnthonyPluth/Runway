@@ -116,6 +116,59 @@ class SuggestionRestoreTests(LedgerCase):
                 api_recurring.api_recurring_suggestion_restore(self.conn, None, body)
 
 
+class CardSuggestionTests(LedgerCase):
+    """Credit cards are read like cash accounts: a card's repeating charges are suggested, on that card."""
+    def setUp(self):
+        super().setUp()
+        self.acct("chk", "checking", 3000.0)
+        self.acct("cc", "credit", -400.0, pay_from="chk")
+        for d in ["2026-07-05", "2026-08-05", "2026-09-05"]:
+            self.tx("cc", d, -15.99, "STREAMCO", "Entertainment")
+
+    def suggestions(self):
+        return {s["match"]: s for s in forecast.suggest_recurring(self.conn, TODAY)}
+
+    def test_a_monthly_card_charge_is_suggested_on_the_card(self):
+        s = self.suggestions()["streamco"]
+        self.assertEqual((s["key"], s["account_id"], s["amount"], s["frequency"], s["anchor_date"]),
+                         ("cc|streamco|monthly", "cc", -15.99, "monthly", "2026-09-05"))
+        self.assertEqual((s["amount_low"], s["amount_high"]), (15.99, 15.99))
+
+    def test_adding_it_puts_the_item_on_the_card_and_its_statements(self):
+        s = self.suggestions()["streamco"]
+        api_recurring.api_recurring_add(self.conn, None, {k: s[k] for k in ("name", "account_id", "amount", "frequency", "anchor_date", "match")})
+        self.assertEqual([tuple(r) for r in self.conn.execute(select(Recurring.account_id, Recurring.amount)).fetchall()], [("cc", -15.99)])
+        self.assertEqual({e["account_id"] for e in forecast.build(self.conn, TODAY, 60)["charges"]}, {"cc"})
+        self.assertNotIn("streamco", self.suggestions())   # now it's an item
+
+    def test_card_payments_and_transfers_are_not_suggested(self):
+        for d in ["2026-07-20", "2026-08-20", "2026-09-20"]:
+            self.tx("cc", d, 300.0, "PAYMENT THANK YOU", "Credit Card Payment")
+            self.tx("chk", d, -300.0, "CARD AUTOPAY", "Credit Card Payment")
+            self.tx("cc", d, -50.0, "MOVE MONEY", "Transfer")
+            self.tx("chk", d, -50.0, "MOVE MONEY", "Transfer")
+        self.assertEqual(set(self.suggestions()), {"streamco"})
+
+    def test_dismissing_a_card_suggestion_hides_it(self):
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "cc|streamco|monthly"})
+        self.assertEqual(self.suggestions(), {})
+        [d] = api_recurring.api_recurring_suggestions_dismissed(self.conn, None, None)
+        self.assertEqual((d["key"], d["account_id"]), ("cc|streamco|monthly", "cc"))
+        api_recurring.api_recurring_suggestion_restore(self.conn, None, {"key": "cc|streamco|monthly"})
+        self.assertIn("streamco", self.suggestions())
+
+    def test_cash_accounts_are_suggested_as_before_and_loans_and_investments_are_not(self):
+        self.acct("loan", "loan", -9000.0)
+        self.acct("brk", "investment", 5000.0)
+        for d in ["2026-07-01", "2026-08-01", "2026-09-01"]:
+            self.tx("chk", d, -900.0, "RENT CO", "Rent")
+            self.tx("loan", d, -200.0, "LOAN FEE", None)
+            self.tx("brk", d, -200.0, "FUND FEE", None)
+        s = self.suggestions()
+        self.assertEqual(set(s), {"streamco", "rent co"})
+        self.assertEqual((s["rent co"]["account_id"], s["rent co"]["amount"]), ("chk", -900.0))
+
+
 class AmountSignTests(LedgerCase):
     """The form sends the signed amount (negative for money out); the API stores what it's given."""
     def setUp(self):
