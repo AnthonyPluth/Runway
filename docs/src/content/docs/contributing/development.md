@@ -32,7 +32,7 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs the checks to run before you push, each tool once: ruff and mypy, Runway's own Semgrep rules, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs the checks to run before you push, each tool once: ruff, mypy and import-linter, Runway's own Semgrep rules, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## One paved path
 
@@ -81,10 +81,10 @@ Link to another page by its address, base included: `[Configuration](/Runway/ref
 
 ## Changing the database
 
-Edit `runway/schema.py`, then generate a migration and check it over:
+Edit `runway/storage/schema.py`, then generate a migration and check it over:
 
 ```bash
-poetry run alembic revision --autogenerate -m "add a column"   # writes runway/migrations/versions/…
+poetry run alembic revision --autogenerate -m "add a column"   # writes runway/storage/migrations/versions/…
 poetry run alembic check                                       # the schema and migrations agree
 ```
 
@@ -98,29 +98,43 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 |---|---|
 | `run.py` | Starts the server; `backup`, `restore` and `demo` commands |
 | `runway/server/` | Web server: `handler.py` (who may reach what, security headers, request limits, reading bodies and sending answers, `serve()`), `routes.py` (the API's route table: finding a request's route and answering it, for the web app and `/mcp` alike) and `api/` (the API, one module per area), `oauth_http.py` (OAuth for `/mcp` and its consent page), `static.py` (the web app's files), `sync.py` (background sync) |
-| `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
-| `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
-| `runway/banktx.py` | What storing a bank transaction works the same way for with either provider: a posted one taking over its pending version, and matching up the history when an account switches |
-| `runway/tls.py`, `validate.py` | The TLS context for every outbound https request; checking numbers and other input, including numbers in a provider's reply |
-| `runway/tracked.py` | Hand-tracked holdings |
-| `runway/retail/` | Amazon, Target and Costco orders from the browser extension: `token.py` (the extension's key), `parsers/` (one module per store), `items.py` (categorizing items), `match.py` (pairing charges with bank transactions), `split.py` (splitting a transaction by its order), `undo.py` and `view.py` |
-| `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
-| `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
-| `runway/dates.py`, `money.py` | Month arithmetic (a day a month doesn't have is its last) and month keys; amounts to the cent, and splitting a total into whole cents |
-| `runway/portfolio.py`, `prices.py` | Investment performance and price data |
-| `runway/networth.py`, `realie.py` | Net worth and home values |
-| `runway/oidc.py` | OpenID Connect sign-in |
-| `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
-| `runway/mcp_server.py`, `mcp_access.py`, `mcp_oauth.py` | The MCP server's tools, what an assistant may reach, and OAuth for connecting one |
-| `runway/db.py`, `schema.py`, `models.py`, `backup.py` | Database connections (SQLite or Postgres), the schema and its ORM models, backups |
-| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0040) |
-| `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
+| `runway/server/mcp_server.py`, `mcp_access.py`, `mcp_oauth.py` | The MCP server's tools, what an assistant may reach, and OAuth for connecting one |
+| `runway/providers/` | Each outside service Runway reads from or sends to. Providers don't import each other; what two of them share sits in a module of its own |
+| `runway/providers/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
+| `runway/providers/plaid.py`, `plaidapi.py`, `plaidbank.py` | Plaid: investments; its API client; banks and cards (per-account provider, transactions, card statements) |
+| `runway/providers/banktx.py`, `banks.py` | Shared by the bank providers: what storing a bank transaction works the same way for with either (a posted one taking over its pending version, and matching up the history when an account switches); whether any bank is connected |
+| `runway/providers/carta.py`, `carta_web.py`, `prices.py`, `finnhub.py`, `realie.py`, `webpush.py` | Carta equity; price data and Finnhub's live prices; home values; sending push notifications |
+| `runway/domain/` | What Runway works out from your data. It doesn't import the server |
+| `runway/domain/forecast.py`, `recurring.py`, `statements.py`, `bankdays.py` | Cash-flow forecast, card statements (Plaid's and entered ones), recurring items and missed payments, bank holidays |
+| `runway/domain/categorize.py`, `categories.py`, `rules.py`, `payees.py`, `splits.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text; split transactions |
+| `runway/domain/brands.py`, `merchants.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
+| `runway/domain/budgets.py`, `reports.py` | Budgets and reports |
+| `runway/domain/networth.py`, `loans.py`, `equity.py`, `portfolio.py`, `planner.py`, `tracked.py` | Net worth, loans, equity grants, investment performance, the retirement planner and hand-tracked holdings |
+| `runway/domain/churning.py`, `churn_*.py`, `bank_bonuses.py` | Credit card churning: cards, benefits, cards found on your accounts, plans, bank bonuses |
+| `runway/domain/notify.py`, `deleted_accounts.py`, `demo.py` | What to send a push notification about; deleting an account and keeping it deleted; the sample data |
+| `runway/domain/retail/` | Amazon, Target and Costco orders from the browser extension: `token.py` (the extension's key), `parsers/` (one module per store), `items.py` (categorizing items), `match.py` (pairing charges with bank transactions), `split.py` (splitting a transaction by its order), `undo.py` and `view.py` |
+| `runway/storage/` | The database, at the bottom: it imports nothing from the domain, the providers or the server, and only it imports the database drivers and Alembic |
+| `runway/storage/db.py`, `schema.py`, `models.py`, `settings_keys.py`, `secretbox.py`, `backup.py` | Database connections (SQLite or Postgres), the schema and its ORM models, the settings' names, secrets encrypted at rest, backups |
+| `runway/storage/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0040) |
+| `runway/tls.py`, `validate.py` | The only module that opens outbound connections (every https request goes through it); checking numbers and other input, including numbers in a provider's reply |
+| `runway/dates.py`, `money.py`, `monitoring.py`, `oidc.py` | Month arithmetic (a day a month doesn't have is its last) and month keys; amounts to the cent, and splitting a total into whole cents; logs and Sentry; OpenID Connect sign-in |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components (`components/settings/` holds Settings' tabs) |
 | `extension/` | The browser extension (Amazon, Target, Costco and Carta): `background.js` runs the imports, with one file each for Runway's API, the store address allow-list, hidden frames and tabs, and each store. Plain scripts with no build step; their pure helpers are tested by `frontend/src/extension/` |
 | `runway/static/` | Files Runway serves beside the app: the service worker (`sw.js`), manifest, fonts, icons, and `page.css` for the sign-in pages; the web app builds into `runway/static/app/` |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
 | `data/` | Your database (not in Git) |
+
+### Import boundaries
+
+`make lint` (so `make check`, and CI) runs [import-linter](https://import-linter.readthedocs.io) over `runway/`, with the contracts in `pyproject.toml`:
+
+- Only the server imports `runway/server/`: the domain, the providers, storage and the shared modules don't.
+- Only `runway/tls.py` opens outbound connections (`ssl`, `socket`, `http`, `websocket`, `requests`). The few modules that need one of these for another reason are listed, each with why. urllib can't be split this way, so Semgrep keeps `urlopen` in `tls.py`.
+- A provider doesn't import another provider. What two of them share goes in a module of its own (`banktx.py`, `banks.py`) or in the domain.
+- `runway/storage/` imports nothing from the domain, the providers or the server, and only it imports the database drivers and Alembic. Everything else reaches the database through `db.session()` and `db.connect()`.
+
+When a contract breaks, move the code to where its import is allowed rather than adding an exception. A new provider module joins its provider's contract, or gets one of its own.
 
 ## API handlers
 
