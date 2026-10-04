@@ -23,6 +23,7 @@ from sqlalchemy import and_, case, func, literal_column, or_, select
 
 from . import db, merchants, plaid, planner, prices, splits
 from . import settings_keys as sk
+from .dates import month_keys
 from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
                      ManualState, PlaidItem, Price, Security, Transaction)
 
@@ -250,7 +251,7 @@ def _is_income(t: dict) -> bool:
 
 def income(conn, today: date | None = None, months: int = 24) -> dict:
     today = today or date.today()
-    keys = _month_keys(today, months)
+    keys = month_keys(today, months)
     inc = {k: 0.0 for k in keys}
     fees = {k: 0.0 for k in keys}
     _add_plaid_income(conn, keys[0] + "-01", inc, fees)
@@ -263,17 +264,6 @@ def income(conn, today: date | None = None, months: int = 24) -> dict:
     last12 = keys[-12:]
     return {"months": keys, "income": [round(inc[k], 2) for k in keys], "fees": [round(fees[k], 2) for k in keys],
             "income_12m": round(sum(inc[k] for k in last12), 2), "fees_12m": round(sum(fees[k] for k in last12), 2)}
-
-
-def _month_keys(today: date, months: int) -> list[str]:
-    """The last `months` months ("2026-09"), oldest first, ending with this one."""
-    keys = []
-    y, m = today.year, today.month
-    for _ in range(months):
-        keys.append(f"{y:04d}-{m:02d}")
-        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
-    keys.reverse()
-    return keys
 
 
 def _add_plaid_income(conn, since: str, inc: dict[str, float], fees: dict[str, float]) -> None:

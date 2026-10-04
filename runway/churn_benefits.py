@@ -18,7 +18,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, insert, select
 
-from . import churning, db, validate
+from . import churning, dates, db, validate
 from .models import ChurnBenefit, ChurnBenefitUse, ChurnCard
 
 KINDS = {"credit": "Credit", "access": "Access", "status": "Status", "other": "Other"}
@@ -102,9 +102,9 @@ def period(benefit: dict, opened_on: str, day: date) -> tuple[date, date | None]
     else:
         anchor = date(opened.year if months > 12 else day.year, 1, 1)
     k = max(0, ((day.year - anchor.year) * 12 + day.month - anchor.month) // months)
-    while k > 0 and churning.add_months(anchor, k * months) > day:
+    while k > 0 and dates.add_months(anchor, k * months) > day:
         k -= 1
-    return churning.add_months(anchor, k * months), churning.add_months(anchor, (k + 1) * months) - relativedelta(days=1)
+    return dates.add_months(anchor, k * months), dates.add_months(anchor, (k + 1) * months) - relativedelta(days=1)
 
 
 def lead_days(benefit: dict) -> int:

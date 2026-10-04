@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
-from . import bankdays, brands, db
+from . import bankdays, brands, dates, db
 from .models import Account, Override, Recurring, RecurringDismissed, Transaction
 
 # How far a real payment can land from its expected date and still count as that occurrence.
@@ -68,7 +68,7 @@ def _once_window(item: dict) -> tuple[str, str]:
     """A one-time item's matching window, first and last day: around the day its money moves (its date, moved off a
     weekend or holiday as the forecast moves it), so a payment the forecast still expects can match it."""
     window = timedelta(days=MATCH_WINDOW_DAYS["once"])
-    day = bankdays.settles(date.fromisoformat(item["anchor_date"][:10]), (item.get("amount") or 0) > 0)
+    day = bankdays.settles(dates.parse_day(item["anchor_date"]), (item.get("amount") or 0) > 0)
     return (day - window).isoformat(), (day + window).isoformat()
 
 
@@ -312,7 +312,7 @@ def candidates(conn, item: dict, day: date, amount: float) -> list[dict]:
         q = q.where(t.amount > 0 if amount > 0 else t.amount < 0, func.abs(t.amount) >= want * (1 - CANDIDATE_SHARE),
                     func.abs(t.amount) <= want * (1 + CANDIDATE_SHARE))
     rows = db.rows(conn.execute(q))
-    rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((date.fromisoformat(r["posted"][:10]) - day).days), r["id"]))
+    rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((dates.parse_day(r["posted"]) - day).days), r["id"]))
     return rows[:CANDIDATES]
 
 

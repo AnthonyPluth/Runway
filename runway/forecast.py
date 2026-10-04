@@ -39,12 +39,12 @@ import urllib.parse
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, db, plaidapi, plaidbank, simplefin, splits, statements
+from .dates import clamp_day, month_end, month_start, next_after, parse_day
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -62,25 +62,6 @@ FEE_TEXT = re.compile(r"(?:annual|membership)\s+(?:membership\s+)?fee", re.I)   
 
 
 # ------------------------------------------------------------------------------------------------ dates
-
-def _d(s: str) -> date:
-    return date.fromisoformat(s[:10])
-
-
-def clamp_day(year: int, month: int, day: int) -> date:
-    """That day of the month, or the month's last day if it's shorter (Feb 31 -> Feb 28)."""
-    return date(year, month, 1) + relativedelta(day=day)
-
-
-def add_months(d: date, n: int, day: int | None = None) -> date:
-    return date(d.year, d.month, 1) + relativedelta(months=n, day=day or d.day)
-
-
-def next_after(d: date, day: int) -> date:
-    """First date strictly after d whose day-of-month is `day` (clamped)."""
-    this_month = clamp_day(d.year, d.month, day)
-    return this_month if this_month > d else add_months(this_month, 1, day)
-
 
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
@@ -120,7 +101,7 @@ def _monthly_rule(freq: Literal[0, 1], interval: int, dtstart: datetime, day: in
 
 def schedule(item: dict) -> rruleset:
     """A recurring item's dates, as a dateutil rule set starting at its anchor date."""
-    anchor = datetime.combine(_d(item["anchor_date"]), datetime.min.time())
+    anchor = datetime.combine(parse_day(item["anchor_date"]), datetime.min.time())
     freq = item["frequency"]
     rules = rruleset()
     if freq in ("weekly", "biweekly"):
@@ -142,7 +123,7 @@ def schedule(item: dict) -> rruleset:
 
 def scheduled(item: dict, start: date, end: date) -> list[date]:
     """The dates in (start, end] a recurring item is scheduled for, before moving any off weekends and holidays."""
-    stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
+    stop = min(end, parse_day(item["end_date"])) if item.get("end_date") else end
     if stop <= start:
         return []
     lo = datetime.combine(start + timedelta(days=1), datetime.min.time())
@@ -153,7 +134,7 @@ def scheduled(item: dict, start: date, end: date) -> list[date]:
 def occurrences(item: dict, start: date, end: date) -> list[date]:
     """Dates in (start, end] on which a recurring item's money actually moves: its scheduled dates, moved off weekends
     and bank holidays (money in to the business day before, money out to the one after; see bankdays)."""
-    stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
+    stop = min(end, parse_day(item["end_date"])) if item.get("end_date") else end
     if stop <= start:
         return []
     money_in = (item.get("amount") or 0) > 0
@@ -163,7 +144,7 @@ def occurrences(item: dict, start: date, end: date) -> list[date]:
     out = []
     for d in schedule(item).between(lo, hi, inc=True):
         nominal = d.date()
-        if item.get("end_date") and nominal > _d(item["end_date"]):
+        if item.get("end_date") and nominal > parse_day(item["end_date"]):
             continue
         moved = bankdays.settles(nominal, money_in)
         if start < moved <= end:
@@ -247,8 +228,8 @@ def bank_statement(conn, card: dict, today: date) -> dict | None:
     st = {**{k: plaid[k] for k in STATEMENT_FIELDS}, "source": "plaid"} if plaid else statements.latest(conn, card["id"], today)
     if not st:
         return None
-    close = _d(st["last_statement_date"])
-    due = _d(st["next_due_date"]) if st["next_due_date"] else None
+    close = parse_day(st["last_statement_date"])
+    due = parse_day(st["next_due_date"]) if st["next_due_date"] else None
     card["closing_day"] = close.day
     card["due_day"] = (due if due and due > close else close + timedelta(days=25)).day
     return st
@@ -278,7 +259,7 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     total = 0.0
     for s in sent:
         # The card's credit for it: the same amount, from a few days before to a couple of weeks after it left.
-        lo, hi = (_d(s["posted"]) - timedelta(days=5)).isoformat(), (_d(s["posted"]) + timedelta(days=14)).isoformat()
+        lo, hi = (parse_day(s["posted"]) - timedelta(days=5)).isoformat(), (parse_day(s["posted"]) + timedelta(days=14)).isoformat()
         hit = next((c for c in unclaimed if abs(c["amount"] + s["amount"]) <= 0.005 and lo <= c["posted"][:10] <= hi), None)
         if hit:
             unclaimed.remove(hit)
@@ -332,7 +313,7 @@ def interest(plan: dict, carried: float, charges: float = 0.0) -> float:
 def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
-    last_close = _d(bank["last_statement_date"])
+    last_close = parse_day(bank["last_statement_date"])
     T = Transaction
     # SimpleFIN's pending rows count from its refresh window only, as in pending_total: an older one isn't re-read by a
     # sync, so one that has since posted under a new id would count twice.
@@ -351,7 +332,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     over = max(0.0, paid - statement)
     net = -sum(t["amount"] for t in txs if t["category"] not in transfers) - over
     new_charges = max(0.0, net)
-    due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
+    due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, card["due_day"])
     remaining = max(0.0, statement - paid)
     plan = payment_plan(conn, card["id"], bank.get("purchase_apr"))   # none on a statement you entered
@@ -424,9 +405,9 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
     fee = round(card.get("annual_fee") or 0.0, 2)
     if fee < 0.005 or (card.get("status") or "open") != "open":
         return []
-    opened = _d(card.get("_anniversary") or card["opened_on"])   # a product change keeps the account's anniversary
+    opened = parse_day(card.get("_anniversary") or card["opened_on"])   # a product change keeps the account's anniversary
     acct = card.get("account_id")
-    plan_by = _d(card["plan_date"]) if card.get("plan_date") else None
+    plan_by = parse_day(card["plan_date"]) if card.get("plan_date") else None
     out = []
     for year in range(max(opened.year + 1, today.year), end.year + 1):
         if clamp_day(year, opened.month, 31) < today:
@@ -604,7 +585,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         # until the window closes; what's paid is in the balance already (see recurring.still_due).
         window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
         first_tx = conn.execute(select(func.min(T.posted)).where(T.account_id == item["account_id"])).fetchone()[0]
-        since = max(today - timedelta(days=window + 1), _d(first_tx) + timedelta(days=window) if first_tx else today)
+        since = max(today - timedelta(days=window + 1), parse_day(first_tx) + timedelta(days=window) if first_tx else today)
         paid = rec.paid_by_occurrence(item, history)
         for d in occurrences(item, min(since, today - timedelta(days=1)), end):
             key = f"rec:{item['id']}:{d.isoformat()}"
@@ -633,7 +614,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         if bank:
             # The day each fee is on the card's statements from: a fee charged on the day the latest one closed (today)
             # is on the next one.
-            after = (_d(bank["last_statement_date"]) + timedelta(days=1)).isoformat()
+            after = (parse_day(bank["last_statement_date"]) + timedelta(days=1)).isoformat()
             for f in on_cards[card["id"]]:
                 f["_on"] = max(f["date"], after)
 
@@ -689,7 +670,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 skipped.append({"category": q["category"], "reason": why})
                 continue
             for day, v in way["days"].items():
-                spend[acct][bankdays.next_business_day(_d(day)).isoformat() if acct in cash_ids else day] += v
+                spend[acct][bankdays.next_business_day(parse_day(day)).isoformat() if acct in cash_ids else day] += v
             spend_of[acct][q["category"]] = way["days"]   # each share's days, for the statement's estimate breakdown
             used.append({"category": q["category"], "amount": round(monthly, 2), "account_id": acct,
                          "account": db.account_label(a), "chosen": bool(q["pay_with"])})
@@ -707,7 +688,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
         info["annual_fees"] = [{"date": f["_on"], "amount": f["amount"], "category": f["category"]} for f in on_card]
-        due = _d(info["due_date"])
+        due = parse_day(info["due_date"])
         key = f"cardclose:{card['id']}:{info['last_close']}"
         old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
         pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
@@ -741,8 +722,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         # Future statements: what's been charged since the last one closed (the statement in progress), the budgets
         # charged to the card, its recurring charges and any annual fee, each in the cycle it lands in. A statement that
         # isn't paid in full carries the rest into the next one, with a month's interest on it.
-        close = next_after(_d(info["last_close"]), card["closing_day"])
-        prev_close = _d(info["last_close"])
+        close = next_after(parse_day(info["last_close"]), card["closing_day"])
+        prev_close = parse_day(info["last_close"])
         first = True
         charged = spend.get(card["id"], {})
         stale = False
@@ -790,7 +771,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                     f.update(paid_on=pays_k.isoformat(), paid_from=db.account_label(payer))
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
-            warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
+            warn(f"{label}: the bank hasn't sent the statement after {parse_day(info['last_close']):%b %-d} yet, so its "
                  "payment isn't in the forecast.", "#setup/connections", setting=False)   # the bank's to send
         if carries and info["apr"] is None:
             warn(f"{label}: the forecast carries part of its statements to the next one, but doesn’t count the interest "
@@ -813,7 +794,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             continue   # not paid from a forecast account: its fees are only listed
         payer, days = by_id[card["pay_from"]], spend.get(cid, {})
         prev, first = today, True
-        close = clamp_day(today.year, today.month, 31)
+        close = month_end(today)
         card_plan = payment_plan(conn, cid)
         owing = owed(card)   # the bank's sign, as everywhere (owed_positive): below zero is a credit
         while True:
@@ -847,7 +828,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                     f.update(paid_on=pays_on.isoformat(), paid_from=db.account_label(payer))
             owing = statement - pay
             prev, first = close, False
-            close = clamp_day(close.year + close.month // 12, close.month % 12 + 1, 31)
+            close = month_end(month_start(close, 1))
 
     # Churning cards not linked to a credit card account here (or to a hidden one): their fees are listed, on the
     # anniversary's day, but aren't in any balance, since there's no card whose statement they'd be on.
@@ -1208,7 +1189,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
         if len(items) < 2 or any(a == acct and (m in payee or payee in m) for a, m in known):
             continue
         items.sort(key=lambda t: t["posted"])
-        ds = [_d(t["posted"]) for t in items]
+        ds = [parse_day(t["posted"]) for t in items]
         gaps = [(b - a).days for a, b in itertools.pairwise(ds) if (b - a).days > 0]
         if not gaps:
             continue

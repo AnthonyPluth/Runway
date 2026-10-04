@@ -14,7 +14,7 @@ from dateutil.relativedelta import relativedelta
 
 from sqlalchemy import func, select
 
-from . import categories, db, splits
+from . import categories, dates, db, splits
 from .models import Account, Transaction
 
 TOP = 7                      # series shown by name; the rest are "Everything else"
@@ -23,14 +23,12 @@ GROUPS = ("category", "merchant", "account")
 
 
 def month_list(end: str, months: int) -> list[str]:
-    y, m = (int(x) for x in end.split("-"))
-    last = date(y, m, 1)
-    return [f"{last - relativedelta(months=months - 1 - i):%Y-%m}" for i in range(months)]
+    """The `months` months ("2026-09") ending with `end` ("YYYY-MM"), oldest first."""
+    return dates.month_keys(dates.key_start(end), months)
 
 
 def _bounds(months: list[str]) -> tuple[str, str]:
-    y, m = (int(x) for x in months[-1].split("-"))
-    return f"{months[0]}-01", (date(y, m, 1) + relativedelta(months=1)).isoformat()
+    return f"{months[0]}-01", f"{dates.next_month_key(months[-1])}-01"
 
 
 def _with_data(conn, ms: list[str]) -> list[str]:
@@ -42,8 +40,7 @@ def _with_data(conn, ms: list[str]) -> list[str]:
                          .join(Account, Account.id == Transaction.account_id).where(*SCOPE)).scalar()
     start = (first or "")[:7] or ms[-1]
     if first and first[8:10] != "01":
-        y, m = int(start[:4]), int(start[5:7])
-        after = f"{y + m // 12}-{m % 12 + 1:02d}"
+        after = dates.next_month_key(start)
         if after < ms[-1]:
             start = after
     return [m for m in ms if m >= start] or ms[-1:]
@@ -94,8 +91,7 @@ def _group_key(row, group: str, kinds: _Kinds) -> str:
 
 
 def _month_back(month: str, n: int) -> str:
-    y, m = (int(x) for x in month.split("-"))
-    return f"{date(y, m, 1) - relativedelta(months=n):%Y-%m}"
+    return dates.month_key(dates.month_start(dates.key_start(month), -n))
 
 
 def spending_over_time(conn, end: str, months: int = 12, group: str = "category", today: date | None = None) -> dict:
@@ -307,13 +303,13 @@ def month_pace(conn, today: date) -> dict:
     """Spending so far this month, day by day and added up, next to last month's, for the Overview.
     `this` runs to today; `last` covers all of last month. Both count spending the way everything else here does."""
     first = today.replace(day=1)
-    prev = first - relativedelta(months=1)
+    prev = dates.month_start(first, -1)
     kinds = _Kinds(conn)
     this_days, last_days = [0.0] * today.day, [0.0] * (first - prev).days
     for r in _rows(conn, prev.isoformat(), (today + relativedelta(days=1)).isoformat()):
         if kinds.kind(r) != "spend":
             continue
-        d = date.fromisoformat(r["posted"][:10])
+        d = dates.parse_day(r["posted"])
         days = this_days if d >= first else last_days
         days[d.day - 1] -= r["amount"]
 

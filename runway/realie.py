@@ -21,7 +21,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import or_, select, update
 
-from . import db, networth
+from . import dates, db, networth
 from . import settings_keys as sk
 from .models import Asset
 
@@ -170,7 +170,7 @@ def refresh_asset(conn, asset_id: int, today: date | None = None) -> dict:
         raise RealieError("Not found")
     nxt = next_lookup(a["last_lookup"])
     if nxt and nxt > today:
-        raise RealieError(f"Already looked up from Realie on {date.fromisoformat(a['last_lookup'][:10]):%b %-d}; "
+        raise RealieError(f"Already looked up from Realie on {dates.parse_day(a['last_lookup']):%b %-d}; "
                           f"Runway checks each home once a week, so the next lookup is {nxt:%b %-d}.")
     est = value_estimate(conn, a["address"], today)
     networth.set_value(conn, asset_id, est["value"], "realie", today, est["low"], est["high"])
@@ -180,7 +180,7 @@ def refresh_asset(conn, asset_id: int, today: date | None = None) -> dict:
 
 def next_lookup(last_lookup: str | None) -> date | None:
     """The first day a home can be looked up again, or None if it never has been."""
-    return date.fromisoformat(last_lookup[:10]) + timedelta(days=REFRESH_DAYS) if last_lookup else None
+    return dates.parse_day(last_lookup) + timedelta(days=REFRESH_DAYS) if last_lookup else None
 
 
 def refresh_due(conn, today: date | None = None) -> int:

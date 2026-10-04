@@ -26,7 +26,6 @@ decide each application themselves. The page says so.
 """
 from __future__ import annotations
 
-import calendar
 import re
 from datetime import date
 from typing import Any
@@ -35,6 +34,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, func, insert, select, update
 
 from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits, validate
+from .dates import add_months, clamp_day
 from .models import (Account, Category, ChurnBalance, ChurnBankBonus, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask,
                      ChurnScore, ChurnWish, User)
 
@@ -122,21 +122,6 @@ class ChurnError(ValueError):
     pass
 
 
-# ------------------------------------------------------------------------------------------------ dates
-
-def add_months(d: date, months: int) -> date:
-    """The same day `months` later; the 31st (or Feb 29) becomes the month's last day where there's no such day."""
-    return d + relativedelta(months=months)
-
-
-def _day(s: str | None) -> date | None:
-    return date.fromisoformat(s) if s else None
-
-
-def _on(year: int, month: int, day: int) -> date:
-    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
-
-
 # ------------------------------------------------------------------------------------------------ one card
 
 def family_key(card: dict) -> str:
@@ -177,7 +162,7 @@ def next_fee(card: dict, today: date) -> date | None:
         return None
     opened = date.fromisoformat(card.get("_anniversary") or card["opened_on"])
     for year in range(max(opened.year, today.year - 1), today.year + 2):
-        d = _on(year, opened.month, opened.day)
+        d = clamp_day(year, opened.month, opened.day)
         if d > opened and d >= today:
             return d
     return None
