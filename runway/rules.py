@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import brands, db, payees, splits
+from . import brands, db, payees, splits, validate
 from .models import Account, Category, Rule, Transaction
 from .money import CENT, allocate_cents
 
@@ -166,7 +166,7 @@ def clean(conn, body: dict) -> dict:
     """A rule from the app, checked. Raises RuleError with something to tell the person."""
     r = _clean_conditions(conn, body)
     r["category"] = body.get("category") or None
-    if r["category"] and not _known_category(conn, r["category"]):
+    if r["category"] and (not isinstance(r["category"], str) or not _known_category(conn, r["category"])):
         raise RuleError(f"Unknown category: {r['category']}")
     r["rename"] = " ".join(str(body.get("rename") or "").split())[:80] or None
     r["review"] = 1 if body.get("review") else 0
@@ -183,14 +183,14 @@ def _known_category(conn, name: str) -> bool:
     return conn.execute(select(Category.name).where(Category.name == name)).fetchone() is not None
 
 
+# A rule's amounts are amounts of money (validate.MAX_AMOUNT), to the cent, whichever way the money goes.
+_amount = validate.Validator(RuleError, drop="", not_number="Amounts must be numbers", too_large="Amounts must be less than a billion")
+
+
 def _clean_amount(v) -> float | None:
     """A dollar limit, whichever way the money goes; None when it's left empty."""
-    if v in (None, ""):
-        return None
-    try:
-        return round(abs(db.number(v)), 2)
-    except (TypeError, ValueError):
-        raise RuleError("Amounts must be numbers") from None
+    n = _amount.amount(v, "amount")
+    return None if n is None else abs(n)
 
 
 def _clean_conditions(conn, body: dict) -> dict:
@@ -208,6 +208,8 @@ def _clean_conditions(conn, body: dict) -> dict:
     if r["direction"] not in (None, *DIRECTIONS):
         raise RuleError("Direction is money out or money in")
     r["account_id"] = body.get("account_id") or None
+    if r["account_id"] and not isinstance(r["account_id"], str):
+        raise RuleError("Unknown account")
     if r["account_id"] and not conn.execute(select(Account.id).where(Account.id == r["account_id"])).fetchone():
         raise RuleError("Unknown account")
     if not r["match"] and not any(r[k] is not None for k in ("amount_min", "amount_max", "direction", "account_id")):
@@ -222,14 +224,15 @@ def _clean_split(conn, split) -> str:
     Returned as the JSON the rules table keeps."""
     if not isinstance(split, list) or len(split) < 2:
         raise RuleError("A split needs at least two parts")
-    parts = []
-    for p in split:
-        cat = (p or {}).get("category")
+    parts: list[dict] = []
+    for given in split:
+        p = given if isinstance(given, dict) else {}
+        cat = p.get("category")
         try:
-            pct = round(db.number((p or {}).get("percent")), 2)
+            pct = round(db.number(p.get("percent")), 2)
         except (TypeError, ValueError):
             raise RuleError("Give every part a percentage") from None
-        if not cat or not _known_category(conn, cat):
+        if not cat or not isinstance(cat, str) or not _known_category(conn, cat):
             raise RuleError("Give every part a category")
         if pct <= 0:
             raise RuleError("Give every part a percentage")

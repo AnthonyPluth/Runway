@@ -129,26 +129,28 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
 def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None = None) -> int:
     today = today or date.today()
     fields: dict[str, Any] = {}
+    text = lambda v: v if isinstance(v, str) else ""   # anything but text is as good as nothing
     if "name" in body or asset_id is None:
-        name = (body.get("name") or "").strip()
+        name = text(body.get("name")).strip()
         if not name:
             raise ValueError("Give it a name")
         fields["name"] = name[:80]
     if "kind" in body or asset_id is None:
         kind = body.get("kind") or "other"
-        if kind not in ASSET_KINDS:
+        if not isinstance(kind, str) or kind not in ASSET_KINDS:
             raise ValueError("Kind must be home, vehicle or other")
         fields["kind"] = kind
     if "auto_update" in body:
-        fields["auto_update"] = 1 if body.get("auto_update") else 0
+        fields["auto_update"] = validate.flag(body.get("auto_update"))
     for key in ("url", "address", "notes"):
         if key in body:
-            fields[key] = (body.get(key) or "").strip() or None
+            fields[key] = text(body.get(key)).strip() or None
     if fields.get("url") and not re.match(r"https?://", fields["url"], re.I):   # it's a link in the app: never javascript:
         raise ValueError("The link must be a web address starting with https://")
     if "loan_account_id" in body:
         lid = body.get("loan_account_id") or None
-        if lid and not conn.execute(select(Account.id).where(Account.id == lid, Account.kind == "loan")).fetchone():
+        if lid and (not isinstance(lid, str)
+                    or not conn.execute(select(Account.id).where(Account.id == lid, Account.kind == "loan")).fetchone()):
             raise ValueError("Pick one of your loan accounts")
         fields["loan_account_id"] = lid
     if "yearly_change" in body:

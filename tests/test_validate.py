@@ -158,6 +158,30 @@ class DayTests(unittest.TestCase):
                 self.v.day(empty, "day", required=True)
 
 
+class AmountTests(unittest.TestCase):
+    v = validate.Validator(Oops, drop="")
+
+    def test_an_amount(self):
+        self.assertEqual(self.v.amount("-12.345", "amount"), -12.35)            # to the cent
+        self.assertEqual(self.v.amount("-12.345", "amount", cents=False), -12.345)
+        self.assertEqual(self.v.amount(999_999_999.99, "amount"), 999_999_999.99)
+        self.assertIsNone(self.v.amount("", "amount"))
+        with self.assertRaisesRegex(Oops, "^Enter the amount$"):
+            self.v.amount(None, "amount", required=True)
+
+    def test_not_an_amount(self):
+        for bad in ("nan", "inf", float("nan"), float("-inf"), "abc", True, False, [], {}, "$5"):
+            with self.subTest(v=bad), self.assertRaisesRegex(Oops, "^The amount must be a number$"):
+                self.v.amount(bad, "amount")
+
+    def test_too_large(self):
+        for bad in (validate.MAX_AMOUNT, -validate.MAX_AMOUNT, "1e300", 10 ** 30):
+            with self.subTest(v=bad), self.assertRaisesRegex(Oops, "^The amount (is too large|must be a number)$"):
+                self.v.amount(bad, "amount")
+        with self.assertRaisesRegex(Oops, "^The amount is too large$"):
+            self.v.amount("1e10", "amount")
+
+
 class FlagTests(unittest.TestCase):
     def test_on(self):
         for on in (True, 1, "1", "true", "on", 1.0):
@@ -168,6 +192,11 @@ class FlagTests(unittest.TestCase):
         for off in (False, 0, "0", "", None, "True", "yes", "ON", "false", 2):
             with self.subTest(v=off):
                 self.assertEqual(validate.flag(off), 0)
+
+    def test_on_is_flag_as_a_bool(self):
+        for v in (True, 1, "1", "true", "on", False, 0, "0", "false", "no", "off", None, [], {"a": 1}):
+            with self.subTest(v=v):
+                self.assertIs(validate.on(v), validate.flag(v) == 1)
 
 
 if __name__ == "__main__":

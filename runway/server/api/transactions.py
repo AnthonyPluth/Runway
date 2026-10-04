@@ -1,7 +1,6 @@
 """Transactions: the list and its filters, categorizing and splitting them, and the AI model's suggestions."""
 from __future__ import annotations
 
-import math
 import re
 import urllib.parse
 import uuid
@@ -10,10 +9,10 @@ from datetime import date, timedelta
 from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.orm import aliased
 
-from ... import categories, categorize, db, merchants, retail, splits
+from ... import categories, categorize, db, merchants, retail, splits, validate
 from ... import settings_keys as sk
 from ...models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
-from ..common import ApiError, _month_range
+from ..common import ApiError, _month_range, query_int, row_id, text
 
 # A manual transaction's id: its account's, then this and a random part (a bank's are "|<its id>" or "|pl:<its id>").
 MANUAL = "|manual:"
@@ -46,27 +45,18 @@ def _transfers(conn) -> tuple[list[str], list[str]]:
     return moves, ignore
 
 
+# The list's filters (?from=, ?min=, ...): a day, or an amount of money in or out (unsigned, not rounded).
+_filters = validate.Validator(ApiError, drop="", not_date="Dates must look like 2026-09-30", not_number="Amounts must be numbers",
+                              too_large="Amounts must be less than a billion")
+
+
 def _date(q, key: str) -> str:
-    v = q.get(key, [""])[0]
-    if not v:
-        return ""
-    try:
-        return date.fromisoformat(v).isoformat()
-    except ValueError:
-        raise ApiError("Dates must look like 2026-09-30") from None
+    return _filters.day(q.get(key, [""])[0], key) or ""
 
 
 def _number(q, key: str) -> float | None:
-    v = q.get(key, [""])[0]
-    if not v:
-        return None
-    try:
-        n = abs(float(v))
-    except ValueError:
-        raise ApiError("Amounts must be numbers") from None
-    if not math.isfinite(n):
-        raise ApiError("Amounts must be numbers")
-    return n
+    n = _filters.amount(q.get(key, [""])[0], key, cents=False)
+    return None if n is None else abs(n)
 
 
 def _as_amount(text: str) -> float | None:
@@ -86,10 +76,7 @@ def tx_where(conn, q) -> tuple[list, list[str]]:
     if q.get("review", ["0"])[0] == "1":
         where.append(T.needs_review == 1)
     if q.get("recurring", [""])[0]:
-        try:
-            where.append(T.recurring_id == int(q["recurring"][0]))
-        except ValueError:
-            raise ApiError("Unknown recurring item") from None
+        where.append(T.recurring_id == row_id(q["recurring"][0], "Unknown recurring item", 400))
     if q.get("account", [""])[0]:
         where.append(T.account_id == q["account"][0])
     if q.get("category", [""])[0]:
@@ -171,8 +158,8 @@ def _net(conn, where: list, family: list[str], kind: str) -> float:
 def api_transactions(conn, q, _b):
     T = Transaction
     where, family = tx_where(conn, q)
-    limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
-    offset = max(0, int(q.get("offset", ["0"])[0]))
+    limit = query_int(q, "limit", 200, 1, 1000)
+    offset = query_int(q, "offset", 0, 0, 10 ** 9)
     items = db.rows(conn.execute(
         select(T, db.account_label_expr().label("account_name"), Account.kind.label("account_kind"),
                Recurring.name.label("recurring_name"))
@@ -299,16 +286,17 @@ def restore(conn, rows: list) -> int:
 
 def api_tx_category(conn, _q, body, tx_id):
     was = snapshot(conn, [tx_id], orders=True)
+    category = text(body.get("category"), "category")
     try:
-        if set_parts(conn, [tx_id], _family(conn, body.get("only")), body.get("category", "")):
+        if set_parts(conn, [tx_id], _family(conn, body.get("only")), category):
             return {"ok": True, "also_updated": 0, "offer_rule": None, "was": was, "part": True}
-        remember = bool(body.get("remember"))
-        n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
-        retail.set_transaction_category(conn, [tx_id], body.get("category", ""))
+        remember = validate.on(body.get("remember"))
+        n = categorize.set_category(conn, tx_id, category, remember)
+        retail.set_transaction_category(conn, [tx_id], category)
     except ValueError as e:
         raise ApiError(str(e)) from e
     # Not remembered yet: the app asks whether to use this category for the merchant from now on.
-    offer = None if remember else categorize.rule_offer(conn, tx_id, body.get("category", ""))
+    offer = None if remember else categorize.rule_offer(conn, tx_id, category)
     return {"ok": True, "also_updated": n, "offer_rule": offer, "was": was}
 
 
@@ -329,33 +317,34 @@ def api_tx_bulk(conn, _q, body, *_):
     if isinstance(body.get("restore"), list):   # Undo: the `was` an earlier change sent back
         keep = body.get("keep_bank")   # ... and whether a brand kept the bank's name before (api_tx_brand_name)
         if isinstance(keep, dict) and isinstance(keep.get("brand"), str) and keep["brand"]:
-            categorize.keep_bank_name(conn, keep["brand"], bool(keep.get("keep")))
+            categorize.keep_bank_name(conn, keep["brand"], validate.on(keep.get("keep")))
         return {"ok": True, "updated": restore(conn, body["restore"])}
     ids = body.get("ids")
     if isinstance(body.get("filter"), dict):   # every transaction a list's filters match ("Select all 212")
         ids = filtered_ids(conn, body["filter"])
     if not isinstance(ids, list):
         raise ApiError("Select some transactions first")
-    was = snapshot(conn, ids, orders=bool(body.get("category")))
+    category = text(body.get("category"), "category") or None
+    was = snapshot(conn, ids, orders=bool(category))
     try:
         ids = list(dict.fromkeys(str(i) for i in ids))
         if not ids or len(ids) > categorize.MAX_BULK:   # (bulk_update says which)
-            categorize.bulk_update(conn, ids, body.get("category") or None, None, False)
-        payee, reviewed = body.get("payee") or None, bool(body.get("reviewed"))
+            categorize.bulk_update(conn, ids, category, None, False)
+        payee, reviewed = text(body.get("payee"), "payee") or None, validate.on(body.get("reviewed"))
         # Under a category filter, a split one changes only its part in that category (see set_parts).
-        parts = set(set_parts(conn, ids, _family(conn, body.get("only")), body["category"])) if body.get("category") else set()
+        parts = set(set_parts(conn, ids, _family(conn, body.get("only")), category)) if category else set()
         rest = [i for i in ids if i not in parts]
         n = len(parts)
         if parts and (payee or reviewed):
             categorize.bulk_update(conn, list(parts), None, payee, reviewed)
         if rest:
-            n += categorize.bulk_update(conn, rest, body.get("category") or None, payee, reviewed)
-        if body.get("category") and rest:
-            retail.set_transaction_category(conn, rest, body["category"])
+            n += categorize.bulk_update(conn, rest, category, payee, reviewed)
+        if category and rest:
+            retail.set_transaction_category(conn, rest, category)
     except ValueError as e:
         raise ApiError(str(e)) from e
     # All one merchant: the app asks whether to use this category for it from now on, as after a single change.
-    offer = categorize.bulk_rule_offer(conn, rest, body["category"]) if body.get("category") and rest and not parts else None
+    offer = categorize.bulk_rule_offer(conn, rest, category) if category and rest and not parts else None
     return {"ok": True, "updated": n, "was": was, "offer_rule": offer}
 
 
@@ -376,26 +365,21 @@ def filtered_ids(conn, f: dict) -> list[str]:
 # What an edit can change, and so what Undo puts back exactly (with the category and splits, from `snapshot`).
 _EDITS = ("payee", "posted", "amount", "notes", "bank_posted", "bank_amount")
 MAX_NOTE = 1000
-MAX_AMOUNT = 1e9
+DATE = "Enter a date like 2026-09-30"
+# A transaction's date and amount, as you enter or edit one: an amount is to the cent, under validate.MAX_AMOUNT.
+_v = validate.Validator(ApiError, drop="", missing="Enter the {label}", not_number="Enter the {label} as a number",
+                        too_large="Enter the {label} as a number", not_date=DATE)
 
 
 def _valid_date(v) -> str:
-    try:
-        return date.fromisoformat(str(v)).isoformat()
-    except ValueError:
-        raise ApiError("Enter a date like 2026-09-30") from None
+    day = _v.day(v if isinstance(v, str) else "", "date")
+    if day is None:
+        raise ApiError(DATE)
+    return day
 
 
 def _valid_amount(v) -> float:
-    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
-        raise ApiError("Enter the amount as a number")
-    try:
-        n = float(v)
-    except ValueError:
-        raise ApiError("Enter the amount as a number") from None
-    if not math.isfinite(n) or abs(n) >= MAX_AMOUNT:
-        raise ApiError("Enter the amount as a number")
-    return round(n, 2)
+    return _v.amount(v, "amount", required=True)
 
 
 def _name(v) -> str | None:
@@ -445,7 +429,8 @@ def api_tx_update(conn, _q, body, tx_id):
             back["payee"] = back["payee"] if isinstance(back["payee"], str) and back["payee"] else None
         if "notes" in back:
             back["notes"] = back["notes"] if isinstance(back["notes"], str) and back["notes"] else None
-        conn.execute(update(t).where(t.id == tx_id).values(**back))
+        if back:   # (a `was` with none of them puts back only the category and splits)
+            conn.execute(update(t).where(t.id == tx_id).values(**back))
         restore(conn, [{**was, "id": tx_id}])
         return {"ok": True}
     was = edit_was(conn, tx_id)
@@ -592,15 +577,16 @@ def api_tx_brand_name(conn, _q, body, tx_id):
     """Name a transaction by the bank's text instead of the brand's name a sync gave it ({"use": "bank"}), or by the
     brand's again ({"use": "brand"}). With {"all": true}, the brand's other transactions too, and the syncs from now on
     (categorize.keep_bank_name). Sends back what Undo needs: the transactions as they were, and the brand's setting."""
+    every = validate.on(body.get("all"))
     try:
-        brand, names = categorize.brand_renames(conn, tx_id, str(body.get("use") or ""), bool(body.get("all")))
+        brand, names = categorize.brand_renames(conn, tx_id, str(body.get("use") or ""), every)
     except ValueError as e:
         raise ApiError(str(e)) from e
     was = snapshot(conn, list(names))
     kept = brand in categorize.kept_bank_names(conn)
     for tid, payee in names.items():
         conn.execute(update(Transaction).where(Transaction.id == tid).values(payee=payee))
-    if body.get("all"):
+    if every:
         categorize.keep_bank_name(conn, brand, body.get("use") == "bank")
     return {"ok": True, "updated": len(names), "brand": brand, "payee": names[tx_id], "was": was,
             "keep_bank": {"brand": brand, "keep": kept}}
@@ -631,16 +617,21 @@ def api_ai_log(conn, _q, _b):
 
 
 def api_ai_apply(conn, _q, body):
-    ids = [str(i) for i in (body.get("tx_ids") or [])]
-    category = body.get("category") or ""
-    new = body.get("new_category") or None
+    tx_ids = body.get("tx_ids") or []
+    if not isinstance(tx_ids, list):
+        raise ApiError("Choose the transactions to categorize")
+    ids = [str(i) for i in tx_ids]
+    category = text(body.get("category"), "category")
+    new = body.get("new_category") or None   # {"name", "parent"}: the AI's proposal
+    if new is not None and not isinstance(new, dict):
+        raise ApiError("The suggested category has no name")
     created = False
     if new:   # accept an AI-proposed category: create it (unless it exists by now), then use it
         try:
             category, created = categorize.create_proposed(conn, new, is_income=body.get("direction") == "in")
         except ValueError as e:
             raise ApiError(str(e)) from e
-    remember = bool(body.get("remember"))
+    remember = validate.on(body.get("remember"))
     was = snapshot(conn, ids, orders=True)
     try:
         n = categorize.apply_to_group(conn, ids, category, remember)

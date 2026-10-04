@@ -5,10 +5,10 @@ from datetime import datetime
 
 from sqlalchemy import delete, select
 
-from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked
+from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked, validate
 from ... import settings_keys as sk
 from ...models import CostOverride, Holding, ManualContribution, ManualState, Security
-from ..common import ApiError
+from ..common import ApiError, text
 from ..sync import refresh_prices
 
 
@@ -24,7 +24,7 @@ def api_plan_save(conn, _q, body):
 
 def api_cost_basis(conn, _q, body):
     """Set the price paid per share for a holding in one account (cost basis = that x shares held). Empty clears it."""
-    acct, sec = body.get("account_id") or "", body.get("security_id") or ""
+    acct, sec = text(body.get("account_id"), "account_id"), text(body.get("security_id"), "security_id")
     if not conn.execute(select(Holding.account_id).where(Holding.account_id == acct, Holding.security_id == sec)).fetchone():
         raise ApiError("That holding isn't in this account")
     v = body.get("per_share", body.get("cost_basis"))
@@ -68,7 +68,7 @@ def api_finnhub_status(conn, _q, _b):
 def api_finnhub_settings(conn, _q, body):
     """Save (after one quote proves it works) or remove the Finnhub key that makes live prices real-time trades."""
     key = str(body.get("api_key") or "").strip()
-    if body.get("clear"):
+    if validate.on(body.get("clear")):
         db.set_setting(conn, sk.FINNHUB_API_KEY, None)
     elif key:
         try:

@@ -177,14 +177,14 @@ class HttpTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", self.open("/api/state")[1]["Content-Security-Policy"])
 
     def test_errors_dont_show_internals(self):
+        # A value that can't be read is a 400 saying which one; a handler's own failure, a 500 with only a reference.
         code, body = self.api("GET", "/api/transactions?limit=x")
-        self.assertEqual(code, 400)
-        self.assertNotIn("int()", body["error"])
-        self.assertIn("reference", body["error"])
+        self.assertEqual((code, body["error"]), (400, "The limit must be a whole number"))
         with mock.patch.object(categories, "all_categories", side_effect=RuntimeError("secret detail")):
             code, body = self.api("GET", "/api/categories")
         self.assertEqual(code, 500)
         self.assertNotIn("secret detail", body["error"])
+        self.assertIn("reference", body["error"])
 
     def test_request_limits(self):
         code, _ = self.api("POST", "/api/settings", headers={"Content-Length": str(server.MAX_JSON_BODY + 1)})

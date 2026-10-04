@@ -11,12 +11,12 @@ from sqlalchemy import func, select
 from ... import categorize, db, monitoring, plaid, plaidbank, recurring, simplefin
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, InvAccount, PlaidAccount, PlaidItem
-from ..common import ApiError
+from ..common import ApiError, text
 from ..sync import _inv_lock, _sync_lock, refresh_prices
 
 
 def api_connect(conn, _q, body):
-    token = (body.get("token") or "").strip()
+    token = text(body.get("token"), "token").strip()
     if not token:
         raise ApiError("Paste a SimpleFIN setup token.")
     try:
@@ -67,26 +67,26 @@ def api_plaid_status(conn, _q, _b):
 
 def api_plaid_settings(conn, _q, body):
     if "env" in body:
-        if body["env"] not in plaid.HOSTS:
+        if text(body["env"], "env") not in plaid.HOSTS:
             raise ApiError("Environment must be sandbox or production")
         db.set_setting(conn, sk.PLAID_ENV, body["env"])
     if body.get("client_id") is not None:
-        db.set_setting(conn, sk.PLAID_CLIENT_ID, body["client_id"].strip() or None)
-    if body.get("secret"):
-        db.set_setting(conn, sk.PLAID_SECRET, body["secret"].strip())
+        db.set_setting(conn, sk.PLAID_CLIENT_ID, text(body["client_id"], "client_id").strip() or None)
+    if text(body.get("secret"), "secret").strip():
+        db.set_setting(conn, sk.PLAID_SECRET, text(body["secret"], "secret").strip())
     if "redirect_uri" in body:
-        db.set_setting(conn, sk.PLAID_REDIRECT_URI, (body.get("redirect_uri") or "").strip() or None)
+        db.set_setting(conn, sk.PLAID_REDIRECT_URI, text(body.get("redirect_uri"), "redirect_uri").strip() or None)
     return {"ok": True}
 
 
 def api_plaid_link_token(conn, _q, body):
-    kind = body.get("kind") or "investments"
+    kind = text(body.get("kind"), "kind") or "investments"
     if body.get("item_id"):
         kind = "investments"   # reconnecting: the connection keeps its products
     if kind not in ("investments", "bank", "cards"):
         raise ApiError("Unknown kind of connection")
     try:
-        token = plaid.link_token(conn, body.get("item_id") or None, kind)
+        token = plaid.link_token(conn, text(body.get("item_id"), "item_id") or None, kind)
     except plaid.PlaidError as e:
         if not (kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD")):
             raise ApiError(monitoring.public_text(str(e)), 502) from e
@@ -122,14 +122,15 @@ def _item_lock(conn, item_id: str) -> threading.Lock:
 
 
 def api_plaid_exchange(conn, _q, body):
-    kind = body.get("kind")
+    kind: str | None = text(body.get("kind"), "kind")
     if kind not in plaid.KIND_PRODUCTS:   # what Link was opened for, if the page didn't say
         try:
             kind = json.loads(db.get_setting(conn, sk.PLAID_PENDING_LINK) or "{}").get("kind")
         except ValueError:
             kind = None
     try:
-        item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {}, kind)
+        institution = body.get("institution") if isinstance(body.get("institution"), dict) else {}
+        item_id = plaid.exchange(conn, text(body.get("public_token"), "public_token"), institution, kind)
     except plaid.PlaidError as e:
         raise ApiError(monitoring.public_text(str(e)), 502) from e
     lock = _item_lock(conn, item_id)

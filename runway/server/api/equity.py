@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from ... import carta, equity
 from ...models import EquityGrant
-from ..common import ApiError, host_allowed
+from ..common import ApiError, host_allowed, text
 
 
 def carta_redirect_uri(origin: str | None = None) -> str:
@@ -63,6 +63,8 @@ def api_equity_grant_remove(conn, _q, _b, gid):
 
 
 def api_carta_settings(conn, _q, body):
+    if any(body.get(k) is not None and not isinstance(body[k], str) for k in ("env", "client_id", "client_secret", "origin")):
+        raise ApiError("Send Carta's settings as text")
     try:
         carta.save_settings(conn, body)
     except carta.CartaError as e:
@@ -73,7 +75,7 @@ def api_carta_settings(conn, _q, body):
 def api_carta_connect(conn, _q, body):
     """Where to send you to approve Runway at Carta."""
     try:
-        return {"url": carta.authorize_url(conn, carta_redirect_uri(body.get("origin")))}
+        return {"url": carta.authorize_url(conn, carta_redirect_uri(text(body.get("origin"), "origin") or None))}
     except carta.CartaError as e:
         raise ApiError(str(e)) from e
 

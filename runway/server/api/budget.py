@@ -7,12 +7,15 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, select, update
 
-from ... import categories, db, forecast
+from ... import categories, db, forecast, validate
 from ...budgets import budget_carry, month_totals
 from ...models import Account, Budget, Category
-from ..common import ApiError, _month_range
+from ..common import ApiError, _month_range, text
 
 EXPECTED_DAYS = 366   # how far ahead a month's expected payments are worked out (the forecast's longest horizon)
+# A budget is an amount of money (validate.MAX_AMOUNT), kept as typed.
+_amount = validate.Validator(ApiError, drop="", missing="Enter an amount", not_number="Enter an amount",
+                             too_large="The amount is too large")
 
 
 def api_budget(conn, q, _b):
@@ -108,7 +111,7 @@ def subtree_sums(cats: list[dict], amounts: list[tuple[str, float]]) -> dict[str
 
 
 def api_budget_set(conn, _q, body):
-    cat = body.get("category") or ""
+    cat = text(body.get("category"), "category")
     found = conn.execute(select(Category.is_income).where(Category.name == cat, Category.is_transfer == 0)).fetchone()
     if not found:
         raise ApiError("Pick a spending or income category")
@@ -116,7 +119,7 @@ def api_budget_set(conn, _q, body):
     if "rollover" in body and "amount" not in body:   # rolling over from this month on, or not
         if income:
             raise ApiError("Income doesn’t roll over")
-        start = f"{date.today():%Y-%m}" if body.get("rollover") else None
+        start = f"{date.today():%Y-%m}" if validate.on(body.get("rollover")) else None
         if not conn.execute(update(Budget).where(Budget.category == cat).values(rollover_from=start)).rowcount:
             raise ApiError("Set a budget for this category first")
         return {"ok": True}
@@ -124,7 +127,7 @@ def api_budget_set(conn, _q, body):
         if income:
             return {"ok": True}
         try:
-            categories.set_pay_with(conn, cat, body.get("pay_with") or None)
+            categories.set_pay_with(conn, cat, text(body.get("pay_with"), "pay_with") or None)
         except categories.CategoryError as e:
             raise ApiError(str(e)) from e
         return {"ok": True}
@@ -132,10 +135,7 @@ def api_budget_set(conn, _q, body):
     if amt in (None, "", 0, "0"):
         conn.execute(delete(Budget).where(Budget.category == cat))   # the parent's budget stays as it is
         return {"ok": True, "raised": []}
-    try:
-        amt = abs(db.number(amt))
-    except (TypeError, ValueError):
-        raise ApiError("Enter an amount") from None
+    amt = abs(_amount.amount(amt, "amount", cents=False, required=True))
     db.upsert(conn, Budget, {"category": cat, "amount": amt}, key=["category"])
     return {"ok": True, "raised": raise_parents(conn, cat)}
 

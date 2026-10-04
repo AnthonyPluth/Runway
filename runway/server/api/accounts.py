@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from ... import brands, db, deleted_accounts, forecast, loans, merchants, plaidbank, statements, validate
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, LoanTerms, PlaidAccount, PlaidItem
-from ..common import ApiError
+from ..common import ApiError, text
 from ..sync import _inv_lock, _sync_lock
 
 
@@ -173,8 +173,8 @@ def api_account_update(conn, _q, body, acct_id):
             continue
         if v in ("", None):
             v = None
-        elif ACCOUNT_FIELDS[k] is int:
-            v = int(v)
+        elif ACCOUNT_FIELDS[k] is int:   # (on/off switches)
+            v = validate.flag(v)
         else:
             v = str(v).strip()
         if k == "kind" and v not in KINDS:
@@ -234,9 +234,9 @@ def api_account_logo(conn, _q, body, acct_id):
     """Choose an account's logo: a website's (fetched from Logo.dev now), none (its letter), or (neither) its institution's."""
     if not conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone():
         raise ApiError("Account not found", 404)
-    website = (body.get("website") or "").strip()
+    website = text(body.get("website"), "website").strip()
     try:
-        logo = merchants.fetch_site(conn, website) if website else brands.NO_LOGO if body.get("hidden") else None
+        logo = merchants.fetch_site(conn, website) if website else brands.NO_LOGO if validate.on(body.get("hidden")) else None
     except ValueError as e:
         raise ApiError(str(e)) from e
     conn.execute(update(Account).where(Account.id == acct_id).values(logo=logo))
