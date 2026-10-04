@@ -57,6 +57,13 @@ describe("isPhone", () => {
   });
 });
 
+describe("date fields", () => {
+  it("are drawn as plain boxes, so iOS gives them the width they're given instead of their text's", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    expect(css).toMatch(/^input\[type="date"\] \{ display: block; min-width: 0; -webkit-appearance: none; appearance: none; \}/m);
+  });
+});
+
 describe("zoom", () => {
   it("is off for the page: the viewport meta for the installed app and Android, touch-action for Safari in a tab", () => {
     const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
