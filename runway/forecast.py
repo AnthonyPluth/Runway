@@ -396,7 +396,7 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
     """A churning card's (churn_cards row) annual fees from today through `end`: one, or two with a horizon over a year.
 
     The fee posts on the account's anniversary, the day of the month it was opened (for a product change, the original
-    card's: `_anniversary`, churning.anniversaries; whatever fee_month says), from the first anniversary on (a shorter
+    card's: `_anniversary`, churning.anniversaries), from the first anniversary on (a shorter
     month's last day: Feb 29 -> Feb 28): churning.fee_anniversaries, as the Churning page's next_fee counts them. Issuers charge it on the anniversary, so it's on whichever statement that day
     falls in: the one closing that month when the anniversary is on or before the closing day, else the next one (the
     Churning page dates it the same way). An anniversary earlier this month whose fee hasn't been charged yet is still

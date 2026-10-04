@@ -267,16 +267,3 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
     conn.execute(delete(Budget).where(Budget.category == name))
     conn.execute(delete(Category).where(Category.name == name))
     return n
-
-
-def flatten(conn) -> int:
-    """Move anything nested deeper than MAX_DEPTH up so it sits directly under its top-level category.
-    (Deeper nesting was briefly allowed.) Returns how many categories moved."""
-    parents = _parents(conn)
-    moved = 0
-    for name in list(parents):
-        p = path(parents, name)
-        if len(p) > MAX_DEPTH:
-            conn.execute(update(Category).where(Category.name == name).values(parent=p[MAX_DEPTH - 2]))
-            moved += 1
-    return moved

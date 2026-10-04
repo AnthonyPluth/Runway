@@ -179,6 +179,8 @@ def api_account_update(conn, _q, body, acct_id):
             v = str(v).strip()
         if k == "kind" and v not in KINDS:
             raise ApiError("Unknown account type")
+        if k == "pay_from" and v is not None and not conn.execute(select(Account.id).where(Account.id == v)).fetchone():
+            raise ApiError("Pick one of your accounts to pay it from")
         sets[k] = v   # only ACCOUNT_FIELDS' columns
     if sets:
         conn.execute(update(Account).where(Account.id == acct_id).values(**sets))

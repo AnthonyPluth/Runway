@@ -71,7 +71,7 @@ class FeeAnniversaryTests(unittest.TestCase):
 
 class BothPagesTests(LedgerCase):
     def test_the_forecast_dates_a_fee_as_the_churning_page_does(self):
-        self.acct("chk", "checking", 1000.0, daily_spend=0)
+        self.acct("chk", "checking", 1000.0)
         self.acct("cc", "credit", 0.0, pay_from="chk")
         for opened in ("2024-02-29", "2024-10-31", "2025-09-23", "2023-09-24", "2025-12-31"):
             self.conn.execute(insert(ChurnCard).values(owner="Alex", issuer="chase", product=f"Card {opened}", opened_on=opened,

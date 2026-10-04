@@ -29,7 +29,7 @@ class StalenessRuleTests(unittest.TestCase):
 class ManualStatementForecastTests(LedgerCase):
     def setUp(self):
         super().setUp()
-        self.acct("chk", "checking", 5000.0, daily_spend=0)
+        self.acct("chk", "checking", 5000.0)
         self.acct("cc", "credit", -900.0, pay_from="chk")
         self.tx("cc", "2026-09-12", -100.0, "COFFEE", "Restaurants")
         self.tx("cc", "2026-09-20", -200.0, "GROCER", "Groceries")

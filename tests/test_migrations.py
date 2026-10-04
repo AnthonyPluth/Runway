@@ -53,10 +53,17 @@ class MigrationTests(unittest.TestCase):
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
-            row = conn.execute(select(Account.name, Account.owner, Account.daily_spend)).fetchone()
-            self.assertEqual((row["name"], row["owner"], row["daily_spend"]), ("Checking", None, 0))
+            row = conn.execute(select(Account.name, Account.owner)).fetchone()
+            self.assertEqual((row["name"], row["owner"]), ("Checking", None))
             self.assertGreater(conn.execute(select(func.count()).select_from(Category)).fetchone()[0], 10)
         db.init(self.path)   # starting again changes nothing
+
+    def test_database_from_before_migrations_without_accounts_yet_is_upgraded(self):
+        # The tables it lacks are made as the baseline had them, columns later migrations drop again included.
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+        db.init(self.path)
+        self.assertEqual(drift(self.path), [])
 
     def test_database_from_before_migrations_keeps_daily_spend_switched_back_on(self):
         # One that had v4's one-time switch-off (and noted it) before migrations came in: it isn't done again.
@@ -65,12 +72,16 @@ class MigrationTests(unittest.TestCase):
             c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
             c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('a1', 'Checking', 1)")
             c.exec_driver_sql("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
+        from alembic import command
+        with db.engine(self.path).begin() as c:   # what db.migrate does, as far as 0036 (0038 drops the column)
+            db._upgrade_legacy(c)
+            command.stamp(db.alembic_config(c), db.BASELINE)
+            command.upgrade(db.alembic_config(c), "0036")
+        with db.engine(self.path).begin() as c:
+            self.assertEqual(c.exec_driver_sql("SELECT daily_spend FROM accounts").scalar(), 1)
+            self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
-        with db.session(self.path) as conn:
-            self.assertEqual(conn.execute(select(Account.daily_spend)).fetchone()[0], 1)
-            self.assertIsNone(conn.execute(select(Setting.key)
-                                           .where(Setting.key == "migrated_daily_spend_off")).fetchone())
 
     def test_0026_switches_daily_spend_off_once(self):
         from alembic import command
@@ -91,25 +102,24 @@ class MigrationTests(unittest.TestCase):
                     if flag is not None:
                         # raw SQL: on the raw connection, with a parameter either database's driver takes
                         c.execute(sa.text("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', :v)"), {"v": flag})
-                    command.upgrade(db.alembic_config(c), "head")
+                    command.upgrade(db.alembic_config(c), "0036")
                 with db.engine(self.path).begin() as c:
                     self.assertEqual(dict(c.exec_driver_sql("SELECT id, daily_spend FROM accounts").fetchall()), want)
                     self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
                     command.downgrade(db.alembic_config(c), "0025")
         with db.engine(self.path).begin() as c:
-            command.upgrade(db.alembic_config(c), "head")
-            c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
-        db.init(self.path)   # starting again leaves an account switched back on alone
-        with db.session(self.path) as conn:
-            self.assertEqual(conn.execute(select(Account.daily_spend).where(Account.id == "a1")).fetchone()[0], 1)
+            command.upgrade(db.alembic_config(c), "head")   # and on to 0038, which drops the column
+            self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts WHERE id='a1'").scalar(), "Checking")
+        db.init(self.path)
         self.assertEqual(drift(self.path), [])
 
     def test_plaid_account_counted_twice_is_retired(self):
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
-            c.exec_driver_sql("DROP INDEX accounts_plaid_account")
-            c.exec_driver_sql("UPDATE alembic_version SET version_num='0011'")
+            command.downgrade(db.alembic_config(c), "0011")
+        with db.engine(self.path).begin() as c:
             c.exec_driver_sql("INSERT INTO accounts(id, name, plaid_account_id) VALUES ('sf', 'Freedom', 'p1'), "
                               "('pl:p1', 'Freedom ••9999', 'p1'), ('pl:p2', 'Savings', 'p2')")
         with db.engine(self.path).begin() as c:
@@ -193,6 +203,7 @@ class MigrationTests(unittest.TestCase):
             command.downgrade(db.alembic_config(c), "0026")
         with db.engine(self.path).begin() as c:
             self.assertNotIn("guests", {col["name"] for col in sa.inspect(c).get_columns("churn_benefits")})
+            c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on) VALUES (1, 'Alex', 'amex', 'Gold', '2025-01-01')")
             c.exec_driver_sql("INSERT INTO churn_benefits(id, card_id, name, kind) VALUES (1, 1, 'Lounge access', 'access')")
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
@@ -262,6 +273,7 @@ class MigrationTests(unittest.TestCase):
             command.downgrade(db.alembic_config(c), "0030")
         with db.engine(self.path).begin() as c:
             self.assertNotIn("amount_min", {col["name"] for col in sa.inspect(c).get_columns("recurring")})
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Visa', 'credit'), ('chk', 'Checking', 'checking')")
             c.exec_driver_sql("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date, match, amount_mode) VALUES "
                               "(1, 'Prime', 'cc', -14.99, 'monthly', '2026-01-01', 'amazon', 'fixed'), "
                               "(2, 'Electric', 'chk', -120, 'monthly', '2026-01-01', 'comed', 'avg3'), "
@@ -284,6 +296,8 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0031")
         target, loan = "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)", "DIRECT DEBIT LAKESIDE BANK BAWEB PAY (Cash)"
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('chk', 'Checking', 'checking')")
         with db.session(self.path) as conn:
             txs = [
                 {"id": "chk|1", "account_id": "chk", "posted": "2026-09-01", "amount": -35.91, "description": target,
@@ -453,6 +467,183 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(dict(c.exec_driver_sql("SELECT category, pay_with FROM budgets").fetchall()),
                              {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
             self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
+
+    def test_0038_drops_what_nothing_reads(self):
+        from alembic import command
+        db.init(self.path)
+        instr = "SELECT count(*) FROM pg_proc WHERE proname = 'instr' AND pronamespace = current_schema()::regnamespace"
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0037")
+        with db.engine(self.path).begin() as c:
+            if c.dialect.name == "postgresql":
+                self.assertEqual(c.exec_driver_sql(instr).scalar(), 1)
+            c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('chk', 'Checking', 1)")
+            c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on, fee_month) "
+                              "VALUES (1, 'Alex', 'chase', 'Sapphire', '2025-03-10', 11)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            self.assertNotIn("fee_month", {col["name"] for col in sa.inspect(c).get_columns("churn_cards")})
+            self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts").scalar(), "Checking")
+            self.assertEqual(c.exec_driver_sql("SELECT opened_on FROM churn_cards").scalar(), "2025-03-10")
+            if c.dialect.name == "postgresql":
+                self.assertEqual(c.exec_driver_sql(instr).scalar(), 0)
+            self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
+        self.assertEqual(drift(self.path), [])
+
+    def test_0039_moves_categories_nested_too_deep_up(self):
+        # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.
+        from alembic import command
+        from runway import categories
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0038")
+            c.exec_driver_sql("INSERT INTO categories(name, parent) VALUES ('Food', NULL), ('Eating Out', 'Food'), "
+                              "('Burgers', 'Eating Out'), ('Sliders', 'Burgers'), ('Lost', 'Gone'), ('Lost Too', 'Lost'), "
+                              "('Under Lost', 'Lost Too'), ('Loop A', 'Loop B'), ('Loop B', 'Loop A')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            parents = dict(conn.execute(select(Category.name, Category.parent)).fetchall())
+            self.assertEqual({k: parents[k] for k in ("Food", "Eating Out", "Burgers", "Sliders", "Lost", "Lost Too", "Under Lost",
+                                                      "Loop A", "Loop B")},
+                             {"Food": None, "Eating Out": "Food", "Burgers": "Food", "Sliders": "Food",
+                              "Lost": "Gone", "Lost Too": "Lost", "Under Lost": "Lost",   # an orphan counts as top-level
+                              "Loop A": "Loop B", "Loop B": "Loop A"})                    # a loop is left alone
+            self.assertTrue(all(c["depth"] <= 1 for c in categories.all_categories(conn) if not c["name"].startswith("Loop")))
+
+    def test_0040_keeps_a_copy_then_removes_what_refers_to_nothing(self):
+        import contextlib
+        import io
+        import stat
+        from unittest import mock
+        from alembic import command
+        from runway import backup
+        data = tempfile.mkdtemp()   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0039")
+        with db.engine(self.path).begin() as c:
+            for sql in (
+                "INSERT INTO accounts(id, name, kind, pay_from) VALUES ('chk', 'Checking', 'checking', NULL), "
+                "('cc', 'Visa', 'credit', 'gone'), ('pl:p1', 'Brokerage', 'investment', NULL)",
+                "INSERT INTO transactions(id, account_id, posted, amount, recurring_id) VALUES ('chk|1', 'chk', '2026-09-01', -5, 7), "
+                "('gone|1', 'gone', '2026-09-01', -9.99, NULL), ('gone|2', 'gone', '2026-09-02', -1, NULL)",
+                "INSERT INTO tx_splits(tx_id, amount, category) VALUES ('gone|1', -5, 'Groceries'), ('chk|1', -5, 'Groceries')",
+                "INSERT INTO retail_orders(id, retailer, order_number) VALUES ('amazon:1', 'amazon', '1')",
+                "INSERT INTO retail_charges(id, order_id, date, amount, tx_id, match_source, applied) VALUES "
+                "('amazon:1:a', 'amazon:1', '2026-09-01', -9.99, 'gone|1', 'auto', '{}'), "
+                "('amazon:2:a', 'amazon:2', '2026-09-01', -3, NULL, NULL, NULL)",
+                "INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES "
+                "(7, 'Streaming', 'gone', -9.99, 'monthly', '2026-09-01'), (8, 'Rent', 'chk', -1500, 'monthly', '2026-09-01')",
+                "INSERT INTO overrides(key, amount) VALUES ('rec:7:2026-10-01', -12), ('rec:8:2026-10-01', -1400), "
+                "('card:gone:2026-10-05', -50), ('stmt:pl:gone:2026-09-10', 60), ('card:cc:2026-10-05', -40), "
+                "('card:pl:p1:2026-10-05', -1)",
+                "INSERT INTO recurring_dismissed(key) VALUES ('rec:7:2026-08-01'), ('rec:8:2026-08-01')",
+                "INSERT INTO rules(match, category, account_id) VALUES ('cafe', 'Coffee & Snacks', 'gone'), ('rent', 'Rent', 'chk')",
+                "INSERT INTO manual_statements(account_id, statement_date, balance, due_date) VALUES "
+                "('gone', '2026-09-10', 10, '2026-10-05'), ('cc', '2026-09-10', 20, '2026-10-05')",
+                "INSERT INTO categories(name, pay_with) VALUES ('Crafts', 'gone'), ('Pottery', 'cc')",
+                "INSERT INTO assets(id, name, kind, loan_account_id) VALUES (1, 'Home', 'home', 'gone')",
+                "INSERT INTO asset_values(asset_id, date, value) VALUES (1, '2026-09-01', 400000), (99, '2026-09-01', 1)",
+                "INSERT INTO churn_cards(id, owner, issuer, product, opened_on, account_id, changed_from) VALUES "
+                "(1, 'Alex', 'chase', 'Sapphire', '2025-01-01', 'gone', 999), (2, 'Alex', 'chase', 'Freedom', '2025-01-01', 'cc', NULL)",
+                "INSERT INTO churn_rates(card_id, category, multiplier) VALUES (1, 'Travel', 2), (999, 'Travel', 3)",
+                "INSERT INTO churn_benefits(id, card_id, name) VALUES (5, 999, 'Lounge'), (6, 1, 'Credit')",
+                "INSERT INTO churn_benefit_uses(benefit_id, period_start, used_on) VALUES (5, '2026-01-01', '2026-01-02'), "
+                "(6, '2026-01-01', '2026-01-02')",
+                "INSERT INTO equity_grants(id, company_id, kind, quantity) VALUES ('g1', 'nobody', 'rsu', 10)",
+                "INSERT INTO settings(key, value) VALUES ('card_pay_mode:gone', 'fixed'), ('card_apr:pl:gone', '20'), "
+                "('card_apr:cc', '24.99')",
+            ):
+                c.exec_driver_sql(sql)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"RUNWAY_DATA": data}), contextlib.redirect_stdout(out), \
+                db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        log = out.getvalue()
+        # What went is logged as counts by table, never ids or values.
+        self.assertIn("removed 2 rows from transactions", log)
+        self.assertIn("cleared what 1 row in transactions referred to", log)
+        self.assertNotRegex(log, r"gone|9\.99|Streaming|amazon|cafe")
+        # A copy of everything first, private, that restores what was there.
+        where = data if db.using_postgres() else os.path.dirname(self.path)
+        copies = [f for f in os.listdir(where) if f.startswith("runway-before-migration-0040-")]
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(where, copies[0])).st_mode), 0o600)
+        with open(os.path.join(where, copies[0]), "rb") as f:
+            kept = backup.load(f.read())
+        self.assertEqual(kept["revision"], "0039")
+        self.assertEqual(len(kept["tables"]["transactions"]["rows"]), 3)
+        with db.engine(self.path).begin() as c:
+            # raw SQL: what the migration left, on the raw connection (text() so Postgres takes LIKE's %)
+            q = lambda sql: sorted(tuple(r) for r in c.execute(sa.text(sql)).fetchall())
+            self.assertEqual(q("SELECT id, recurring_id FROM transactions"), [("chk|1", None)])
+            self.assertEqual(q("SELECT tx_id FROM tx_splits"), [("chk|1",)])
+            self.assertEqual(q("SELECT id, tx_id, match_source, applied FROM retail_charges"), [("amazon:1:a", None, None, None)])
+            self.assertEqual(q("SELECT id FROM recurring"), [(8,)])
+            self.assertEqual(q("SELECT key FROM overrides"), [("card:cc:2026-10-05",), ("card:pl:p1:2026-10-05",), ("rec:8:2026-10-01",)])
+            self.assertEqual(q("SELECT key FROM recurring_dismissed"), [("rec:8:2026-08-01",)])
+            self.assertEqual(q("SELECT account_id FROM rules"), [("chk",)])
+            self.assertEqual(q("SELECT account_id FROM manual_statements"), [("cc",)])
+            self.assertEqual(q("SELECT name, pay_with FROM categories WHERE name IN ('Crafts', 'Pottery')"), [("Crafts", None), ("Pottery", "cc")])
+            self.assertEqual(q("SELECT id, pay_from FROM accounts WHERE id = 'cc'"), [("cc", None)])
+            self.assertEqual(q("SELECT name, loan_account_id FROM assets"), [("Home", None)])
+            self.assertEqual(q("SELECT asset_id FROM asset_values"), [(1,)])
+            self.assertEqual(q("SELECT id, account_id, changed_from FROM churn_cards"), [(1, None, None), (2, "cc", None)])
+            self.assertEqual(q("SELECT card_id FROM churn_rates"), [(1,)])
+            self.assertEqual(q("SELECT id FROM churn_benefits"), [(6,)])
+            self.assertEqual(q("SELECT benefit_id FROM churn_benefit_uses"), [(6,)])
+            self.assertEqual(q("SELECT id FROM equity_grants"), [])
+            self.assertEqual(q("SELECT key FROM settings WHERE key LIKE 'card_%'"), [("card_apr:cc",)])
+        # From now on the database keeps it so.
+        with db.session(self.path) as conn, self.assertRaises(sa.exc.IntegrityError):
+            conn.execute(insert(Transaction).values(id="x|1", account_id="nobody", posted="2026-09-01", amount=-1))
+        with db.session(self.path) as conn:
+            conn.execute(sa.delete(Account).where(Account.id == "chk"))
+            self.assertEqual(conn.execute(select(func.count()).select_from(Transaction)).scalar(), 0)   # CASCADE
+            self.assertEqual(conn.execute(select(func.count()).select_from(Rule)).scalar(), 0)
+            self.assertEqual(conn.execute(select(func.count()).select_from(Recurring)).scalar(), 0)
+            conn.execute(sa.delete(Account).where(Account.id == "cc"))
+            self.assertIsNone(conn.execute(select(Category.pay_with).where(Category.name == "Pottery")).scalar())   # SET NULL
+            self.assertIsNone(conn.execute(select(ChurnCard.account_id).where(ChurnCard.id == 2)).scalar())
+        with db.engine(self.path).begin() as c:   # and back down: the keys go
+            command.downgrade(db.alembic_config(c), "0039")
+            self.assertEqual([fk for t in ("transactions", "churn_cards") for fk in sa.inspect(c).get_foreign_keys(t)], [])
+
+    def test_0040_saves_no_copy_when_nothing_refers_to_nothing(self):
+        from unittest import mock
+        from alembic import command
+        data = tempfile.mkdtemp()
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0039")
+            c.exec_driver_sql("INSERT INTO accounts(id, name) VALUES ('chk', 'Checking')")
+            c.exec_driver_sql("INSERT INTO transactions(id, account_id, posted, amount) VALUES ('chk|1', 'chk', '2026-09-01', -5)")
+        with mock.patch.dict(os.environ, {"RUNWAY_DATA": data}), db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        for where in (data, os.path.dirname(self.path)):
+            self.assertFalse([f for f in os.listdir(where) if f.startswith("runway-before-migration")])
+        with db.session(self.path) as conn:
+            self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
+
+    @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
+    def test_migrating_doesnt_cascade_on_sqlite(self):
+        # Batch mode drops the old copy of a table it changes; with foreign keys on, that would take every row referring
+        # to it along. db.migrate keeps them off while it migrates.
+        from alembic import command
+        db.init(self.path)
+        with db.session(self.path) as conn:
+            conn.execute(insert(Account).values(id="chk", name="Checking"))
+            conn.execute(insert(Transaction).values(id="chk|1", account_id="chk", posted="2026-09-01", amount=-5))
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0036")   # 0038's way back remakes accounts
+        db.migrate(self.path)
+        with db.session(self.path) as conn:
+            self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
+            self.assertEqual(conn.sa.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)   # and on again for everything else
 
     def test_0037_gives_each_side_of_a_plaid_connection_its_own_error_and_time(self):
         from alembic import command

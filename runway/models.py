@@ -8,8 +8,8 @@ Use the classes' attributes in SQLAlchemy statements (`select(Account.id, Accoun
 run with `conn.execute(...)`), or load objects through the connection's ORM session (`conn.orm.get(Asset, 3)`).
 docs/src/content/docs/contributing/orm.md has the conventions.
 
-Relationships: the schema has no foreign keys, so each one spells out its join. They're all `viewonly` (writes go
-through the columns: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one
+Relationships: each one spells out its join (not every one has a foreign key behind it). They're all `viewonly` (writes
+go through the columns; what a delete takes along is the database's foreign keys' doing) and `lazy="raise"`, so reading one
 that wasn't loaded up front fails loudly rather than running a query per row: load them with
 `options(selectinload(RetailOrder.items))`, or join on them (`select(...).join(Account.transactions)`).
 """
@@ -43,7 +43,6 @@ class Account(Base):
     pay_from: Mapped[str | None]
     owed_positive: Mapped[int | None]
     in_forecast: Mapped[int | None]
-    daily_spend: Mapped[int | None]
     hidden: Mapped[int | None]
     networth_hidden: Mapped[int | None]
     owner: Mapped[str | None]
@@ -661,7 +660,6 @@ class ChurnCard(Base):
     authorized_user: Mapped[int | None]
     business: Mapped[int | None]
     annual_fee: Mapped[float | None]
-    fee_month: Mapped[int | None]
     currency: Mapped[str | None]
     base_rate: Mapped[float | None]
     earn_note: Mapped[str | None]

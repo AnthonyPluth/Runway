@@ -1,9 +1,17 @@
 """Runway's database schema, for SQLite and Postgres alike. Alembic migrations (runway/migrations) create and change it."""
-from sqlalchemy import Column, Float, Index, Integer, MetaData, PrimaryKeyConstraint, Table, Text, text
+from sqlalchemy import Column, Float, ForeignKey, Index, Integer, MetaData, PrimaryKeyConstraint, Table, Text, text
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import FunctionElement
 
 metadata = MetaData()
+
+
+def refers(table: str, column: str, target: str, ondelete: str) -> ForeignKey:
+    """A foreign key, named fk_<table>_<column>. ondelete is what removing the row it refers to does: CASCADE takes
+    this row with it, SET NULL lets go (deleted_accounts.remove does the rest by hand). Deferrable, so a restore can
+    load rows that refer to each other in any order (backup.restore), but checked at once otherwise."""
+    return ForeignKey(target, name=f"fk_{table}_{column}", ondelete=ondelete, deferrable=True, initially="IMMEDIATE")
+
 
 
 class now_text(FunctionElement):
@@ -36,10 +44,9 @@ accounts = Table(
     Column('available', Float),
     Column('balance_date', Text),
     Column('kind', Text, server_default=text("'checking'"), doc='checking | savings | credit | loan | investment'),
-    Column('pay_from', Text, doc='credit cards: account id that pays the statement'),
+    Column('pay_from', Text, refers('accounts', 'pay_from', 'accounts.id', 'SET NULL'), doc='credit cards: account id that pays the statement'),
     Column('owed_positive', Integer, server_default=text('0'), doc='credit/loan: 1 if the bank reports the amount owed as a positive number'),
     Column('in_forecast', Integer, server_default=text('1'), doc='cash accounts: include in the projection'),
-    Column('daily_spend', Integer, server_default=text('0'), doc='unused: the forecast no longer takes out everyday spending (kept so older backups restore)'),
     Column('hidden', Integer, server_default=text('0')),
     Column('networth_hidden', Integer, server_default=text('0'), doc='1: left out of Net worth (still shown everywhere else)'),
     Column('owner', Text, doc='a signed-in person\'s first name, "Joint", or NULL'),
@@ -54,7 +61,7 @@ accounts = Table(
 transactions = Table(
     'transactions', metadata,
     Column('id', Text, primary_key=True, doc="account_id + '|' + provider transaction id"),
-    Column('account_id', Text, nullable=False),
+    Column('account_id', Text, refers('transactions', 'account_id', 'accounts.id', 'CASCADE'), nullable=False),
     Column('posted', Text, nullable=False, doc='YYYY-MM-DD'),
     Column('amount', Float, nullable=False, doc='positive = money in'),
     Column('description', Text),
@@ -128,7 +135,7 @@ retail_orders = Table(
 retail_items = Table(
     'retail_items', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('order_id', Text, nullable=False),
+    Column('order_id', Text, refers('retail_items', 'order_id', 'retail_orders.id', 'CASCADE'), nullable=False),
     Column('position', Integer, server_default=text('0')),
     Column('title', Text),
     Column('quantity', Float),
@@ -143,7 +150,7 @@ retail_items = Table(
 retail_charges = Table(
     'retail_charges', metadata,
     Column('id', Text, primary_key=True),
-    Column('order_id', Text, nullable=False),
+    Column('order_id', Text, refers('retail_charges', 'order_id', 'retail_orders.id', 'CASCADE'), nullable=False),
     Column('date', Text, nullable=False),
     Column('amount', Float, nullable=False, doc='as the bank shows it: negative = a charge, positive = a refund'),
     Column('payment', Text),
@@ -177,7 +184,7 @@ equity_companies = Table(
 equity_grants = Table(
     'equity_grants', metadata,
     Column('id', Text, primary_key=True),
-    Column('company_id', Text, nullable=False),
+    Column('company_id', Text, refers('equity_grants', 'company_id', 'equity_companies.id', 'CASCADE'), nullable=False),
     Column('kind', Text, nullable=False, doc='iso | nso | rsu | rsa | shares'),
     Column('label', Text, doc='the grant\'s name, e.g. ES-12'),
     Column('granted_on', Text),
@@ -204,7 +211,8 @@ categories = Table(
     Column('parent', Text, doc='subcategories: name of the top-level category'),
     Column('icon', Text, doc='an emoji you picked; NULL = the default for its name'),
     Column('color', Text, doc='a #rrggbb color you picked; NULL = the default (a subcategory: its parent\'s)'),
-    Column('pay_with', Text, doc='account id its spending goes on, for the budget forecast; NULL = the one used most'),
+    Column('pay_with', Text, refers('categories', 'pay_with', 'accounts.id', 'SET NULL'),
+           doc='account id its spending goes on, for the budget forecast; NULL = the one used most'),
 )
 
 rules = Table(
@@ -217,7 +225,7 @@ rules = Table(
     Column('amount_min', Float, doc='only amounts at least this much (dollars, either direction)'),
     Column('amount_max', Float, doc='only amounts at most this much'),
     Column('direction', Text, doc='out | in | NULL (either)'),
-    Column('account_id', Text, doc='only this account'),
+    Column('account_id', Text, refers('rules', 'account_id', 'accounts.id', 'CASCADE'), doc='only this account'),
     Column('rename', Text, doc='show the merchant as this'),
     Column('review', Integer, server_default=text('0'), doc='1: put matching transactions in Review'),
     Column('split', Text, doc='JSON [{"category", "percent"}]: split matching transactions this way'),
@@ -228,7 +236,7 @@ recurring = Table(
     'recurring', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('name', Text, nullable=False),
-    Column('account_id', Text, nullable=False),
+    Column('account_id', Text, refers('recurring', 'account_id', 'accounts.id', 'CASCADE'), nullable=False),
     Column('amount', Float, nullable=False, doc='negative = money out'),
     Column('frequency', Text, nullable=False, doc='weekly | biweekly | semimonthly | monthly | quarterly | semiannual | yearly | dates | once'),
     Column('anchor_date', Text, nullable=False, doc='a known occurrence (YYYY-MM-DD)'),
@@ -311,7 +319,7 @@ card_statements = Table(
 
 manual_statements = Table(
     'manual_statements', metadata,
-    Column('account_id', Text, nullable=False),
+    Column('account_id', Text, refers('manual_statements', 'account_id', 'accounts.id', 'CASCADE'), nullable=False),
     Column('statement_date', Text, nullable=False, doc='the day the statement closed (YYYY-MM-DD)'),
     Column('balance', Float, nullable=False, doc='the statement balance, positive = owed'),
     Column('due_date', Text, nullable=False),
@@ -563,7 +571,8 @@ assets = Table(
     Column('yearly_change', Float, doc='optional % per year applied since as_of (e.g. -15 for a car)'),
     Column('address', Text),
     Column('url', Text, doc='e.g. the Zillow or KBB page, to check by hand'),
-    Column('loan_account_id', Text, doc='the mortgage / auto loan against it, for equity'),
+    Column('loan_account_id', Text, refers('assets', 'loan_account_id', 'accounts.id', 'SET NULL'),
+           doc='the mortgage / auto loan against it, for equity'),
     Column('auto_update', Integer, server_default=text('0'), doc='homes: refresh from Realie monthly'),
     Column('low', Float),
     Column('high', Float),
@@ -576,7 +585,7 @@ assets = Table(
 
 asset_values = Table(
     'asset_values', metadata,
-    Column('asset_id', Integer, nullable=False),
+    Column('asset_id', Integer, refers('asset_values', 'asset_id', 'assets.id', 'CASCADE'), nullable=False),
     Column('date', Text, nullable=False),
     Column('value', Float),
     Column('source', Text),
@@ -670,15 +679,15 @@ churn_cards = Table(
                                                'wells_fargo | discover | other (churning.ISSUERS)'),
     Column('product', Text, nullable=False, doc='e.g. Sapphire Preferred'),
     Column('family', Text, doc="cards whose bonuses count as one for the issuer's rules (e.g. Sapphire); NULL = the product"),
-    Column('account_id', Text, doc='the Runway account it is (accounts.id), to count its spending'),
+    Column('account_id', Text, refers('churn_cards', 'account_id', 'accounts.id', 'SET NULL'),
+           doc='the Runway account it is (accounts.id), to count its spending'),
     Column('opened_on', Text, nullable=False, doc='YYYY-MM-DD'),
     Column('closed_on', Text, doc='closed, or changed to another product, on this day'),
     Column('status', Text, server_default=text("'open'"), doc='open | closed | product_changed'),
-    Column('changed_from', Integer, doc='a product change of this card (churn_cards.id): the same account, so not a new one for 5/24'),
+    Column('changed_from', Integer, refers('churn_cards', 'changed_from', 'churn_cards.id', 'SET NULL'), doc='a product change of this card (churn_cards.id): the same account, so not a new one for 5/24'),
     Column('authorized_user', Integer, server_default=text('0'), doc="1: you're an authorized user on someone else's card"),
     Column('business', Integer, server_default=text('0'), doc="1: a business card (most don't count toward 5/24)"),
     Column('annual_fee', Float, server_default=text('0')),
-    Column('fee_month', Integer, doc='the month the annual fee posts (1-12); NULL = the month it was opened'),
     Column('currency', Text, server_default=text("'cash'"),
            doc='what it earns, and its bonus is paid in (a key of churning.CURRENCIES or churn_currencies)'),
     Column('base_rate', Float, server_default=text('1'), doc='points per dollar on everything without a rate of its own'),
@@ -699,7 +708,7 @@ churn_cards = Table(
     Column('plan_date', Text, doc='do it by this day; NULL = the day before the next annual fee'),
     Column('plan_remind_days', Integer, server_default=text('14'), doc='remind you this many days before plan_date'),
     Column('plan_done_on', Text, doc='the day you checked the plan off'),
-    Column('plan_new_id', Integer, doc='the card checking off a product change added (churn_cards.id); undo removes it'),
+    Column('plan_new_id', Integer, refers('churn_cards', 'plan_new_id', 'churn_cards.id', 'SET NULL'), doc='the card checking off a product change added (churn_cards.id); undo removes it'),
     Column('hide_upcoming', Integer, server_default=text('0'), doc='1: leave this card out of Upcoming and its alerts'),
     sqlite_autoincrement=True,
     info={'doc': 'credit cards you and your partner opened for their sign-up bonuses and rewards'},
@@ -707,7 +716,7 @@ churn_cards = Table(
 
 churn_rates = Table(
     'churn_rates', metadata,
-    Column('card_id', Integer, nullable=False),
+    Column('card_id', Integer, refers('churn_rates', 'card_id', 'churn_cards.id', 'CASCADE'), nullable=False),
     Column('category', Text, nullable=False, doc='a category (its subcategories earn the same unless they have their own)'),
     Column('multiplier', Float, nullable=False, doc='points per dollar'),
     Column('portal_only', Integer, nullable=False, server_default=text('0'),
@@ -738,7 +747,7 @@ churn_balances = Table(
 churn_tasks = Table(
     'churn_tasks', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('card_id', Integer, nullable=False),
+    Column('card_id', Integer, refers('churn_tasks', 'card_id', 'churn_cards.id', 'CASCADE'), nullable=False),
     Column('due_on', Text, nullable=False),
     Column('action', Text, nullable=False, doc='e.g. close, downgrade to Freedom, call retention'),
     Column('done', Integer, server_default=text('0')),
@@ -750,7 +759,7 @@ churn_tasks = Table(
 churn_benefits = Table(
     'churn_benefits', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('card_id', Integer, nullable=False),
+    Column('card_id', Integer, refers('churn_benefits', 'card_id', 'churn_cards.id', 'CASCADE'), nullable=False),
     Column('name', Text, nullable=False, doc='e.g. Uber Cash, Priority Pass lounges'),
     Column('kind', Text, server_default=text("'credit'"), doc='credit | access | status | other (churn_benefits.KINDS)'),
     Column('amount', Float, doc='a credit: dollars per period (NULL for access and the like)'),
@@ -775,7 +784,7 @@ churn_benefits = Table(
 churn_benefit_uses = Table(
     'churn_benefit_uses', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('benefit_id', Integer, nullable=False),
+    Column('benefit_id', Integer, refers('churn_benefit_uses', 'benefit_id', 'churn_benefits.id', 'CASCADE'), nullable=False),
     Column('period_start', Text, nullable=False, doc='the first day of the period it was used in'),
     Column('amount_used', Float, doc='dollars of a credit used (NULL: a benefit without an amount, used)'),
     Column('used_on', Text, nullable=False),
@@ -834,7 +843,8 @@ churn_bank_bonuses = Table(
     Column('owner', Text, nullable=False, doc="whose account it is: a person's first name (as accounts.owner has it)"),
     Column('bank', Text, nullable=False),
     Column('account_type', Text, server_default=text("'checking'"), doc='checking | savings | business'),
-    Column('account_id', Text, doc='the Runway account it is (accounts.id), to follow its deposits and balance'),
+    Column('account_id', Text, refers('churn_bank_bonuses', 'account_id', 'accounts.id', 'SET NULL'),
+           doc='the Runway account it is (accounts.id), to follow its deposits and balance'),
     Column('opened_on', Text, nullable=False, doc='YYYY-MM-DD'),
     Column('bonus', Float, nullable=False, doc='the bonus, in dollars'),
     Column('dd_total', Float, doc='direct deposits needed, in total'),
@@ -899,7 +909,3 @@ Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a 
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}
-
-# SQLite's instr(haystack, needle), which Runway's queries use, for Postgres.
-POSTGRES_INSTR = ("CREATE OR REPLACE FUNCTION instr(text, text) RETURNS integer AS 'SELECT strpos($1, $2)' "
-                  "LANGUAGE sql IMMUTABLE")

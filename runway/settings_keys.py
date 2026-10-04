@@ -71,6 +71,11 @@ def card_apr(card_id: str) -> str:
     return f"card_apr:{card_id}"
 
 
+# Settings kept for one account, named by its id: deleting the account removes them (deleted_accounts.remove).
+# tests/test_deleted_accounts.py fails if a key named by an account id isn't listed here.
+PER_ACCOUNT = (sf_raw, card_pay_mode, card_pay_amount, card_apr)
+
+
 # Merchant names
 BRAND_NAMES_OFF = "brand_names_off"   # JSON: brands whose transactions keep the bank's name (categorize.keep_bank_name)
 

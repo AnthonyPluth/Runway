@@ -96,6 +96,28 @@ describe("Settings → Data: restore", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("says when a backup from an older version may have older data not brought up to date", async () => {
+    const warning = "This backup is from an older version of Runway that didn’t record its database version, so some of its older data may not have been brought up to date. Check your accounts, payees and budgets.";
+    fetchMock.mockImplementation(async (path: string) => path === "/api/backup/inspect"
+      ? reply(200, { created: "2026-05-01T09:30:00", source: "sqlite", version: 1, revision: null, warning, counts: counts(3, 10), current: counts(0, 0), database: "sqlite" })
+      : reply(200, { ok: true, created: "2026-05-01T09:30:00", safety_copy: null, unreadable_secrets: [], warning }));
+    render(BackupSection);
+    const user = userEvent.setup();
+    await choose();
+    expect(await screen.findByText(warning)).toBeInTheDocument();       // before you restore it
+    await user.click(screen.getByRole("button", { name: "Restore…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Replace everything with this backup?" });
+    expect(dialog).toHaveTextContent(warning);
+    await user.type(within(dialog).getByLabelText(/Type RESTORE to confirm/), "RESTORE");
+    await user.click(within(dialog).getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent(warning);       // and after, until dismissed
+    cleanup();
+    render(BackupSection);
+    await user.click(within(screen.getByRole("alert")).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("says why a file can't be restored, and keeps Restore off", async () => {
     fetchMock.mockResolvedValue(reply(400, { error: "That file isn't a Runway backup." }));
     render(BackupSection);

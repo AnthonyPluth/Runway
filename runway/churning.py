@@ -168,8 +168,7 @@ def fee_anniversaries(opened: date, since: date) -> Iterator[date]:
 def next_fee(card: dict, today: date) -> date | None:
     """The next annual fee: on the account's anniversary (`_anniversary`, from `anniversaries`; else the day the card
     was opened), from today on. None for a card without a fee, or one that's closed. (The fee posts in its anniversary
-    month. The card's `fee_month` column, once settable, is no longer read or written: it stays in the table so old
-    rows load, but the anniversary decides.)"""
+    month: a fee month set by an older version is ignored, and migration 0038 dropped the column.)"""
     if not card.get("annual_fee") or (card.get("status") or "open") != "open":
         return None
     opened = date.fromisoformat(card.get("_anniversary") or card["opened_on"])

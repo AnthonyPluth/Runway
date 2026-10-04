@@ -564,11 +564,8 @@ class CategoryTests(LedgerCase):
         food = next(n for n in cf["spending"] if n["name"] == "Food")
         self.assertEqual((food["value"], sorted(k["name"] for k in food["children"])), (20.0, ["Groceries & more", "Restaurants"]))
         self.assertEqual(len(server.api_transactions(self.conn, {"category": ["Food"]}, None)["items"]), 2)
-        # anything nested deeper by an earlier version moves up under its top-level category
-        self.conn.execute(insert(Category).values(name="Burgers", is_transfer=0, is_income=0, parent="Restaurants"))
-        self.assertEqual(categories.flatten(self.conn), 1)
-        self.assertEqual(self.conn.execute(select(Category.parent)
-                                           .where(Category.name == "Burgers")).fetchone()[0], "Food")
+        # (anything nested deeper by an earlier version was moved up by migration 0039: tests/test_migrations.py)
+        categories.add(self.conn, "Burgers", parent="Food")
         categories.move(self.conn, "Burgers", None)
         categories.move(self.conn, "Burgers", "Income")
         self.assertEqual(self.conn.execute(select(Category.is_income)

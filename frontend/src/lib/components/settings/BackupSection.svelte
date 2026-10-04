@@ -1,8 +1,9 @@
 <script lang="ts" module>
   import { act, errMsg } from "$lib/act";
-  // What the last restore said that's worth keeping (where the copy of what it replaced went, keys it couldn't read):
-  // it stays under Restore until dismissed, through the page redrawing after the restore.
-  type Restored = { when: string; copy: string | null; unreadable: number };
+  // What the last restore said that's worth keeping (where the copy of what it replaced went, keys it couldn't read,
+  // and that a backup from an older version may have older data not brought up to date): it stays under Restore until
+  // dismissed, through the page redrawing after the restore.
+  type Restored = { when: string; copy: string | null; unreadable: number; warning: string | null };
   let lastRestore: Restored | null = null;
 </script>
 
@@ -20,7 +21,7 @@
   // Settings → Data: download everything, or replace everything with a backup file. A chosen file is read first
   // (POST /api/backup/inspect) so you see what it holds before typing RESTORE; the server keeps a copy of what was here.
   type Counts = { accounts: number; transactions: number; recurring: number; budgets: number; total: number };
-  type Inspected = { created?: string | null; source?: string | null; counts: Counts; current: Counts };
+  type Inspected = { created?: string | null; source?: string | null; warning?: string | null; counts: Counts; current: Counts };
 
   let file = $state<File | null>(null);
   let inspected = $state<Inspected | null>(null);
@@ -67,10 +68,11 @@
     const f = file;
     if (!f) return false;
     if (!(await act(async () => {
-      const r = await api<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[] }>("/api/restore", { method: "POST", body: f, failed: "Restore failed" });
+      const r = await api<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[]; warning?: string | null }>(
+        "/api/restore", { method: "POST", body: f, failed: "Restore failed" });
       // The backup's bank access and API keys are encrypted with the key of the Runway that made it: under another
       // key they can't be read, and each is entered again in Settings (the note under Restore says so).
-      restored = { when: when(r.created), copy: r.safety_copy || null, unreadable: r.unreadable_secrets?.length ?? 0 };
+      restored = { when: when(r.created), copy: r.safety_copy || null, unreadable: r.unreadable_secrets?.length ?? 0, warning: r.warning || null };
       toast.success("Restored");
       await refreshState(); reload();
     }))) return false;
@@ -94,6 +96,7 @@
       <Button variant="outline" disabled={!inspected} onclick={() => (asking = true)}>Restore…</Button>
     </div>
     {#if summary}<p class={helpCls}>{summary}</p>
+      {#if inspected?.warning}<p class={`text-sm ${warnText}`}>{inspected.warning}</p>{/if}
     {:else if problem}<p class={`text-sm ${warnText}`}>{problem}</p>
     {:else if file}<p class={helpCls}>Reading the backup…</p>{/if}
     {#if restored}
@@ -106,6 +109,7 @@
               Runway’s secret key. Set the key the backup was made with as <code class="rounded bg-muted px-1">RUNWAY_SECRET_KEY_OLD</code> and restart, or
               enter them again in Settings.</p>
           {/if}
+          {#if restored.warning}<p class={warnText}>{restored.warning}</p>{/if}
         </AlertDescription>
         <Button variant="ghost" size="icon" class="absolute top-1.5 right-1.5" aria-label="Dismiss" onclick={() => (restored = null)}><X /></Button>
       </Alert>
@@ -117,6 +121,7 @@
   typeToConfirm="RESTORE" onconfirm={restore}>
   {#snippet description()}
     <p>{summary}.</p>
+    {#if inspected?.warning}<p>{inspected.warning}</p>{/if}
     <p>This replaces everything in this Runway (currently {n(inspected?.current.transactions ?? 0, "transaction")}) with the backup. It can’t be undone.</p>
     {#if hasData}<p>Runway first saves a copy of what’s here now in its data folder.</p>{/if}
   {/snippet}

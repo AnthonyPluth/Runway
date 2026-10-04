@@ -50,5 +50,8 @@ elif context.is_offline_mode():
         context.run_migrations()
 else:
     with db.engine().connect() as connection:
+        if connection.dialect.name == "sqlite":   # as db.migrate does: batch mode's remade tables mustn't cascade
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
         run(connection)
         connection.commit()

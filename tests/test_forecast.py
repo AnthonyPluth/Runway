@@ -55,7 +55,7 @@ class ForecastTests(LedgerCase):
         self.card_setup()
 
     def card_setup(self):
-        self.acct("chk", "checking", 5000.0, daily_spend=0)
+        self.acct("chk", "checking", 5000.0)
         # Card owes 900 now (negative = owed). Its last statement: $800, closed Sep 10, due Oct 5.
         self.acct("cc", "credit", -900.0, pay_from="chk")
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=40.0)
@@ -323,8 +323,6 @@ class ForecastTests(LedgerCase):
         self.acct("chk2", "checking", 300.0)
         for i in range(60):  # plenty of everyday spending in history
             self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
-        # an account still marked for everyday spending by an older version: nothing is taken out for it any more
-        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
         db.set_setting(self.conn, "primary_account", "chk")
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual([a["id"] for a in fc["accounts"]], ["chk"])

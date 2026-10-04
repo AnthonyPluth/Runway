@@ -25,8 +25,8 @@ class GoldenForecastTests(LedgerCase):
     def ledger(self):
         c = self.conn
         # Two checking accounts in the forecast, a savings account that isn't, and five cards.
-        self.acct("chk", "checking", 6200.0, in_forecast=1, daily_spend=0)
-        self.acct("chk2", "checking", 1800.0, in_forecast=1, daily_spend=0)
+        self.acct("chk", "checking", 6200.0, in_forecast=1)
+        self.acct("chk2", "checking", 1800.0, in_forecast=1)
         self.acct("sav", "savings", 12000.0, in_forecast=0)
         self.acct("cc", "credit", -1400.0, pay_from="chk")                 # the issuer's statement (Plaid)
         self.acct("cc2", "credit", -2300.0, pay_from="chk2")               # a statement you entered, paying the minimum

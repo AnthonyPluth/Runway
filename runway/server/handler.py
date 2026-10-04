@@ -22,12 +22,10 @@ from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sqlalchemy.exc
-from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, prices, retail, secretbox
 from .. import settings_keys as sk
 from . import mcp_http, sync
-from ..models import PlaidItem
 from .common import ApiError, _current, host_allowed, request_ref
 from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
 from .api.investments import live_tickers
@@ -515,40 +513,25 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
             # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
-            # import): its rows would be mixed into the restored ones.
-            held: list[threading.Lock] = []
-            for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
-                if not lock.acquire(blocking=False):
-                    for h in held:
-                        h.release()
-                    return self._json(409, {"error": "A sync is running. Restore once it has finished."})
-                held.append(lock)
-            failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
-            copy = None
-            unreadable: list[str] = []
+            # import): its rows would be mixed into the restored ones. The locks are let go before answering, so a sync
+            # can start as soon as you have the answer.
             try:
-                with db.session() as conn:
-                    copy = backup.safety_copy(conn)   # what's here now, in the data directory, in case the backup was the wrong one
-                    counts = backup.restore(conn, restored)
-                    unreadable = backup.unreadable_secrets(conn)   # from a machine with another key: entered again
-                with db.session() as conn:
-                    sfinvest.repair_stored(conn)
-            except (ValueError, OSError, sqlalchemy.exc.OperationalError) as e:
-                failed = e
-            finally:
-                for lock in held:
-                    lock.release()
-            if isinstance(failed, ValueError):
-                return self._json(400, {"error": str(failed)})
-            if isinstance(failed, OSError):
-                return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({failed.strerror or failed}), so nothing was restored."})
-            if failed is not None:
-                if "locked" in str(failed):
+                done = backup.restore_all(restored, locks=(_sync_lock, _inv_lock, _retail_categorize_lock))
+            except backup.Busy as e:
+                return self._json(409, {"error": str(e)})
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            except OSError as e:
+                return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({e.strerror or e}), so nothing was restored."})
+            except sqlalchemy.exc.OperationalError as e:
+                if "locked" in str(e):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
-                return self._error(failed)
+                return self._error(e)
+            counts = done["counts"]
             return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0),
-                                    "safety_copy": copy, "unreadable_secrets": unreadable})
+                                    "safety_copy": done["safety_copy"], "unreadable_secrets": done["unreadable_secrets"],
+                                    "warning": done["warning"]})
         body = {}
         if method in ("POST", "DELETE"):
             n = self._body_length(MAX_JSON_BODY)
@@ -1123,15 +1106,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         raise SystemExit("Runway is set to accept connections from other devices, so it needs sign-in.\n"
                          "Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, RUNWAY_PUBLIC_URL and OIDC_ALLOWED_EMAILS\n"
                          "(or RUNWAY_ALLOW_NO_AUTH=1 if a proxy in front of Runway already handles sign-in).")
-    db.init()
-    with db.session() as conn:
-        recurring.auto_match(conn)  # pick up matches for items created before this version
-        sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
-        categories.flatten(conn)      # subcategories are one level deep
-        for r in conn.execute(select(PlaidItem.item_id)
-                              .where(func.coalesce(PlaidItem.products, "investments").like("%investments%"))).fetchall():
-            plaid.update_investment_accounts(conn, r["item_id"])   # investment accounts from Plaid in your accounts
-        oidc.backfill_users(conn)        # people who signed in before owners existed
+    db.init()   # migrations included: repairs for data saved by earlier versions are among them (0039)
     sync.AUTO_SYNC = auto_sync   # sync_on_visit reads it there
     if auto_sync:
         threading.Thread(target=background_sync, daemon=True).start()
