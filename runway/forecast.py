@@ -44,7 +44,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, db, plaidapi, plaidbank, simplefin, splits, statements
-from .dates import clamp_day, month_end, month_start, next_after, parse_day
+from .dates import month_end, month_start, next_after, parse_day
 from .money import CENT, allocate_cents, cents, is_zero, same_amount
 from . import categories as catmod
 from . import settings_keys as sk
@@ -395,7 +395,7 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
 
     The fee posts on the account's anniversary, the day of the month it was opened (for a product change, the original
     card's: `_anniversary`, churning.anniversaries; whatever fee_month says), from the first anniversary on (a shorter
-    month's last day: Feb 29 -> Feb 28). Issuers charge it on the anniversary, so it's on whichever statement that day
+    month's last day: Feb 29 -> Feb 28): churning.fee_anniversaries, as the Churning page's next_fee counts them. Issuers charge it on the anniversary, so it's on whichever statement that day
     falls in: the one closing that month when the anniversary is on or before the closing day, else the next one (the
     Churning page dates it the same way). An anniversary earlier this month whose fee hasn't been charged yet is still
     coming: today, as late. That's only for a card linked to an account, where it can be seen whether it was.
@@ -410,10 +410,7 @@ def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict])
     acct = card.get("account_id")
     plan_by = parse_day(card["plan_date"]) if card.get("plan_date") else None
     out = []
-    for year in range(max(opened.year + 1, today.year), end.year + 1):
-        if clamp_day(year, opened.month, 31) < today:
-            continue   # this year's anniversary month is over
-        day = clamp_day(year, opened.month, opened.day)
+    for day in churning.fee_anniversaries(opened, month_start(today)):   # from this month's on (one may be late)
         if day > end:
             break
         if card.get("closed_on") and card["closed_on"] <= day.isoformat():
