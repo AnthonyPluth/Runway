@@ -5,8 +5,9 @@ from datetime import date
 
 from sqlalchemy import insert, select, update
 
-from runway import plaidbank, simplefin, splits
-from runway.models import Account, PlaidAccount, RetailCharge, RetailOrder, Transaction, TxSplit
+from runway.providers import plaidbank, simplefin
+from runway.domain import splits
+from runway.storage.models import Account, PlaidAccount, RetailCharge, RetailOrder, Transaction, TxSplit
 from runway.server.api import transactions as tx
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase, ts
@@ -266,7 +267,7 @@ class ImportTests(Ledger):
         self.assertEqual(other["added"], 1)
 
     def test_rules_categorize_what_has_no_category(self):
-        from runway import rules
+        from runway.domain import rules
         rules.save(self.conn, {"match": "corner bakery", "category": "Groceries"})
         r = self.imp([{"posted": "2026-09-14", "payee": "Corner Bakery", "amount": -8},
                       {"posted": "2026-09-14", "payee": "Corner Bakery #2", "amount": -9, "category": "Coffee & Snacks"}])

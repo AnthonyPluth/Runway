@@ -73,7 +73,7 @@ rules:
       constant_propagation: false   # else a name set to 0.005 (a 0.5% ratio, say) is found at each use too
     paths:
       include: ["/runway/", "/run.py"]
-      exclude: ["/runway/money.py", "/runway/migrations/"]
+      exclude: ["/runway/money.py", "/runway/storage/migrations/"]
 
   - id: runway-today-in-sync
     message: >-
@@ -90,16 +90,7 @@ rules:
     paths:
       include:
         - "/runway/server/sync.py"
-        - "/runway/plaid.py"
-        - "/runway/plaidapi.py"
-        - "/runway/plaidbank.py"
-        - "/runway/simplefin.py"
-        - "/runway/sfinvest.py"
-        - "/runway/finnhub.py"
-        - "/runway/prices.py"
-        - "/runway/realie.py"
-        - "/runway/carta.py"
-        - "/runway/carta_web.py"
+        - "/runway/providers/"
 
   - id: runway-utcnow
     message: >-
@@ -131,4 +122,4 @@ rules:
       - pattern: $D.month - $N
     paths:
       include: ["/runway/", "/run.py"]
-      exclude: ["/runway/dates.py", "/runway/migrations/"]
+      exclude: ["/runway/dates.py", "/runway/storage/migrations/"]

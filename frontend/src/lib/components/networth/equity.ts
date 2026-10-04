@@ -60,7 +60,7 @@ export function stalePrice(asOf: string | null | undefined, today: string): stri
 const EVERY: Record<string, string> = { "1": "monthly", "3": "quarterly", "12": "yearly" };
 
 /** A grant's vesting in one line, from the form's fields as typed: "25% on Jan 2027, then monthly until Jan 2030".
- *  The same rule as runway/equity.py's vested_on: nothing before the cliff, then a share every `vest_every` months.
+ *  The same rule as runway/domain/equity.py's vested_on: nothing before the cliff, then a share every `vest_every` months.
  *  Null when there's nothing to say yet (plain shares, no start date, a length that isn't a number). */
 export function vestingPreview(f: Pick<GrantBody, "kind" | "vest_start" | "granted_on" | "vest_months" | "cliff_months" | "vest_every">): string | null {
   if (f.kind === "shares") return null;

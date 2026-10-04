@@ -10,8 +10,9 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-from .. import db, mcp_access
-from ..mcp_server import ToolError
+from ..storage import db
+from . import mcp_access
+from .mcp_server import ToolError
 from . import routes
 from .common import ApiError, Response, _current
 

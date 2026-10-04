@@ -3,10 +3,10 @@ import unittest
 
 from sqlalchemy import insert, select, update
 
-from runway import categorize, rules, splits
+from runway.domain import categorize, rules, splits
 from runway.server.api import categories as api_categories
 from runway.server.api import transactions as api_tx
-from runway.models import Account, Transaction
+from runway.storage.models import Account, Transaction
 from tests.shared import DbCase
 
 

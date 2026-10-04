@@ -1,4 +1,4 @@
-// Where home values come from. Today that's Realie (runway/realie.py); older values may still say RentCast, the
+// Where home values come from. Today that's Realie (runway/providers/realie.py); older values may still say RentCast, the
 // provider Runway used before. If the provider changes again, this is the one place in the app that names it.
 import { fmt0, fmtDate } from "$lib/format";
 

@@ -38,7 +38,7 @@
   const waiting = $derived(undecidedAccounts(plaid));
   const mine = $derived(accounts.filter((a) => !isPlaidStub(a.id) && isBankKind(a.kind)));
 
-  // Accounts you deleted, which syncs leave out until you restore one (runway/deleted_accounts.py).
+  // Accounts you deleted, which syncs leave out until you restore one (runway/domain/deleted_accounts.py).
   let deleted = $state<DeletedAccount[]>([]);
   api<DeletedAccount[]>("/api/accounts/deleted").then((r) => (deleted = Array.isArray(r) ? r : []), () => {});
   let showDeleted = $state(false);

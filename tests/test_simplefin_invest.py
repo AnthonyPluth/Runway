@@ -3,10 +3,12 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, portfolio, prices, sfinvest, simplefin
-from runway import settings_keys as sk
-from runway.models import (Account, Holding, HoldingSnapshot, InvAccount, ManualContribution, ManualPosition,
-                           ManualState, Price, PriceMeta, Security)
+from runway.storage import db
+from runway.domain import portfolio
+from runway.providers import prices, sfinvest, simplefin
+from runway.storage import settings_keys as sk
+from runway.storage.models import (Account, Holding, HoldingSnapshot, InvAccount, ManualContribution, ManualPosition,
+                                   ManualState, Price, PriceMeta, Security)
 from tests.shared import TODAY, DbCase, freeze_today
 
 RECENT = (TODAY - timedelta(days=1)).isoformat()   # a price the checks still count as current (the clock is frozen at TODAY)
@@ -274,7 +276,7 @@ class TrackedHoldingsTests(Base):
 
     def setUp(self):
         super().setUp()
-        from runway import tracked
+        from runway.domain import tracked
         self.tracked = tracked
         simplefin.store_payload(self.c, {"accounts": [account("vw", "Vestwell 401k", "20000")]}, TODAY)
         self.c.execute(update(Account).where(Account.id == "vw").values(balance_date="2026-09-22"))
@@ -413,7 +415,7 @@ class TrackedHoldingsTests(Base):
 
 class MergeByTickerTests(Base):
     def test_same_fund_in_two_accounts_is_one_row(self):
-        from runway import tracked
+        from runway.domain import tracked
         simplefin.store_payload(self.c, {"accounts": [account("wf", "Roth IRA", "3000", [VTI]), account("vw", "Vestwell 401k", "5000")]}, TODAY)
         self.price("VTI", "2026-09-22", 300.0)
         self.c.execute(update(Account).where(Account.id == "vw").values(balance_date="2026-09-22"))

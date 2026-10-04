@@ -8,11 +8,13 @@ from unittest import mock
 
 from sqlalchemy import event, func, insert, select
 
-from runway import brands, categorize, db, demo, forecast, loans, merchants, plaid, plaidbank, realie, recurring, statements
-from runway.banks import bank_configured
-from runway import settings_keys as sk
-from runway.models import (Account, Budget, CardStatement, Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed, SyncLog,
-                           Transaction)
+from runway.domain import brands, categorize, demo, forecast, loans, merchants, recurring, statements
+from runway.storage import db
+from runway.providers import plaid, plaidbank, realie
+from runway.providers.banks import bank_configured
+from runway.storage import settings_keys as sk
+from runway.storage.models import (Account, Budget, CardStatement, Override, PlaidAccount, PlaidItem, Recurring,
+                                   RecurringDismissed, SyncLog, Transaction)
 from runway.server import routes
 from runway.server.api import accounts, recurring as api_recurring, state
 from tests.shared import TODAY, DbCase, freeze_today

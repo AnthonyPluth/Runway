@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  /** `synced`: a loan paid down since its last balance (runway/loans.py owed_on), what that balance was. */
+  /** `synced`: a loan paid down since its last balance (runway/domain/loans.py owed_on), what that balance was. */
   export interface PanelAccount { id: string; name: string; org: string | null; balance: number; as_of?: string | null; synced?: number; counted: boolean }
 </script>
 

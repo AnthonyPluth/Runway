@@ -1,4 +1,4 @@
-"""The schema comes from Alembic migrations; they must match runway/schema.py, and older databases must upgrade."""
+"""The schema comes from Alembic migrations; they must match runway/storage/schema.py, and older databases must upgrade."""
 import json
 import os
 import unittest
@@ -9,9 +9,10 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import func, insert, select
 
-from runway import db, schema
-from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
-                           ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
+from runway.storage import db, schema
+from runway.storage.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore,
+                                   ChurnTask, ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement,
+                                   Recurring, Rule, Setting, Transaction)
 from tests.shared import database_path, scratch_dir
 
 
@@ -291,7 +292,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_0032_shortens_the_banks_payees_and_leaves_yours(self):
         from alembic import command
-        from runway import recurring
+        from runway.domain import recurring
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0031")
@@ -368,7 +369,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_0034_gives_brands_their_names_and_leaves_yours(self):
         from alembic import command
-        from runway import recurring, rules
+        from runway.domain import recurring, rules
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0034-1")
@@ -495,7 +496,7 @@ class MigrationTests(unittest.TestCase):
     def test_0039_moves_categories_nested_too_deep_up(self):
         # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.
         from alembic import command
-        from runway import categories
+        from runway.domain import categories
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0038")
@@ -519,7 +520,7 @@ class MigrationTests(unittest.TestCase):
         import stat
         from unittest import mock
         from alembic import command
-        from runway import backup
+        from runway.storage import backup
         data = scratch_dir(self)   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
         db.init(self.path)
         with db.engine(self.path).begin() as c:

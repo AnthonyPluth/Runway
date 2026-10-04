@@ -9,10 +9,13 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import insert, or_, select
 
-from .. import categorize, db, merchants, monitoring, networth, notify, plaid, plaidbank, portfolio, prices, realie, recurring, retail, sfinvest, simplefin
-from .. import settings_keys as sk
-from ..banks import bank_configured, plaid_banks
-from ..models import Holding, InvAccount, InvTransaction, ManualPosition, PlaidItem, Security, SyncLog
+from ..domain import categorize, merchants, networth, notify, portfolio, recurring, retail
+from ..storage import db
+from .. import monitoring
+from ..providers import plaid, plaidbank, prices, realie, sfinvest, simplefin
+from ..storage import settings_keys as sk
+from ..providers.banks import bank_configured, plaid_banks
+from ..storage.models import Holding, InvAccount, InvTransaction, ManualPosition, PlaidItem, Security, SyncLog
 from .common import ApiError
 
 DAILY_SYNC_HOUR = 7          # banks and cards (SimpleFIN and Plaid) sync once a day, on the first check after this hour

@@ -9,7 +9,10 @@ from unittest import mock
 
 import sentry_sdk
 
-from runway import categorize, db, monitoring, server, simplefin
+from runway.domain import categorize
+from runway.storage import db
+from runway import monitoring, server
+from runway.providers import simplefin
 from runway.server import sync
 from runway.server.handler import _traced, trace_name
 
@@ -350,7 +353,7 @@ class MonitoringTests(unittest.TestCase):
         transport = start({**ALL_ON, "TZ": "America/Chicago"})
         with db.session() as conn:
             db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
-        with mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
+        with mock.patch("runway.providers.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
             sync.run_sync()   # the Sync button's, or the daily one: either counts
             self.assertTrue(sync._sync_lock.acquire(blocking=False))
             try:   # another sync is running: this one doesn't start, so it's neither a success nor a failure
@@ -358,12 +361,12 @@ class MonitoringTests(unittest.TestCase):
                     sync.run_sync()
             finally:
                 sync._sync_lock.release()
-        with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
+        with mock.patch("runway.providers.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
                 mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
             sync.run_sync()
         # With automatic syncing off, a manual sync checks in without a schedule: it doesn't create a daily monitor.
         with mock.patch.object(sync, "AUTO_SYNC", False), mock.patch("builtins.print"), \
-                mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}):
+                mock.patch("runway.providers.simplefin.sync", return_value={"new": [], "errors": []}):
             sync.run_sync()
         with db.session() as conn:   # nothing connected: nothing to check in
             db.set_setting(conn, "simplefin_access_url", None)

@@ -1,13 +1,13 @@
-"""Churning (runway/churning.py): 5/24, when a bonus can be earned again, annual fee dates, spending toward a bonus,
+"""Churning (runway/domain/churning.py): 5/24, when a bonus can be earned again, annual fee dates, spending toward a bonus,
 estimated rewards, the best card for a purchase, points values and the push alerts."""
 import unittest
 from datetime import date
 
 from sqlalchemy import func, insert, select
 
-from runway import churning, notify
-from runway.churning import ChurnError
-from runway.models import Account, Category, ChurnBalance, ChurnCard, ChurnTask, TxSplit
+from runway.domain import churning, notify
+from runway.domain.churning import ChurnError
+from runway.storage.models import Account, Category, ChurnBalance, ChurnCard, ChurnTask, TxSplit
 from tests.shared import DbCase, add_tx
 
 TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card dates are written around it

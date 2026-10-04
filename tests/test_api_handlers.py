@@ -1,18 +1,19 @@
 """The API handlers for the Overview, Accounts, Budget, Transactions and push notifications, and the sync's own
-queries, called directly on the sample data (runway/demo.py) plus the cases each one handles."""
+queries, called directly on the sample data (runway/domain/demo.py) plus the cases each one handles."""
 import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import categories, db, demo, forecast, splits
+from runway.domain import categories, demo, forecast, splits
+from runway.storage import db
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
-from runway.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction, LoanTerms,
-                           ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring, Security, SyncLog,
-                           Transaction, User)
+from runway.storage.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction,
+                                   LoanTerms, ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring,
+                                   Security, SyncLog, Transaction, User)
 from tests.shared import TODAY, DbCase, freeze_today
 
 # (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
@@ -83,7 +84,7 @@ class HandlerTests(DbCase):
         self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
         accounts.api_account_update(self.c, {}, {"pay_mode": "minimum", "apr": "0"}, "demo-card")
         self.assertEqual(plan(), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
-        from runway import forecast
+        from runway.domain import forecast
         self.assertEqual(forecast.payment_plan(self.c, "demo-card", 24.99),
                          {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0, "apr_source": "you"})
         self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank", products="liabilities"))

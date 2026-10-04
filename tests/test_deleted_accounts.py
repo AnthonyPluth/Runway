@@ -1,4 +1,4 @@
-"""Deleting an account (runway/deleted_accounts.py): everything that belongs to it goes, what pointed at it lets go, a
+"""Deleting an account (runway/domain/deleted_accounts.py): everything that belongs to it goes, what pointed at it lets go, a
 sync (SimpleFIN's, Plaid's banks and cards, Plaid's investments) doesn't bring it back, and restoring it does."""
 import inspect
 import json
@@ -6,12 +6,15 @@ from unittest import mock
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, deleted_accounts, forecast, plaid, plaidbank, schema, simplefin
-from runway import settings_keys as sk
-from runway.models import (Account, Asset, Budget, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount,
-                           Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition,
-                           ManualState, ManualStatement, Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed,
-                           RetailCharge, RetailOrder, Rule, Setting, Transaction, TxSplit)
+from runway.storage import db, schema
+from runway.domain import deleted_accounts, forecast
+from runway.providers import plaid, plaidbank, simplefin
+from runway.storage import settings_keys as sk
+from runway.storage.models import (Account, Asset, Budget, CardStatement, Category, ChurnBankBonus, ChurnCard,
+                                   CostOverride, DeletedAccount, Holding, HoldingSnapshot, InvAccount, InvSnapshot,
+                                   InvTransaction, ManualContribution, ManualPosition, ManualState, ManualStatement,
+                                   Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed, RetailCharge,
+                                   RetailOrder, Rule, Setting, Transaction, TxSplit)
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from runway.server.sync import _sync_lock

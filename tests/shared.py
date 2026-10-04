@@ -27,7 +27,8 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway.models import Account, CardStatement, ManualStatement, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, Transaction
+from runway.storage.models import (Account, CardStatement, ManualStatement, OAuthClient, OAuthCode, OAuthConsent,
+                                   OAuthGrant, OAuthToken, Transaction)
 
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
 
@@ -70,7 +71,7 @@ def forget_oauth(conn, client_ids) -> None:
 def drop_schema(path) -> None:
     """On Postgres, drop the schema db.init(path) made for this path (db.py names it from the path); SQLite has nothing
     to drop: the file goes with its directory."""
-    from runway import db
+    from runway.storage import db
     if not db.using_postgres():
         return
     import psycopg
@@ -88,7 +89,7 @@ def add_database(case, path) -> str:
     """db.init(path), and (in setUp, or setUpClass with the class) drop its schema on Postgres when the test is cleaned
     up, so nothing a run makes stays in the database. own_database does this for its own; a test that needs a second
     database (a restore target, an old schema to migrate) makes it with this. Returns the path."""
-    from runway import db
+    from runway.storage import db
     db.init(path)
     (case.addClassCleanup if isinstance(case, type) else case.addCleanup)(drop_schema, path)
     return path
@@ -118,7 +119,7 @@ def own_database(case, **env) -> str:
     In setUpClass (pass the class): the same for every test in the class, undone after tearDownClass. db.session() is
     patched for the whole process, so a server a class starts on a thread uses it too: start the server after this, and
     stop it in tearDownClass (class cleanups run after that)."""
-    from runway import db
+    from runway.storage import db
     later = case.addClassCleanup if isinstance(case, type) else case.addCleanup
     tmp = tempfile.TemporaryDirectory()
     later(tmp.cleanup)
@@ -138,7 +139,7 @@ class DbCase(unittest.TestCase):
     """A test with a database of its own (own_database) and a connection to it, self.c."""
 
     def setUp(self):
-        from runway import db
+        from runway.storage import db
         self.path = own_database(self)
         self.c = db.connect(self.path)
         self.addCleanup(self.c.close)
@@ -243,7 +244,7 @@ def add_tx(conn, account, posted, amount, *, id=None, description="x", payee=DER
     """Insert a transaction and return its id. Anything else is a column by name (category=, pending=, needs_review=...);
     description=None leaves it empty. Without an id it's "<account>|<n>", counting up on this connection from the number
     of transactions there, and never the same as one already used or deleted, whatever has been removed since."""
-    from runway import categorize
+    from runway.domain import categorize
     if id is None:
         n = max(_NEXT_TX.get(conn, 0), conn.execute(select(func.count()).select_from(Transaction)).fetchone()[0])
         while conn.execute(select(Transaction.id).where(Transaction.id == f"{account}|{n}")).fetchone():
@@ -288,7 +289,7 @@ class LedgerCase(DbCase):
                                                          minimum_payment=minimum))
 
     def cycle(self, card_id, today=None):
-        from runway import forecast
+        from runway.domain import forecast
         card = dict(self.conn.execute(select(Account).where(Account.id == card_id)).fetchone())
         return forecast.card_cycle(self.conn, card, today or TODAY, forecast.bank_statement(self.conn, card, today or TODAY))
 

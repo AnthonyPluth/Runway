@@ -13,9 +13,12 @@ from unittest import mock
 
 from sqlalchemy import func, insert, select, update
 
-from runway import backup, db, networth, server
-from runway import settings_keys as sk
-from runway.models import Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken, PlaidItem, Rule, Transaction
+from runway.storage import backup, db
+from runway.domain import networth
+from runway import server
+from runway.storage import settings_keys as sk
+from runway.storage.models import (Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken,
+                                   PlaidItem, Rule, Transaction)
 from tests.shared import add_database, fetch, own_database, serve
 
 db_session = db.session

@@ -15,7 +15,7 @@ import math
 from datetime import date
 from typing import Literal, overload
 
-from . import db
+from .storage import db
 
 TRUE = (True, 1, "1", "true", "on")
 # The most one amount of money can be, either way: far more than any transaction, bill or budget, and small enough that

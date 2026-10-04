@@ -1,4 +1,4 @@
-"""OAuth for the MCP endpoint, as functions over the database (runway/mcp_oauth.py): the HTTP side is in
+"""OAuth for the MCP endpoint, as functions over the database (runway/server/mcp_oauth.py): the HTTP side is in
 tests/test_mcp_oauth_http.py."""
 import base64
 import hashlib
@@ -10,10 +10,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, mcp_access, mcp_oauth
+from runway.storage import db
+from runway.server import mcp_access, mcp_oauth
 from tests.shared import add_database, database_path
-from runway.mcp_oauth import OAuthError, PageError, RedirectError
-from runway.models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
+from runway.server.mcp_oauth import OAuthError, PageError, RedirectError
+from runway.storage.models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
 
 ISS = "https://runway.example.com"
 RES = ISS + "/mcp"

@@ -9,7 +9,9 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from runway import carta, finnhub, merchants, oidc, prices, simplefin, tls
+from runway.providers import carta, finnhub, prices, simplefin
+from runway.domain import merchants
+from runway import oidc, tls
 
 
 class TlsTests(unittest.TestCase):

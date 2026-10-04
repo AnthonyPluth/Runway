@@ -1,11 +1,11 @@
-"""Planned cards and bank bonuses (runway/churn_wishlist.py): what's in the way of applying and the earliest day,
+"""Planned cards and bank bonuses (runway/domain/churn_wishlist.py): what's in the way of applying and the earliest day,
 credit scores, Upcoming items and alerts, and turning a plan into a card or a bank bonus when you apply."""
 import unittest
 from datetime import date
 
-from runway import churn_wishlist as wl
-from runway import bank_bonuses, churning, notify
-from runway.churning import ChurnError
+from runway.domain import churn_wishlist as wl
+from runway.domain import bank_bonuses, churning, notify
+from runway.domain.churning import ChurnError
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its wishlist dates are written around it

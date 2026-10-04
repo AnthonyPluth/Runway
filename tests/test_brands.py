@@ -5,8 +5,9 @@ from unittest import mock
 
 from sqlalchemy import func, insert, select, update
 
-from runway import brands, db
-from runway.models import Account, Merchant, PlaidAccount, PlaidItem
+from runway.domain import brands
+from runway.storage import db
+from runway.storage.models import Account, Merchant, PlaidAccount, PlaidItem
 from tests.shared import own_database
 
 
@@ -73,7 +74,7 @@ class BrandTests(unittest.TestCase):
     def test_accounts_get_logo_dev_s_logo_by_institution(self):
         from unittest import mock
 
-        from runway import merchants
+        from runway.domain import merchants
         path = own_database(self)
         png = base64.b64encode(b"png").decode()
         with db.session(path) as c:
@@ -146,7 +147,7 @@ class BrandTests(unittest.TestCase):
     def test_choosing_an_account_s_logo(self):
         from runway.server.api.accounts import api_account_logo, api_account_logo_options
         from runway.server.common import ApiError
-        from runway import merchants
+        from runway.domain import merchants
         path = own_database(self)
         with db.session(path) as c:
             c.execute(insert(Account).values(id="a", name="Card", org="Northwind", kind="credit"))
@@ -177,7 +178,7 @@ class BrandTests(unittest.TestCase):
 
 class MerchantLogoTests(unittest.TestCase):
     def test_every_website_is_one(self):
-        from runway import merchants
+        from runway.domain import merchants
         for _p, site, _name in brands.MERCHANT_PATTERNS:
             self.assertEqual(merchants.site(site), site)
 
@@ -204,7 +205,7 @@ class MerchantLogoTests(unittest.TestCase):
             self.assertIsNone(brands.merchant_name(payee), payee)   # nor its name
 
     def test_store_orders_still_leave_out_card_payments(self):
-        from runway.retail.match import MERCHANT
+        from runway.domain.retail.match import MERCHANT
         self.assertIsNone(MERCHANT["costco"].search("PAYMENT TO COSTCO ANYWHERE VISA"))
         self.assertIsNotNone(MERCHANT["costco"].search("COSTCO WHSE #0123"))
         self.assertIsNotNone(MERCHANT["amazon"].search("AMZN Mktp US"))

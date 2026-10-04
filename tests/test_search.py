@@ -4,7 +4,7 @@ from datetime import date
 
 from sqlalchemy import func, insert, select
 
-from runway.models import Account, Transaction
+from runway.storage.models import Account, Transaction
 from runway.server.api import transactions
 from tests.shared import DbCase
 

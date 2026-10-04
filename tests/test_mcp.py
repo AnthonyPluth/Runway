@@ -1,5 +1,5 @@
 """The MCP server: what an assistant connected with OAuth may reach (mcp_access, mcp_http.local_fetch), POST /mcp, the
-Settings routes for it, and the tools and protocol (runway/mcp_server.py) with Runway stood in for by a fake. OAuth
+Settings routes for it, and the tools and protocol (runway/server/mcp_server.py) with Runway stood in for by a fake. OAuth
 itself is tested in tests/test_mcp_oauth.py and tests/test_mcp_oauth_http.py."""
 import base64
 import hashlib
@@ -10,10 +10,12 @@ import urllib.request
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, mcp_access, mcp_oauth, mcp_server, server
+from runway.storage import db
+from runway.server import mcp_access, mcp_oauth, mcp_server
+from runway import server
 from runway.server import mcp_http
-from runway.models import (Account, Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
-                           RetailItemMemory, RetailOrder, Rule, Transaction, TxSplit)
+from runway.storage.models import (Account, Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish,
+                                   OAuthGrant, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction, TxSplit)
 from tests.shared import ServerCase, forget_oauth, tag
 
 VERIFIER = "v" * 50
@@ -259,7 +261,7 @@ class PagesTests(RunwayServer):
             mcp_http.local_fetch("transactions/" + tx + "/accept", {}, {}, CATEGORIZE)
             self.assertEqual(row(), ("Restaurants", "manual", 0))
 
-            from runway import splits                                                 # a split one: refused, its parts kept
+            from runway.domain import splits                                          # a split one: refused, its parts kept
             with db.session() as conn:
                 splits.set_splits(conn, tx, [{"amount": -7, "category": "Groceries"}, {"amount": -5, "category": "Shopping"}])
                 before = [(p["amount"], p["category"]) for p in splits.of(conn, [tx])[tx]]

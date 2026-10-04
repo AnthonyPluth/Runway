@@ -1,4 +1,4 @@
-"""Churning (runway/churning.py), the second round: portal-only earning rates in the best-card ranking, rates sent
+"""Churning (runway/domain/churning.py), the second round: portal-only earning rates in the best-card ranking, rates sent
 with a new card, plans for a card (keep, close, product change) with Done and undo, hiding a card from Upcoming, snoozing
 a to-do, program currencies with estimated values, and whose card it is."""
 import unittest
@@ -6,9 +6,9 @@ from datetime import date
 
 from sqlalchemy import insert
 
-from runway import churning, notify
-from runway.churning import ChurnError
-from runway.models import Account, Category, Transaction, User
+from runway.domain import churning, notify
+from runway.domain.churning import ChurnError
+from runway.storage.models import Account, Category, Transaction, User
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and plan dates are written around it

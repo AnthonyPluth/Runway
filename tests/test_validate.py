@@ -53,8 +53,8 @@ class ProviderNumbersTests(unittest.TestCase):
     """Each provider's reader goes through parse_external: what isn't a real number is left out."""
 
     def test_providers(self):
-        from runway import carta, sfinvest
-        from runway.retail.parsers import common as retail
+        from runway.providers import carta, sfinvest
+        from runway.domain.retail.parsers import common as retail
         readers = {"sfinvest": sfinvest._num, "carta": carta._num, "retail": retail.read_money}
         for name, read in readers.items():
             for bad in (float("nan"), float("inf"), 1e15, "99,999,999,999,999"):

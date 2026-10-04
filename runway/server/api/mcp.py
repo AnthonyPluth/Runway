@@ -1,10 +1,11 @@
 """Settings → Data → AI assistants (MCP): the address to connect to, the assistants connected with OAuth, and the
-switches for letting them change churning, categorize, or change anything. The server is runway/mcp_server.py; OAuth is runway/mcp_oauth.py."""
+switches for letting them change churning, categorize, or change anything. The server is runway/server/mcp_server.py; OAuth is runway/server/mcp_oauth.py."""
 from __future__ import annotations
 
 from datetime import datetime
 
-from ... import mcp_access, mcp_oauth, validate
+from .. import mcp_access, mcp_oauth
+from ... import validate
 from ..common import ApiError, _current, row_id
 
 

@@ -3,8 +3,8 @@ import unittest
 
 from sqlalchemy import insert, update
 
-from runway import categories, reports, splits
-from runway.models import Account, Transaction
+from runway.domain import categories, reports, splits
+from runway.storage.models import Account, Transaction
 from tests.shared import DbCase, add_tx
 
 

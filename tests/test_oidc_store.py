@@ -8,8 +8,9 @@ from unittest import mock
 
 from sqlalchemy import insert, select, update
 
-from runway import db, oidc, secretbox
-from runway.models import AuthPending, AuthSession, User
+from runway.storage import db, secretbox
+from runway import oidc
+from runway.storage.models import AuthPending, AuthSession, User
 from tests.shared import DbCase
 
 ISSUER = "https://id.example.com"

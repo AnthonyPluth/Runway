@@ -6,9 +6,9 @@ sidebar:
 ---
 
 Runway's database code, tests included, builds its queries as SQLAlchemy statements from the ORM models in
-`runway/models.py`. `Connection.execute()` doesn't take SQL text (it raises `TypeError`). This is the guide to
-writing queries: what to use, what to watch, and examples from the code (`runway/db.py`, `runway/networth.py`,
-`runway/equity.py`, `runway/planner.py`, and their API handlers).
+`runway/storage/models.py`. `Connection.execute()` doesn't take SQL text (it raises `TypeError`). This is the guide to
+writing queries: what to use, what to watch, and examples from the code (`runway/storage/db.py`, `runway/domain/networth.py`,
+`runway/domain/equity.py`, `runway/domain/planner.py`, and their API handlers).
 
 When you rewrite an existing query, the rule is **no change in behavior**: same rows, same order, same dict keys in
 API responses, same commit points.
@@ -17,11 +17,11 @@ API responses, same commit points.
 
 | What | Where | Notes |
 |---|---|---|
-| Schema (the one source of truth) | `runway/schema.py` | Core `Table`s; Alembic migrations keep the database matching it. |
-| Models | `runway/models.py` | One class per table, mapping schema.py's own `Table` (`__table__ = schema.assets`), so no migration. `Account`, `Transaction`, `TxSplit`, `Asset`, `AssetValue`, `Setting`, ... |
+| Schema (the one source of truth) | `runway/storage/schema.py` | Core `Table`s; Alembic migrations keep the database matching it. |
+| Models | `runway/storage/models.py` | One class per table, mapping schema.py's own `Table` (`__table__ = schema.assets`), so no migration. `Account`, `Transaction`, `TxSplit`, `Asset`, `AssetValue`, `Setting`, ... |
 | Connection | `db.connect()`, `db.session()` | `conn.execute()` takes a statement; SQL text raises `TypeError`. `conn.sa` is the SQLAlchemy connection underneath. |
 | ORM Session | `conn.orm` | A `sqlalchemy.orm.Session` on the same connection and transaction. |
-| Helpers | `runway/db.py` | `upsert`, `insert_ignore`, `dialect_insert`, `instr`, `account_label_expr`, `not_investment`, `rows`, `as_dict`, `Result.scalar()/scalars()` |
+| Helpers | `runway/storage/db.py` | `upsert`, `insert_ignore`, `dialect_insert`, `instr`, `account_label_expr`, `not_investment`, `rows`, `as_dict`, `Result.scalar()/scalars()` |
 | Shared fragments | `splits.parts()`, `db.not_investment()`, `db.account_label_expr()` | A split transaction as its parts, leaving out investment accounts, an account's name as lists show it |
 | Guard | `tests/test_orm_guard.py` | Fails on SQL text passed to `execute()` (or a `text()` that doesn't say why) anywhere in `runway/` or `tests/`. |
 
@@ -63,7 +63,7 @@ Imports: `from sqlalchemy import select, func, ...` and `from .models import Acc
 
 ### Columns, filters, order
 
-From `runway/planner.py`:
+From `runway/domain/planner.py`:
 
 ```python
 owed = {a["id"]: forecast.owed(a) for a in db.rows(conn.execute(
@@ -80,13 +80,13 @@ owed = {a["id"]: forecast.owed(a) for a in db.rows(conn.execute(
 ### Every column
 
 `select(Model)` through `conn.execute()` gives every column, named as the table's columns, in schema.py's order
-(`runway/networth.py`):
+(`runway/domain/networth.py`):
 
 ```python
 out = db.rows(conn.execute(select(Asset).order_by(Asset.kind, Asset.name)))
 ```
 
-To leave out a big column (a `raw` blob), select the rest instead of loading it (`runway/equity.py`):
+To leave out a big column (a `raw` blob), select the rest instead of loading it (`runway/domain/equity.py`):
 
 ```python
 GRANT_COLUMNS = [c for c in EquityGrant.__table__.c if c.key != "raw"]   # a grant, less what Carta sent
@@ -154,7 +154,7 @@ Use the shared versions, never a copy:
 
 ### Insert
 
-From `runway/networth.py`:
+From `runway/domain/networth.py`:
 
 ```python
 cur = conn.execute(insert(Asset).values(name=fields.pop("name"), kind=fields.pop("kind"), value=new_value,
@@ -182,7 +182,7 @@ written). `rowcount` gives the rows affected. Expressions: `.values(balance=Acco
 ### Upserts (`ON CONFLICT`)
 
 `db.upsert()` builds `INSERT ... ON CONFLICT ... DO UPDATE` with the SQLite or Postgres `insert()` to match the
-connection (`runway/db.py`):
+connection (`runway/storage/db.py`):
 
 ```python
 db.upsert(conn, Setting, {"key": key, "value": value}, key=["key"])
@@ -201,7 +201,7 @@ db.upsert(conn, Setting, {"key": key, "value": value}, key=["key"])
 
 ## Using the ORM Session
 
-From `runway/equity.py`:
+From `runway/domain/equity.py`:
 
 ```python
 grant = conn.orm.get(EquityGrant, gid)
@@ -248,7 +248,7 @@ conn.execute(text("... WHERE x = :x"), {"x": x})
 ```
 
 The guard counts `text()` calls without that comment. SQL must still run on both databases. Dynamic table names
-(runway/backup.py) aren't a reason: use `schema.metadata.tables[name]` and `insert(table)`.
+(runway/storage/backup.py) aren't a reason: use `schema.metadata.tables[name]` and `insert(table)`.
 
 Not statements, on purpose: Alembic migrations (`runway/migrations`, with `op.execute`), the driver-level setup in
 `db.py`'s engine functions (`dbapi_conn.execute("PRAGMA ...")`) and its schema upgrade (`exec_driver_sql` DDL), and

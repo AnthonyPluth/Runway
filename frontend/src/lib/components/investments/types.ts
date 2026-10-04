@@ -1,4 +1,4 @@
-// The shapes of the Investments page's API replies (runway/server.py, runway/portfolio.py).
+// The shapes of the Investments page's API replies (runway/server.py, runway/domain/portfolio.py).
 
 /** One account's share of a holding (the same fund in two accounts is one holding with two lots). */
 interface Lot {
@@ -76,7 +76,7 @@ interface Performance {
 interface AllocItem { name: string; value: number; share: number }
 export type AllocKey = "asset_class" | "account" | "sector" | "holding";
 
-/** The retirement plan, in today's dollars (runway/planner.py keeps it; planner.ts projects it). */
+/** The retirement plan, in today's dollars (runway/domain/planner.py keeps it; planner.ts projects it). */
 interface PlanPerson { name: string; birth_year: number; retire_age: number; savings: number }
 interface PlanIncome { name: string; amount: number; person: number; start_age: number; end_age: number | null }
 interface PlanEvent { name: string; year: number; amount: number }
@@ -97,7 +97,7 @@ export interface RetirementPlan {
    *  for when that's now past: it's counted this year instead. */
   assets: { key: string; sell_year: number; was?: number }[];
 }
-/** What a loan's projection is based on (runway/loans.py): the annual rate in percent, the monthly payment, where
+/** What a loan's projection is based on (runway/domain/loans.py): the annual rate in percent, the monthly payment, where
  *  the payment came from, and why it couldn't be projected (today's balance is then used). `account_id` is the loan
  *  account (one loan against two assets is the same loan); `payoff_year` the calendar year of its last payment when
  *  it's projected; `payment_counted` whether its payment is in the spending figure the plan starts from (not left

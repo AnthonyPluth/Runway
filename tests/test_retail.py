@@ -5,9 +5,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import categorize, db, monitoring, retail, splits
-from runway.retail import store
-from runway.models import Account, AiLog, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
+from runway.domain import categorize, retail, splits
+from runway.storage import db
+from runway import monitoring
+from runway.domain.retail import store
+from runway.storage.models import Account, AiLog, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 from runway.server.api import retail as api_retail
 from runway.server.api import transactions as api_tx
 from tests.shared import freeze_today

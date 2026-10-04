@@ -1,11 +1,11 @@
-"""Settings keys are named once, in runway/settings_keys.py: a key typed out at a call site could be misspelled, and a
+"""Settings keys are named once, in runway/storage/settings_keys.py: a key typed out at a call site could be misspelled, and a
 misspelled key reads as never set rather than failing."""
 import ast
 import os
 import re
 import unittest
 
-from runway import settings_keys as sk
+from runway.storage import settings_keys as sk
 
 RUNWAY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runway")
 SQL_KEY = re.compile(r"\bsettings\b.*\bkey\s*(=|LIKE|IN)\s*\(?\s*'", re.I | re.S)
@@ -18,7 +18,7 @@ def sources():
         for name in sorted(files):
             path = os.path.join(root, name)
             rel = os.path.relpath(path, RUNWAY)
-            if name.endswith(".py") and rel != "settings_keys.py":
+            if name.endswith(".py") and rel != os.path.join("storage", "settings_keys.py"):
                 with open(path) as f:
                     src = f.read()
                 yield rel, src, ast.parse(src, path)
@@ -52,7 +52,7 @@ class SettingsKeysTest(unittest.TestCase):
                 key = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "key"), None)
                 if key is not None and literal(key):
                     found.append(f"{name}:{node.lineno}")
-        self.assertEqual(found, [], "use a name from runway/settings_keys.py for the settings key")
+        self.assertEqual(found, [], "use a name from runway/storage/settings_keys.py for the settings key")
 
     def test_no_literal_keys_in_sql(self):
         found = []
@@ -60,7 +60,7 @@ class SettingsKeysTest(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Constant) and isinstance(node.value, str) and SQL_KEY.search(node.value):
                     found.append(f"{name}:{node.lineno}")
-        self.assertEqual(found, [], "pass the settings key as a parameter, from runway/settings_keys.py")
+        self.assertEqual(found, [], "pass the settings key as a parameter, from runway/storage/settings_keys.py")
 
     def test_keys_are_distinct(self):
         values = [v for k, v in constants().items() if not k.endswith("_PREFIX")]

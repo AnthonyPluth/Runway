@@ -5,9 +5,9 @@ from unittest import mock
 
 from sqlalchemy import insert, select
 
-from runway import retail, splits
-from runway.retail import store
-from runway.models import Account, Transaction
+from runway.domain import retail, splits
+from runway.domain.retail import store
+from runway.storage.models import Account, Transaction
 from tests.shared import DbCase, add_tx
 
 

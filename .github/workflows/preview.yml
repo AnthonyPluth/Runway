@@ -1,6 +1,6 @@
 name: Preview
 
-# A live copy of Runway for a pull request, filled with made-up sample data (runway/demo.py), for about an hour.
+# A live copy of Runway for a pull request, filled with made-up sample data (runway/domain/demo.py), for about an hour.
 # Start it by adding the "needs_preview" label to a pull request, at any time (or run this workflow by hand on a
 # branch). A comment on the pull request gives the address (the one-off password is in the run's summary), and the
 # label comes off again.

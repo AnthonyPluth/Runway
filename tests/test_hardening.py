@@ -16,8 +16,11 @@ from cryptography.fernet import Fernet
 
 from sqlalchemy import insert, select
 
-from runway import backup, carta, db, notify, oidc, secretbox, server, simplefin
-from runway.models import AuthSession, Merchant, NotifyLog, PushSubscription, Setting
+from runway.storage import backup, db, secretbox
+from runway.providers import carta, simplefin
+from runway.domain import notify
+from runway import oidc, server
+from runway.storage.models import AuthSession, Merchant, NotifyLog, PushSubscription, Setting
 from tests.shared import ServerCase, fetch, own_database
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")

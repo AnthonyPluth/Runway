@@ -9,8 +9,10 @@ from datetime import date
 
 from sqlalchemy import func, select, update
 
-from runway import carta, db, equity, networth
-from runway.models import EquityGrant, Setting
+from runway.providers import carta
+from runway.storage import db
+from runway.domain import equity, networth
+from runway.storage.models import EquityGrant, Setting
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 27)   # not shared.TODAY, the 27th: its grant and vesting dates are written around it

@@ -1,12 +1,13 @@
-"""The ORM session layer (runway/db.py): statements run with Connection.execute() and the ORM Session share the
+"""The ORM session layer (runway/storage/db.py): statements run with Connection.execute() and the ORM Session share the
 Connection's transaction, results read as rows did, and the portable helpers (upsert, insert_ignore, instr,
 account_label_expr, splits.parts, not_investment) give the rows they should."""
 import unittest
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, schema, splits
-from runway.models import Account, Asset, AssetValue, Rule, Setting, Transaction, TxSplit
+from runway.storage import db, schema
+from runway.domain import splits
+from runway.storage.models import Account, Asset, AssetValue, Rule, Setting, Transaction, TxSplit
 from tests.shared import DbCase
 
 

@@ -6,12 +6,13 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, literal, select, update
 
-from runway import categories, categorize, db, recurring, rules
+from runway.domain import categories, categorize, recurring, rules
+from runway.storage import db
 from runway.server.api import categories as api_categories
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
-from runway.models import (Account, AiLog, Budget, Category, Override, Recurring, RetailItem, RetailItemMemory,
-                           RetailOrder, Rule, Transaction, TxSplit)
+from runway.storage.models import (Account, AiLog, Budget, Category, Override, Recurring, RetailItem, RetailItemMemory,
+                                   RetailOrder, Rule, Transaction, TxSplit)
 from tests.shared import DbCase, add_tx, freeze_today
 
 

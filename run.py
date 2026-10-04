@@ -31,10 +31,10 @@ if __name__ == "__main__":
         serve(host=a.host, port=a.port, auto_sync=not a.no_sync)
     else:
         from datetime import date
-        from runway import backup, db
+        from runway.storage import backup, db
         db.init()
         if a.command == "demo":
-            from runway import demo
+            from runway.domain import demo
             with db.session() as conn:
                 print(f"Added sample data ({demo.seed(conn)} transactions) to {db.describe()}.")
         elif a.command == "backup":

@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  // Where Runway serves the Logo.dev logo it fetched for an institution's name (runway/merchants.py logo_path).
+  // Where Runway serves the Logo.dev logo it fetched for an institution's name (runway/domain/merchants.py logo_path).
   export const logoFor = (name: string) => `/api/merchants/${encodeURIComponent(`brand:${name.toLowerCase().split(/\s+/).filter(Boolean).join(" ")}`)}/logo`;
 </script>
 

@@ -1,5 +1,5 @@
-// The shapes of the Churning page's API replies (runway/server/api/churning.py, runway/churning.py,
-// runway/bank_bonuses.py).
+// The shapes of the Churning page's API replies (runway/server/api/churning.py, runway/domain/churning.py,
+// runway/domain/bank_bonuses.py).
 
 export interface Eligibility {
   status: "now" | "later" | "never" | "in_progress" | "held" | "au" | "unknown";
@@ -21,7 +21,7 @@ type BenefitKind = "credit" | "access" | "status" | "other";
 type BenefitPeriod = "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time";
 type BenefitBasis = "calendar" | "anniversary";
 
-// A card benefit (runway/churn_benefits.py), as stored plus this period's figures.
+// A card benefit (runway/domain/churn_benefits.py), as stored plus this period's figures.
 export interface Benefit {
   id: number;
   card_id: number;
@@ -214,7 +214,7 @@ interface Task {
 
 export interface Blocker { kind: "five24" | "bonus_rule" | "held" | "wait" | "score" | "offer"; text: string; date: string | null }
 
-// A planned card or bank bonus (runway/churn_wishlist.py) and what's in the way of applying.
+// A planned card or bank bonus (runway/domain/churn_wishlist.py) and what's in the way of applying.
 export interface Wish {
   id: number;
   owner: string;
@@ -299,7 +299,7 @@ export interface BestCard {
   note: string | null;             // "10x if booked through Capital One Travel" / "Only when booked through ..."
 }
 
-// A credit card account that isn't a churning card yet, pre-filled for the add-card form (runway/churn_found.py).
+// A credit card account that isn't a churning card yet, pre-filled for the add-card form (runway/domain/churn_found.py).
 // Nothing in it is saved until the form is. opened_on is the account's first transaction here (null: it has none):
 // the card was opened on or before it.
 export interface FoundDraft {

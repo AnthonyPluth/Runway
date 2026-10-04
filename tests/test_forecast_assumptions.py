@@ -4,9 +4,10 @@ from datetime import date, timedelta
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.exc import OperationalError
 
-from runway import db, forecast, recurring
-from runway import settings_keys as sk
-from runway.models import Account, Budget, Category, Override, Recurring, Transaction
+from runway.storage import db
+from runway.domain import forecast, recurring
+from runway.storage import settings_keys as sk
+from runway.storage.models import Account, Budget, Category, Override, Recurring, Transaction
 from tests import forecast_support as fs
 from tests.shared import TODAY, LedgerCase
 
@@ -243,7 +244,7 @@ class ForecastAssumptionTests(LedgerCase):
     drop = fs.drop
 
     def medical(self, medical=400.0, dentist=None, dentist_pays=None, medical_pays="chk"):
-        from runway import categories
+        from runway.domain import categories
         self.acct("cc3", "credit", 0.0, pay_from="chk")
         categories.add(self.conn, "Dentist", "Medical")
         self.conn.execute(insert(Budget).values(category="Medical", amount=medical))
@@ -317,7 +318,7 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 270 / 31, delta=0.01)
 
     def test_a_parents_usual_account_leaves_out_subcategories_with_their_own(self):
-        from runway import categories
+        from runway.domain import categories
         categories.add(self.conn, "Dentist", "Medical")
         self.tx("chk", "2026-09-06", -50.0, "CLINIC", "Medical")
         self.tx("cc", "2026-09-05", -500.0, "DENTAL", "Dentist")

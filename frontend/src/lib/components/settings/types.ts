@@ -21,7 +21,7 @@ export interface SettingsAccount extends Account {
   statement?: CardStatementInfo | null;
   /** Cards: the statements you entered, newest first. */
   statements?: ManualStatement[];
-  /** Loans: the terms the retirement planner projects what's owed with (runway/loans.py terms()). */
+  /** Loans: the terms the retirement planner projects what's owed with (runway/domain/loans.py terms()). */
   loan?: LoanTerms;
 }
 

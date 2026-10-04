@@ -1,4 +1,4 @@
-// How the Churning page words and filters what the server worked out (runway/churning.py, runway/bank_bonuses.py).
+// How the Churning page words and filters what the server worked out (runway/domain/churning.py, runway/domain/bank_bonuses.py).
 import { fmt0, fmtDate, parseDate, plural } from "$lib/format";
 import type {
   BankBonus, Benefit, Blocker, CardPlan, ChurnCard, ChurnRate, Churning, CreditScore, Currency, CurrencyGroup, Eligibility, Five24,

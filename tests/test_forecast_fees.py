@@ -3,8 +3,8 @@ from datetime import date
 
 from sqlalchemy import insert, update
 
-from runway import churning, forecast
-from runway.models import Account, Budget, Category, ChurnCard, Override, Recurring
+from runway.domain import churning, forecast
+from runway.storage.models import Account, Budget, Category, ChurnCard, Override, Recurring
 from tests import forecast_support as fs
 from tests.shared import TODAY, LedgerCase
 
