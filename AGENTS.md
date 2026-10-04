@@ -17,6 +17,7 @@ Python goes through Poetry (Python 3.14).
 - `make check`: each tool once: ruff, mypy, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
 - `make lint`: ruff, mypy, and ESLint.
 - `make test`: `poetry run python -m unittest discover tests`.
+- `make test-parallel`: the same tests across 4 processes, as CI runs them (`make check` uses it); `make test-pg` runs them against `$DATABASE_URL` (Postgres).
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
 - `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.

@@ -18,7 +18,7 @@ The image is `ghcr.io/anthonypluth/runway:latest` (Intel/AMD and ARM). On a serv
 
 ## From source
 
-You need Python 3.14, [Poetry](https://python-poetry.org/docs/#installation) 2 (`pipx install poetry`) and Node 22 (to build the web app once).
+You need Python 3.14, [Poetry](https://python-poetry.org/docs/#installation) 2 (`pipx install poetry`) and Node 26 (to build the web app once).
 
 ```bash
 git clone https://github.com/AnthonyPluth/Runway.git
