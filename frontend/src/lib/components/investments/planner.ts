@@ -88,8 +88,8 @@ export function paymentEnds(a: PlanAsset, sellYear: number | null): number | nul
  *  plan), `counted` whether it's in the spending figure the plan starts from. One that is comes off spending from
  *  `from`; one paid as a transfer instead (false) is added to spending until then, as it's still being paid; one Runway
  *  couldn't find either way (null) is left as it is, as adding one that's already in would count it twice. */
-export interface LoanPayment { yearly: number; from: number | null; name: string; sold: boolean; counted: boolean | null }
-export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] {
+interface LoanPayment { yearly: number; from: number | null; name: string; sold: boolean; counted: boolean | null }
+function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] {
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const sold = new Map(plan.assets.filter((s) => { const a = byKey.get(s.key); return !a || counted(a); })
     .map((s) => [s.key, saleYear(s.sell_year, thisYear)]));
@@ -109,7 +109,7 @@ export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear
 }
 
 /** Loan payments in Runway's spending figure that end during the plan, and come off it then. */
-export type EndingPayment = LoanPayment & { from: number };
+type EndingPayment = LoanPayment & { from: number };
 export const endingPayments = (plan: RetirementPlan, assets: PlanAsset[], thisYear: number): EndingPayment[] =>
   loanPayments(plan, assets, thisYear).filter((p): p is EndingPayment => p.counted === true && p.from != null);
 

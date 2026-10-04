@@ -15,7 +15,7 @@ type Values = {
 
 /** What the suggestions fill in on the form, which they need to reach into: the card (null when adding), its values and
  * earning rates, and the sections to open so what was filled can be checked. */
-export type Host = {
+type Host = {
   card: ChurnCard | null;
   v: Values;
   rates: { rows: RateRow[]; portalName: string };

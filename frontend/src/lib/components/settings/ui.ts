@@ -15,5 +15,3 @@ export const linkCls = "font-medium text-foreground underline underline-offset-4
 export const helpCls = "text-sm leading-relaxed text-muted-foreground";
 /** Something that needs a look ("no paying account"): the classic app's orange. */
 export const warnText = "text-(--low)";
-/** A card title's quiet note ("optional, via OpenRouter"). */
-export const titleNote = "ml-1 text-sm font-normal text-muted-foreground";

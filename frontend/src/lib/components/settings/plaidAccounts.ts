@@ -8,13 +8,13 @@ export interface PlaidBankAccount { p: PlaidAccount; it: PlaidItem }
 /** An investment connection's account, with "ignore" turned into the `ignored` flag the bank accounts use. */
 const investment = (p: PlaidAccount): PlaidAccount => p.account_id === "ignore" ? { ...p, account_id: null, ignored: 1 } : { ...p, ignored: 0 };
 
-export function bankAccounts(st: PlaidStatus | null): PlaidBankAccount[] {
+function bankAccounts(st: PlaidStatus | null): PlaidBankAccount[] {
   return (st?.items ?? []).filter((it) => it.bank).flatMap((it) => it.accounts.filter((p) => p.type !== "investment").map((p) => ({ p, it })));
 }
-export function investmentAccounts(st: PlaidStatus | null): PlaidBankAccount[] {
+function investmentAccounts(st: PlaidStatus | null): PlaidBankAccount[] {
   return (st?.items ?? []).filter((it) => !it.bank).flatMap((it) => it.accounts.map((p) => ({ p: investment(p), it })));
 }
-export const allAccounts = (st: PlaidStatus | null) => [...bankAccounts(st), ...investmentAccounts(st)];
+const allAccounts = (st: PlaidStatus | null) => [...bankAccounts(st), ...investmentAccounts(st)];
 
 /** Waiting for a decision: not matched to one of your accounts and not left out. */
 export const undecidedAccounts = (st: PlaidStatus | null) => allAccounts(st).filter(({ p }) => !p.account_id && !p.ignored);

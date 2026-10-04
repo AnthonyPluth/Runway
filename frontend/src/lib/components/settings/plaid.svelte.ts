@@ -22,7 +22,7 @@ declare global {
 /** The last Link session that ended without connecting, for quoting to Plaid support. */
 export const plaidSession = $state({ last: null as { sid: string; request: string; at: string } | null });
 
-export function loadPlaid(): Promise<void> {
+function loadPlaid(): Promise<void> {
   if (window.Plaid) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const sc = document.createElement("script");

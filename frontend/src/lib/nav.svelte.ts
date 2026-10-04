@@ -32,7 +32,7 @@ export const currentPage = () => (route.page === "review" ? "transactions" : rou
 export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? s.user : null);
 
 /** After this long without a good sync, the data is called out as old (a day, and some slack for a late sync). */
-export const STALE_HOURS = 26;
+const STALE_HOURS = 26;
 
 type SyncTone = "" | "busy" | "warn" | "bad";
 /** The sync line: its text and tone, a visible second line (`detail`), the full story on hover (`title`), and where to

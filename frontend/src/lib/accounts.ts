@@ -10,11 +10,11 @@ export type AccountKind = (typeof ACCOUNT_KINDS)[number];
 export const KIND_LABEL: Record<AccountKind, string> = { checking: "Checking", savings: "Savings", credit: "Credit card", loan: "Loan", investment: "Investment" };
 
 /** Accounts that hold spending money: what the forecast can follow. */
-export const CASH_KINDS: readonly AccountKind[] = ["checking", "savings"];
+const CASH_KINDS: readonly AccountKind[] = ["checking", "savings"];
 /** Accounts a Plaid bank connection can be matched to (investments connect separately). */
-export const BANK_KINDS: readonly AccountKind[] = ["checking", "savings", "credit", "loan"];
+const BANK_KINDS: readonly AccountKind[] = ["checking", "savings", "credit", "loan"];
 /** Accounts a category's spending can be put on. */
-export const PAYING_KINDS: readonly AccountKind[] = ["credit", "checking", "savings"];
+const PAYING_KINDS: readonly AccountKind[] = ["credit", "checking", "savings"];
 /** Settings → Accounts' groups, in order. */
 export const KIND_GROUPS: readonly (readonly [string, readonly AccountKind[]])[] = [
   ["Cash", CASH_KINDS], ["Credit cards", ["credit"]], ["Loans", ["loan"]], ["Investments", ["investment"]],
