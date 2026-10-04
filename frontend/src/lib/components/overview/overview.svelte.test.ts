@@ -143,6 +143,22 @@ describe("ThisMonth", () => {
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
     expect(screen.getByText("nothing spent yet")).toHaveClass("sr-only");
   });
+
+  it("puts each Recent transaction's bank on its logo, as Transactions does", async () => {
+    const was = app.state;
+    app.state = { ...(was ?? {}), brands: { a1: { institution: "Chase", initial: "C" } } } as typeof app.state;
+    try {
+      vi.mocked(api)
+        .mockResolvedValueOnce({ month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 10, last_same_point: 12, last_total: 300 })
+        .mockResolvedValueOnce({ month: "2026-03", days_in_month: 31, day: 10, categories: [], income: 0, uncategorized: 0, pay_accounts: [] })
+        .mockResolvedValueOnce({ items: [tx({ id: "a", account_id: "a1", account_name: "Sapphire", amount: -12.5 })], total: 1 });
+      const { container } = render(ThisMonth);
+      await screen.findByText("−$12.50");
+      const badge = container.querySelector("[data-account-badge]");
+      expect(badge).toHaveAttribute("title", "Sapphire");
+      expect(badge).toHaveTextContent("C");
+    } finally { app.state = was; }
+  });
 });
 
 describe("CardsTable", () => {
