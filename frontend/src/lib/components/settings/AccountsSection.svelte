@@ -12,6 +12,7 @@
   import { ignoredAccounts, undecidedAccounts } from "./plaidAccounts";
   import type { DeletedAccount, PlaidStatus, SettingsAccount } from "./types";
   import { linkCls } from "./ui";
+  import { act } from "$lib/act";
 
   // Settings → Accounts: every account grouped by type. The forecast account can be chosen here or on Overview (its
   // forecast settings, which also hold its length). Hiding or showing an account moves its row here, without loading
@@ -43,13 +44,11 @@
   let showDeleted = $state(false);
   let restoring = $state("");
   async function restore(d: DeletedAccount) {
-    restoring = d.id;
-    try {
+    await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(d.id)}/restore`, { method: "POST" });
       toast.success(`${d.name || "The account"} comes back with the next sync`);
       reload();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { restoring = ""; }
+    }, { busy: (on) => (restoring = on ? d.id : "") });
   }
 </script>
 

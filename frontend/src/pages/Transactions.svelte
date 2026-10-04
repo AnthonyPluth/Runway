@@ -36,6 +36,7 @@
   import { toast } from "svelte-sonner";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
+  import { act, errMsg } from "$lib/act";
 
   // Transactions (#transactions) and its To review tab (#review) share one list: same filters, same columns.
   // Changing a category saves immediately; in Review the transaction then leaves the list.
@@ -113,7 +114,7 @@
     } catch (err) {
       if (mine !== seq) return;
       // With a list on screen it stays (you may be part way down it), under a line saying it isn't up to date.
-      if (list) refreshError = (err as Error).message; else listError = (err as Error).message;
+      if (list) refreshError = errMsg(err); else listError = errMsg(err);
     }
   }
   const PAGE = 100;
@@ -213,8 +214,7 @@
   async function decide<R>(t: Tx, send: () => Promise<R>, done: (r: R) => void | Promise<void>): Promise<boolean> {
     const name = t.payee || t.description || "this transaction";
     if (!(review && list)) {
-      try { await done(await send()); return true; }
-      catch (err) { toast.error((err as Error).message); return false; }
+      return act(async () => { await done(await send()); });
     }
     const at = list.items.findIndex((x) => x.id === t.id);
     const next = at < 0 ? undefined : (list.items[at + 1] ?? list.items[at - 1])?.id;
@@ -234,7 +234,7 @@
         count++; list.total++;
         if (keyed) { keyed = t.id; focusAfter(t.id); }
       }
-      toast.error(`Couldn’t save ${name}`, { description: (err as Error).message });
+      toast.error(`Couldn’t save ${name}`, { description: errMsg(err) });
       return false;
     }
   }
@@ -273,7 +273,7 @@
       const byId = new Map([...rows, ...list.items].map((t) => [t.id, t]));
       list.items = before.map((id) => byId.get(id)).filter((t): t is Tx => !!t);
       count += rows.length; list.total += rows.length;
-      toast.error((err as Error).message);
+      toast.error(errMsg(err));
       return false;
     }
   }
@@ -318,14 +318,13 @@
   // Only the part shown changes (its order's items, when an order split it); the whole transaction takes the category
   // once every part has it. The list loads again: the part may have left the filter.
   async function savePart(t: Tx, category: string) {
-    try {
+    return act(async () => {
       const r = await api<{ was: Was[] }>(`/api/transactions/${encodeURIComponent(t.id)}/category`, { method: "POST", body: { category, only } });
       undoable(`${t.match!.categories.join(", ")} → ${category}`, async () => { await restoreTx(r.was); await load(); },
         { description: t.payee || t.description || undefined });
       refreshState();
       await load();
-      return true;
-    } catch (err) { toast.error((err as Error).message); return false; }
+    });
   }
 
   // The sheet: a transaction's details (by id, so it shows the list's latest copy after a reload; the one it was opened

@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { actGet, act } from "$lib/act";
   // Which items you've opened: they stay open when the page loads again (after a save, a sync), like the classic app.
   const openRecurring = new Set<string>();
 </script>
@@ -99,21 +100,18 @@
     if (busy) return;
     submitted = true;
     if (Object.keys(validate(blank)).length) { await tick(); form?.querySelector<HTMLElement>("[aria-invalid=true]")?.focus(); return; }
-    busy = true;
-    try {
+    await act(async () => {
       const r = await api<{ linked: number }>("/api/recurring", { method: "POST", body: { ...blank, active: 1 } });
       toast.success(r.linked ? `Added · matched ${r.linked} past transactions` : "Added");
       adding = false; startOver();
       await load();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { busy = false; }
+    }, { busy: (on) => (busy = on) });
   }
   // "Add" on a suggestion adds it as it is (Undo removes it); "Edit first" fills the form with it to adjust.
   const values = (s: Suggestion): RecurringValues => ({ name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "", end_date: "" });
   async function addSuggestion(s: Suggestion) {
-    let r: { id: number; linked: number };
-    try { r = await api<{ id: number; linked: number }>("/api/recurring", { method: "POST", body: { ...values(s), active: 1 } }); }
-    catch (err) { toast.error((err as Error).message); return; }
+    const r = await actGet(() => api<{ id: number; linked: number }>("/api/recurring", { method: "POST", body: { ...values(s), active: 1 } }));
+    if (!r) return;
     await load();
     undoable(r.linked ? `Added ${s.name} · matched ${r.linked}` : `Added ${s.name}`, async () => {
       await api(`/api/recurring/${r.id}`, { method: "DELETE" });
@@ -126,20 +124,20 @@
     await focusForm();
   }
   async function dismissSuggestion(s: Suggestion) {
-    try {
+    await act(async () => {
       await api("/api/recurring/suggestions/dismiss", { method: "POST", body: { key: s.key } });
       suggestions = suggestions.filter((x) => x.key !== s.key);
       dismissed = [...dismissed, { key: s.key, account_id: s.account_id, match: s.match, name: s.name, frequency: s.frequency }];
       toast(`Okay, ${s.name} won’t be suggested again`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // Putting one back makes it a suggestion again (if it still looks recurring), so look the lists up again.
   async function restoreSuggestion(d: DismissedSuggestion) {
-    try {
+    await act(async () => {
       await api("/api/recurring/suggestions/restore", { method: "POST", body: { key: d.key } });
       await loadSuggestions();
       toast.success(`${d.name ?? d.match} can be suggested again`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   function toggle(id: number, open: boolean) { if (open) openRecurring.add(String(id)); else openRecurring.delete(String(id)); }
 

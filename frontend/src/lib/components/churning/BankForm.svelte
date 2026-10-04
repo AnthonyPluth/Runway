@@ -17,6 +17,7 @@
   import Section from "./Section.svelte";
   import type { BankBonus, Churning } from "./types";
   import { validateBank } from "./validate";
+  import { act, errMsg } from "$lib/act";
 
   // Adding a bank account bonus, or editing one (each field saves as you change it; Close redraws the page).
   let { b, d, person, onclose }: { b: BankBonus | null; d: Churning; person: string; onclose: (changed: boolean) => void } = $props();
@@ -72,14 +73,13 @@
     if (Object.keys(validateBank(v)).length) { focusFirstInvalid(box); return; }
     busy = true;
     try { await api("/api/churning/bank", { method: "POST", body: v }); toast(`Added ${v.bank}`); onclose(true); }
-    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
+    catch (err) { addError = errMsg(err); flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
     finally { busy = false; }
   }
   // Deleting a bonus takes its record for good (nothing here can bring it back), so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/churning/bank/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.bank}`); onclose(true); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/bank/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.bank}`); onclose(true); });
   }
   const lbl = "flex flex-col gap-1 text-sm";
   const open = $state<Record<Key, boolean>>({ requirements: false, fees: false, received: false });

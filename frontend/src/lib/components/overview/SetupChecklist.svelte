@@ -6,9 +6,9 @@
   import { barWidth, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
   import Check from "@lucide/svelte/icons/check";
   import { openForecastSettings } from "./forecastSheet.svelte";
+  import { act } from "$lib/act";
 
   // Getting started: four steps that tick themselves off as you do them, each with a short line on what it means. On its
   // own (`welcome`) before a bank is connected; at the top of the Overview after that, until every step is done or you
@@ -43,8 +43,7 @@
     await refreshState();
   };
   async function dismiss() {
-    try { await setDismissed(true); }
-    catch (err) { toast.error((err as Error).message); return; }
+    if (!(await act(async () => { await setDismissed(true); }))) return;
     undoable("Setup checklist dismissed", () => setDismissed(false));
   }
 </script>

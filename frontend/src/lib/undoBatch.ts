@@ -3,6 +3,7 @@
 // has gone starts a new one. The toast stays while the pointer is over it (the toaster's own) or a key is on it.
 import { toast } from "svelte-sonner";
 import { UNDO_MS } from "./undo";
+import { errMsg } from "./act";
 
 type Undo = () => Promise<string | void>;
 export interface Also { label: string; run: () => Promise<void> }
@@ -21,7 +22,7 @@ function show(b: Batch): void {
         let what: string | void = undefined;
         for (const u of [...b.undos].reverse()) what = await u();
         toast("Undone", n > 1 ? { description: `${n} changes` } : what ? { description: what } : undefined);
-      } catch (err) { toast.error((err as Error).message || "Couldn’t undo that"); }
+      } catch (err) { toast.error(errMsg(err) || "Couldn’t undo that"); }
     },
   };
   const end = () => { if (current === b) current = null; };
@@ -33,7 +34,7 @@ function show(b: Batch): void {
     onAutoClose: end,
     ...(b.also ? {
       cancel: undoButton,
-      action: { label: b.also.label, onClick: async () => { try { await b.also!.run(); } catch (err) { toast.error((err as Error).message || "Couldn’t do that"); } } },
+      action: { label: b.also.label, onClick: async () => { try { await b.also!.run(); } catch (err) { toast.error(errMsg(err) || "Couldn’t do that"); } } },
     } : { action: undoButton }),
   });
 }

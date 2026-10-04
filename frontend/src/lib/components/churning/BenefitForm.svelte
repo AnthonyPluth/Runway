@@ -14,6 +14,7 @@
   import FormFooter from "./FormFooter.svelte";
   import type { Benefit, Churning } from "./types";
   import { validateBenefit } from "./validate";
+  import { act, errMsg } from "$lib/act";
 
   // Adding a custom benefit to a card, or editing one (each field saves as you change it, as in the card's form).
   let { card, d, b, onclose }: { card: { id: number; product: string }; d: Churning; b: Benefit | null; onclose: (changed: boolean) => void } = $props();
@@ -53,14 +54,13 @@
     if (Object.keys(validateBenefit(v)).length) { focusFirstInvalid(box); return; }
     busy = true;
     try { await api(`/api/churning/cards/${card.id}/benefits`, { method: "POST", body: v }); toast(`Added ${v.name}`); onclose(true); }
-    catch (err) { addError = (err as Error).message; }
+    catch (err) { addError = errMsg(err); }
     finally { busy = false; }
   }
   // Deleting a benefit takes its use history with it, which can't be brought back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/churning/benefits/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.name}`); onclose(true); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/benefits/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.name}`); onclose(true); });
   }
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
 </script>

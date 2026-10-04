@@ -20,6 +20,7 @@
   import LookPicker from "./LookPicker.svelte";
   import type { PayAccount } from "$lib/components/budget/types";
   import { dangerGhost, inputCls, selectCls } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // A category: its emoji, its name (rename it in place, unless it's built in), how many transactions use it, and
   // + Sub / Move / Remove: icons that show on hover (always, on a touch screen), behind "…" on a phone. + Sub and Move
@@ -36,7 +37,7 @@
   async function rename(e: Event) {
     const f = e.currentTarget as HTMLInputElement;
     try { await api("/api/categories/rename", { method: "POST", body: { name, new_name: f.value } }); toast.success("Renamed"); reload(); }
-    catch (err) { toast.error((err as Error).message); f.value = name; }
+    catch (err) { toast.error(errMsg(err)); f.value = name; }
   }
 
   // + Sub
@@ -48,11 +49,11 @@
   const height = $derived(1 + Math.max(0, ...categories.list.filter((x) => x.path.includes(name)).map((x) => x.path.length - c.path.length)));
   async function move() {
     const parent = moveTo || null;
-    try {
+    await act(async () => {
       await api("/api/categories/move", { method: "POST", body: { name, parent } });
       toast.success(parent ? `Moved ${name} under ${parent}` : `${name} is now a top-level category`);
       await refreshState(); reload();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   // Remove. In use (transactions, rules, a budget or order items): ask, and the transactions go to Review or to
@@ -67,8 +68,7 @@
   }
   async function removeNow() {
     const was = { name, parent: c.parent || null, is_transfer: !!c.is_transfer, is_income: !!c.is_income, icon: c.custom_icon ?? null, color: c.custom_color ?? null };
-    try { await api("/api/categories/remove", { method: "POST", body: { name, move_to: null } }); }
-    catch (err) { toast.error((err as Error).message); return; }
+    if (!(await act(async () => { await api("/api/categories/remove", { method: "POST", body: { name, move_to: null } }); }))) return;
     undoable(`Removed ${name}`, async () => {
       await api("/api/categories", { method: "POST", body: { name: was.name, parent: was.parent, is_transfer: was.is_transfer, is_income: was.is_income } });
       if (was.icon || was.color) await api("/api/categories/look", { method: "POST", body: { name: was.name, icon: was.icon ?? "", color: was.color ?? "" } });
@@ -77,12 +77,11 @@
     await refreshState(); reload();
   }
   async function removeAsked(): Promise<boolean> {
-    try {
+    return act(async () => {
       const r = await api<{ moved?: number }>("/api/categories/remove", { method: "POST", body: { name, move_to: sendTo || null } });
       toast.success(r.moved ? `Removed ${name} · ${plural(r.moved, "transaction")} ${sendTo ? `moved to ${sendTo}` : "sent to Review"}` : `Removed ${name}`);
       await refreshState(); reload();
-      return true;
-    } catch (err) { toast.error((err as Error).message); return false; }
+    });
   }
   // What else goes with it, one short line each.
   const consequences = $derived.by(() => {

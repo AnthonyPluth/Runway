@@ -1,6 +1,7 @@
 <script lang="ts" module>
   import type { Rule, SettingsAccount } from "./types";
   import { ruleActions } from "./ruleApply.svelte";
+  import { act } from "$lib/act";
 
   // The search box keeps what you typed when the page redraws.
   let rulesFilter = "";
@@ -41,8 +42,7 @@
     else asking.ask(p.changes, `${r.summary || "any transaction"} → ${ruleActions(r)}`, () => applyRule(r.id!));
   }
   async function remove(r: Rule) {
-    try { await api(`/api/rules/${r.id}`, { method: "DELETE" }); }
-    catch (err) { toast.error((err as Error).message); return; }
+    if (!(await act(async () => { await api(`/api/rules/${r.id}`, { method: "DELETE" }); }))) return;
     undoable("Rule removed", async () => {
       await api("/api/rules", { method: "POST", body: { ...previewBody(r), split: r.split ?? null, apply: false } });
       reload();

@@ -12,6 +12,7 @@
   import { plaidProblem } from "./plaidErrors";
   import type { PlaidItem } from "./types";
   import { linkCls, warnText } from "./ui";
+  import { act } from "$lib/act";
 
   // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Its accounts are
   // matched to yours under Settings → Accounts.
@@ -61,20 +62,19 @@
   let syncing = $state(false);
   async function sync() {
     syncing = true;
-    try {
+    await act(async () => {
       const r = await api<{ bank?: boolean; new_transactions?: number; statements?: number; holdings?: number; transactions?: number }>(
         `/api/plaid/items/${encodeURIComponent(it.item_id)}/sync`, { method: "POST" });
       toast.success(r.bank ? `Synced · ${plural(r.new_transactions ?? 0, "new transaction")} · ${plural(r.statements ?? 0, "statement")}`
         : `Synced ${plural(r.holdings ?? 0, "holding")}, ${r.transactions ?? 0} ${r.transactions === 1 ? "activity" : "activities"}`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
     reload();
   }
   async function reconnect() {
-    try { if (await openPlaidLink(it.item_id, "update")) reload(); } catch (err) { toast.error((err as Error).message); }
+    await act(async () => { if (await openPlaidLink(it.item_id, "update")) reload(); });
   }
   async function remove() {
-    try { await api(`/api/plaid/items/${encodeURIComponent(it.item_id)}/remove`, { method: "POST" }); toast.success("Connection removed"); reload(); }
-    catch (err) { toast.error((err as Error).message); return false; }
+    if (!(await act(async () => { await api(`/api/plaid/items/${encodeURIComponent(it.item_id)}/remove`, { method: "POST" }); toast.success("Connection removed"); reload(); }))) return false;
   }
 </script>
 

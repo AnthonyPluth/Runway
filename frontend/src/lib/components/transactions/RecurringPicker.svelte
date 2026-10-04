@@ -5,6 +5,7 @@
   import { toast } from "svelte-sonner";
   import { askAlsoMatch } from "./remember.svelte";
   import type { Tx } from "./types";
+  import { act } from "$lib/act";
 
   // Link a transaction to a recurring item, start a new one from it, or mark it as not recurring. Leaving the picker
   // without choosing closes it.
@@ -18,13 +19,13 @@
     if (!value) return;
     busy = true;
     const body = value.startsWith("new:") ? { new: value.slice(4) } : value === "none" ? { recurring_id: null } : { recurring_id: Number(value) };
-    try {
+    await act(async () => {
       const r = await api<{ suggest_text?: string }>(`/api/transactions/${encodeURIComponent(t.id)}/recurring`, { method: "POST", body });
       // None of the item's texts is on this one: offer its text, so the next one links by itself.
       const item = "recurring_id" in body && r?.suggest_text ? items.find((i) => i.id === body.recurring_id) : undefined;
       if (item && r.suggest_text) askAlsoMatch(item.id, item.name, r.suggest_text, onchanged);
       else toast.success("new" in body ? "Recurring item created; edit it in Recurring" : body.recurring_id ? "Linked" : "Marked as not recurring");
-    } catch (err) { toast.error((err as Error).message); }
+    });
     onclose();
     onchanged();
   }

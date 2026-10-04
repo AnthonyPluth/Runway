@@ -7,6 +7,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { helpCls, linkCls, rowCls } from "./ui";
+  import { act } from "$lib/act";
 
   // Merchant logos through Logo.dev, for merchants Plaid has no logo for.
   const configured = $derived(!!app.state?.logodev_configured);
@@ -17,8 +18,7 @@
   const loadStatus = () => api<Status>("/api/logodev/status").then((r) => (st = r)).catch(() => {});
   loadStatus();
   async function fetchNow() {
-    try { await api("/api/logodev/fetch", { method: "POST" }); toast.success("Fetching logos now. They fill in over the next few minutes."); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/fetch", { method: "POST" }); toast.success("Fetching logos now. They fill in over the next few minutes."); });
     setTimeout(loadStatus, 4000);
   }
 
@@ -35,12 +35,10 @@
     toast.success("Key saved: looking merchants up again with Brand Search."); loadStatus();
   }
   async function clearSecret() {
-    try { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); });
   }
   async function clearKey() {
-    try { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); });
   }
 </script>
 

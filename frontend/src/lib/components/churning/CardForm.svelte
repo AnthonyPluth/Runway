@@ -23,6 +23,7 @@
   import Section from "./Section.svelte";
   import type { CardSuggestion, ChurnCard, Churning, DraftBenefit, FoundDraft } from "./types";
   import { validateCard } from "./validate";
+  import { act, errMsg } from "$lib/act";
 
   // Adding a card, or editing one (each field saves as you change it, as elsewhere in Runway; Close redraws the page).
   // The essentials (whose card, bank, name, opened, annual fee) are always showing; the rest sits in sections that start
@@ -89,7 +90,7 @@
       toast(`Added ${v.product}`);
       onclose(true);
     }
-    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
+    catch (err) { addError = errMsg(err); flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
     finally { busy = false; }
   }
   const benefitBody = ({ ai: _ai, ...b }: DraftBenefit) => ({ ...b, amount: b.amount === null || String(b.amount) === "" ? null : b.amount });
@@ -111,8 +112,7 @@
   // Deleting a card takes its to-dos, earning rates and benefits with it, and none of that comes back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Deleted ${c!.product}`); onclose(true); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Deleted ${c!.product}`); onclose(true); });
   }
 
   // Earning rates: kept in the form and sent with the card when adding; when editing, each change saves the whole list.
@@ -140,11 +140,9 @@
   let aiFields: Record<string, unknown> = {};
   let aiRates = false;
   async function suggest() {
-    suggesting = true;
-    try {
+    await act(async () => {
       applySuggestion(await api<CardSuggestion>("/api/churning/suggest", { method: "POST", body: { issuer: v.issuer, product: v.product } }));
-    } catch (err) { toast.error((err as Error).message); }
-    finally { suggesting = false; }
+    }, { busy: (on) => (suggesting = on) });
   }
   function applySuggestion(s: CardSuggestion) {
     const before: Record<string, unknown> = { ...v }, rows = rateRows.map((r) => ({ ...r })), portal = portalName, benefits = aiBenefits;
@@ -196,7 +194,7 @@
   }
   function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; aiSources = []; }
   async function saveSuggestions() {
-    try {
+    await act(async () => {
       // What the form holds now for the fields the AI filled: you may have corrected one since.
       const now = Object.fromEntries(Object.keys(aiFields).map((k) => [k, k === "portal_name" ? portalName : (v as Record<string, unknown>)[k]]));
       await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: { ...now, ...(aiRates ? ratesBody() : {}) } });
@@ -204,7 +202,7 @@
       aiBenefits = []; aiFields = {}; aiRates = false; aiUndo = null; aiMarked = false; aiSources = []; changed = true;
       toast("Saved the suggestions");
       await onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   const currencyName = $derived(d.currencies.find((x) => x.key === v.currency)?.name ?? "");

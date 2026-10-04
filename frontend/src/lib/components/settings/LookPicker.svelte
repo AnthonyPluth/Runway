@@ -6,7 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import type { Category } from "$lib/types";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
+  import { act } from "$lib/act";
 
   // A category's emoji: click the icon, then search by name ("coffee", "car"), type or paste any emoji (the phone's emoji
   // keyboard, or the computer's emoji panel), or pick one of the grid's. A web page can't open the device's own emoji
@@ -23,10 +23,10 @@
   }
 
   async function save(icon: string | null | undefined, color: string | null | undefined) {
-    try {
+    await act(async () => {
       await api("/api/categories/look", { method: "POST", body: { name: c.name, icon: icon ?? "", color: color ?? "" } });
       await loadCategories();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   const pickIcon = (icon: string) => save(icon, c.custom_color);
   let typed = $state("");

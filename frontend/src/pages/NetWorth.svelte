@@ -23,6 +23,7 @@
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
+  import { act, errMsg } from "$lib/act";
 
   let { sub = "" }: { sub?: string } = $props();
 
@@ -32,7 +33,7 @@
   let error = $state<string | null>(null);
   async function load() {
     try { d = await api<NetWorth>("/api/networth"); error = null; }
-    catch (err) { error = (err as Error).message; }
+    catch (err) { error = errMsg(err); }
   }
   load();
 
@@ -89,11 +90,11 @@
   // Leave an account out of net worth (or bring it back). It stays everywhere else; only these totals and the history from
   // today on change.
   async function leaveOut(id: string, name: string, out: boolean) {
-    try {
+    await act(async () => {
       await setLeftOut(id, out);
       if (out) undoable(`${name} is left out of net worth`, async () => { await setLeftOut(id, false); });
       else toast(`${name} is counted again`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   // The "Not counted" footnote under the breakdown: a total when there are many, and a list to bring them back.

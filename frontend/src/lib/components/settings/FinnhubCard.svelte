@@ -7,6 +7,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { helpCls, linkCls, rowCls } from "./ui";
+  import { act } from "$lib/act";
 
   // Real-time stock prices through Finnhub. Runway keeps one connection to it on the server, so the key never reaches
   // your browser. Without a key, live prices come from Yahoo, as before.
@@ -26,8 +27,7 @@
     toast.success("Key saved. Live prices use it the next time the market is open."); await refreshState(); loadStatus();
   }
   async function clearKey() {
-    try { await api("/api/finnhub/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/finnhub/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); });
   }
 </script>
 

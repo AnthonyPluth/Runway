@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { act, errMsg } from "$lib/act";
   // What the last restore said that's worth keeping (where the copy of what it replaced went, keys it couldn't read):
   // it stays under Restore until dismissed, through the page redrawing after the restore.
   type Restored = { when: string; copy: string | null; unreadable: number };
@@ -41,7 +42,7 @@
     try {
       const r = await upload<Inspected>("/api/backup/inspect", f, "Couldn’t read that backup");
       if (file === f) inspected = r;   // not a file chosen before this one
-    } catch (err) { if (file === f) problem = (err as Error).message; }
+    } catch (err) { if (file === f) problem = errMsg(err); }
   }
 
   const n = (k: number, word: string) => `${k.toLocaleString("en-US")} ${word}${k === 1 ? "" : "s"}`;
@@ -69,15 +70,16 @@
   function downloaded() { setTimeout(() => { refreshState().catch(() => {}); }, 3000); }
 
   async function restore() {
-    if (!file) return false;
-    try {
-      const r = await upload<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[] }>("/api/restore", file, "Restore failed");
+    const f = file;
+    if (!f) return false;
+    if (!(await act(async () => {
+      const r = await upload<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[] }>("/api/restore", f, "Restore failed");
       // The backup's bank access and API keys are encrypted with the key of the Runway that made it: under another
       // key they can't be read, and each is entered again in Settings (the note under Restore says so).
       restored = { when: when(r.created), copy: r.safety_copy || null, unreadable: r.unreadable_secrets?.length ?? 0 };
       toast.success("Restored");
       await refreshState(); reload();
-    } catch (err) { toast.error((err as Error).message); return false; }
+    }))) return false;
   }
 </script>
 

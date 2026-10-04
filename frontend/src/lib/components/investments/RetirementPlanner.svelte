@@ -16,6 +16,7 @@
   import { addedPayments, counted, type Dollars, endingPayments, inDollars, loanProjected, paymentEnds, project,
     projectionIn, sale as saleAt, saleProceeds, saleYear } from "./planner";
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
+  import { errMsg } from "$lib/act";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
@@ -42,7 +43,7 @@
       await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
       problem = null; isDefault = false; saved = true;
       clearTimeout(savedTimer); savedTimer = setTimeout(() => (saved = false), 1600);
-    } catch (err) { problem = (err as Error).message; }
+    } catch (err) { problem = errMsg(err); }
   }
   function keep() {
     dirty = true; clearTimeout(timer);
@@ -52,7 +53,7 @@
   async function startOver() {
     clearTimeout(timer); dirty = false;
     try { await api("/api/investments/plan", { method: "POST", body: { plan: null } }); }
-    catch (err) { problem = (err as Error).message; return; }
+    catch (err) { problem = errMsg(err); return; }
     plan = copy({ ...data.plan, ...defaults() });
     isDefault = true; problem = null; assumptionsOpen = true;
   }

@@ -4,6 +4,7 @@ import { loadCategories } from "./categories.svelte";
 import { startMonitoring } from "./monitoring";
 import { toast } from "svelte-sonner";
 import type { AppState } from "./types";
+import { errMsg } from "./act";
 
 export const app = $state({
   state: null as AppState | null,
@@ -149,7 +150,7 @@ export async function syncNow(): Promise<void> {
   } catch (err) {
     if ((err as { status?: number }).status === 409) { toast("A sync is already running. Runway will show the result when it's done."); watchSync(true); return; }
     if (app.state) app.state.syncing = false;
-    toast.error((err as Error).message);
+    toast.error(errMsg(err));
     await refreshState().catch(console.error);   // the failure is in the log now, and the sidebar says so
     // A proxy can give up on a long sync (a 504) while it carries on: still running, so watch it to the end.
     if (app.state?.syncing) watchSync(true);
@@ -164,7 +165,7 @@ const onBoot: (() => void)[] = [];
 export function whenBooted(fn: () => void): void { if (booted) fn(); else onBoot.push(fn); }
 export async function boot(): Promise<void> {
   try { await refreshState(); app.bootError = ""; }
-  catch (err) { console.error(err); app.bootError = (err as Error).message; return; }
+  catch (err) { console.error(err); app.bootError = errMsg(err); return; }
   if (booted) return;
   booted = true;
   startMonitoring(app.state?.sentry).catch((err) => console.error(err));   // error reports, if Runway sends them

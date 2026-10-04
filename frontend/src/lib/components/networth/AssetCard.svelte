@@ -9,6 +9,7 @@
   import { toast } from "svelte-sonner";
   import { HOME_VALUES, valueSource } from "./homeValues";
   import type { Asset, NetWorth } from "./types";
+  import { act, errMsg } from "$lib/act";
 
   // A home, vehicle or other asset as the side panel shows it: its value as the one field to change it (a home Realie values shows the figure only),
   // where the value came from, the value link, and removing it. `onremoved` runs after Remove goes through (the panel closes).
@@ -35,12 +36,11 @@
       const r = await api<{ value: number; low: number | null; high: number | null }>(`/api/assets/${a.id}/refresh`, { method: "POST" });
       toast(HOME_VALUES.refreshed(r));
       onchanged();
-    } catch (err) { toast.error((err as Error).message); looking = false; }
+    } catch (err) { toast.error(errMsg(err)); looking = false; }
   }
   let removing = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onremoved(); onchanged(); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onremoved(); onchanged(); });
   }
 </script>
 

@@ -4,10 +4,10 @@
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { fmtSigned, plural } from "$lib/format";
   import { undoBatched } from "$lib/undoBatch";
-  import { toast } from "svelte-sonner";
   import { ruleOffer } from "./remember.svelte";
   import { restoreTx, type Was } from "./restore";
   import type { RuleOffer, Tx } from "./types";
+  import { act } from "$lib/act";
 
   // Review a merchant at a time: one row per merchant (how many, what they add up to) with one picker that sets all of
   // them. Each change can be undone from its toast, which also offers to use the category for the merchant from now on.
@@ -31,16 +31,14 @@
   async function apply(g: { key: string; name: string; txs: Tx[] }, category: string) {
     if (!category) return;
     const ids = g.txs.map((t) => t.id);
-    busy[g.key] = true;
-    try {
+    await act(async () => {
       const r = await api<{ updated: number; was: Was[]; offer_rule?: RuleOffer | null }>("/api/transactions/bulk", { method: "POST", body: { ids, category } });
       const offer = r.offer_rule ? ruleOffer(ids[0], category, r.offer_rule, onchanged) : null;
       undoBatched(`${g.name} → ${category}`, async () => { await restoreTx(r.was); onchanged(); },
         { description: offer?.description || plural(r.updated, "transaction"), also: offer?.also });
       refreshState();
       onapplied(ids);
-    } catch (err) { toast.error((err as Error).message); }
-    finally { busy[g.key] = false; }
+    }, { busy: (on) => (busy[g.key] = on) });
   }
 </script>
 

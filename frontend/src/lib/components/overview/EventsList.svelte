@@ -15,6 +15,7 @@
   import { toast } from "svelte-sonner";
   import EstimateBreakdown from "./EstimateBreakdown.svelte";
   import { estimateTitle } from "./estimate";
+  import { act, actGet } from "$lib/act";
 
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's name opens it in Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
@@ -60,11 +61,10 @@
     const key = e.key!;
     // This date's own edit as it was (a total, like this one), to put back on Undo; none if it had none.
     const before = e.overridden ? Math.round((e.amount + (e.paid_so_far ?? 0)) * 100) / 100 : null;
-    let r: { item?: { id: number; name: string }; previous?: Previous };
-    try { r = await api("/api/overrides", { method: "POST", body: { key, amount: total } }); }
-    catch (err) { toast.error((err as Error).message); return; }
+    const r = await actGet(() => api<{ item?: { id: number; name: string }; previous?: Previous }>("/api/overrides", { method: "POST", body: { key, amount: total } }));
+    if (!r) return;
     onchanged();
-    if (r?.item && r.previous) {
+    if (r.item && r.previous) {
       const { item, previous } = r;
       undoable(`${item.name} is ${fmt(Math.abs(total))} now`, async () => { await restoreItem(item.id, previous); onchanged(); });
       return;
@@ -87,8 +87,7 @@
     }, { description: previous.amount_mode && previous.amount_mode !== "fixed" ? "A fixed amount now, not one from recent payments" : undefined });
   }
   async function reset(e: ForecastEvent) {
-    try { await api("/api/overrides", { method: "DELETE", body: { key: e.key } }); toast.success("Back to the usual amount"); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/overrides", { method: "DELETE", body: { key: e.key } }); toast.success("Back to the usual amount"); onchanged(); });
   }
 </script>
 

@@ -8,6 +8,7 @@
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import { toast } from "svelte-sonner";
   import { forecastSheet } from "./forecastSheet.svelte";
+  import { act, errMsg } from "$lib/act";
 
   // Overview's forecast settings: the account the forecast shows and how far it looks. The account's name above the balance is the trigger, so switching account is one click away; anything
   // else can open it too (see forecastSheet.svelte.ts). Saved like Settings used to (POST /api/settings), then
@@ -26,14 +27,14 @@
     if (!forecastSheet.open) return;
     api<Account[]>("/api/accounts").then(
       (all) => (cash = all.filter((a) => !a.hidden && (a.kind === "checking" || a.kind === "savings"))),
-      (err) => toast.error((err as Error).message));
+      (err) => toast.error(errMsg(err)));
   });
 
   async function setPrimary(e: Event) {
-    try {
+    await act(async () => {
       await api("/api/settings", { method: "POST", body: { primary_account: (e.currentTarget as HTMLSelectElement).value } });
       toast.success("Primary account saved"); await refreshState(); onchange?.();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   async function setHorizon(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     const days = Number(f.value);

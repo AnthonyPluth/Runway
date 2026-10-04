@@ -11,6 +11,7 @@
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
+  import { act } from "$lib/act";
 
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
   // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
@@ -52,10 +53,10 @@
 
   // Rolling over: what's left at the end of a month adds to the next, starting this month.
   async function setRollover(on: boolean) {
-    try {
+    await act(async () => {
       await api("/api/budget", { method: "POST", body: { category: c.name, rollover: on } });
       toast.success(on ? `${c.name} rolls over from this month on` : `${c.name} no longer rolls over`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
     onchanged();
   }
 </script>

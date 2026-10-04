@@ -4,6 +4,7 @@
   import type { InvAccount, PlanData } from "$lib/components/investments/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { errMsg } from "$lib/act";
 
   // The Retirement tab of Net worth. The plan comes with the investments data (it starts from the portfolio's value and
   // history), which works without any investment accounts: the planner then starts from Runway's own figures.
@@ -14,7 +15,7 @@
     try {
       const r = await api<{ plan: PlanData; accounts?: InvAccount[] }>("/api/investments?period=1Y");
       plan = r.plan; accounts = (r.accounts ?? []).filter((a) => !a.hidden && !a.duplicate_of).length; error = null;
-    } catch (err) { error = (err as Error).message; }
+    } catch (err) { error = errMsg(err); }
   }
   load();
 </script>

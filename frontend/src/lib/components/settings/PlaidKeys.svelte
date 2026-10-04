@@ -6,6 +6,7 @@
   import SecretInput from "./SecretInput.svelte";
   import type { PlaidStatus } from "./types";
   import { fieldCls, helpCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
+  import { act } from "$lib/act";
 
   // The Plaid API keys, collapsed once they're set (`open` is bound so Connect a bank can open it when they aren't).
   // They're a pair, so they're saved together with Save rather than field by field; the secret field is emptied once
@@ -26,14 +27,12 @@
     e.preventDefault();
     if (!clientId.trim()) { toast.error("Enter the client ID."); return; }
     if (!st.configured && !secret.trim()) { toast.error("Enter the secret."); return; }
-    saving = true;
-    try {
+    await act(async () => {
       await api("/api/plaid/settings", { method: "POST", body: { env, client_id: clientId.trim(), ...(secret.trim() ? { secret: secret.trim() } : {}) } });
       secret = "";
       toast.success("Plaid keys saved");
       reload();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { saving = false; }
+    }, { busy: (on) => (saving = on) });
   }
 </script>
 

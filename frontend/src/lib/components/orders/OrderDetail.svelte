@@ -8,6 +8,7 @@
   import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import { STORES, STORE_SITES, type RetailOrder } from "./retail";
+  import { act, errMsg } from "$lib/act";
 
   // An Amazon or Target order: its items, each with a category you can change (remembered for the next time you
   // buy it), and the card charges it was paid with. `onchange` runs after anything here changes a transaction.
@@ -31,26 +32,26 @@
 
   async function load() {
     try { order = await api<RetailOrder>(`/api/retail/orders/${encodeURIComponent(orderId)}`, { keep: true }); failed = ""; }
-    catch (err) { failed = (err as Error).message; }
+    catch (err) { failed = errMsg(err); }
   }
   load();
   function changed() { onchange?.(); picking = {}; load(); }
 
   async function post(path: string, body: unknown, msg: string | ((r: any) => string)) {   // eslint-disable-line @typescript-eslint/no-explicit-any
-    try {
+    await act(async () => {
       const r = await api(path, { method: "POST", body });
       toast.success(typeof msg === "string" ? msg : msg(r));
       changed();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // A change with an Undo: the reply's `was`, sent back to `restore` (the charge's or the item's), puts back exactly
   // what was there, the transactions it changed included.
   async function undoablePost(path: string, restore: string, body: unknown, msg: (r: { was: unknown; orders?: number }) => string) {
-    try {
+    await act(async () => {
       const r = await api<{ was: unknown; orders?: number }>(path, { method: "POST", body });
       undoable(msg(r), async () => { await api(restore, { method: "POST", body: { was: r.was } }); changed(); });
       changed();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // The AI's suggestions for items that have no category, from the button above the items: nothing is saved until you use
   // one (a suggested new category is created then).
@@ -59,22 +60,22 @@
   let asking = $state(false);
   async function suggest() {
     asking = true;
-    try {
+    await act(async () => {
       const list = await api<Suggestion[]>(`/api/retail/orders/${encodeURIComponent(orderId)}/suggest`, { method: "POST" });
       suggestions = Object.fromEntries(list.map((s) => [s.item_id, s]));
       if (!list.length) toast("The AI had nothing to suggest");
-    } catch (err) { toast.error((err as Error).message); }
+    });
     asking = false;
   }
   async function useSuggestion(s: Suggestion) {
-    try {
+    await act(async () => {
       const r = await api<{ category: string; created: boolean; orders: number }>(`/api/retail/items/${s.item_id}`,
         { method: "POST", body: s.new_category ? { new_category: s.new_category } : { category: s.category } });
       if (r.created) await loadCategories();
       toast.success(r.created ? `Created ${r.category} and saved` : "Saved");
       delete suggestions[s.item_id];
       changed();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   const charge = (id: string, what: string) => `/api/retail/charges/${encodeURIComponent(id)}/${what}`;
   function pick(id: string) { picking[id] = api<Candidate[]>(charge(id, "candidates"), { keep: true }).catch(() => []); }

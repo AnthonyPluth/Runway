@@ -13,6 +13,7 @@
   import FoldedLine from "./FoldedLine.svelte";
   import { benefitOrder, benefitState, benefitSummary, canUse, isPerk, lastUse } from "./churning";
   import type { ChurnCard, Churning } from "./types";
+  import { act } from "$lib/act";
 
   // A card's benefits (lounge access, travel and Lyft credits, hotel credits): what each is worth a year, this period's
   // remaining amount, and a button to mark it used. The summary nets them against the annual fee. `onchanged` redraws
@@ -35,12 +36,12 @@
     pick = "";
     if (!key) return;
     if (key === "custom") { editing = "new"; return; }
-    try {
+    await act(async () => {
       const r = await api<{ id: number }>(`/api/churning/cards/${card.id}/benefits`, { method: "POST", body: { preset: key } });
       await onchanged();
       editing = r.id;
       toast("Added. Enter its amount or value.");
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   const closeForm = async (changed: boolean) => { editing = null; if (changed) await onchanged(); };
 </script>

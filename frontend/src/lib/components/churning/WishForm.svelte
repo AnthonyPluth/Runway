@@ -18,6 +18,7 @@
   import Section from "./Section.svelte";
   import type { Churning, Wish } from "./types";
   import { validateWish } from "./validate";
+  import { act, errMsg } from "$lib/act";
 
   // Planning a card or a bank bonus: what you expect it to cost and pay, and what you're waiting for. Adding sends it
   // all with Add; editing saves each field as you change it (Close redraws the page).
@@ -77,14 +78,13 @@
     for (const k of own) body[k] = v[k as keyof typeof v];
     busy = true;
     try { await api("/api/churning/wishlist", { method: "POST", body }); toast(`Planned ${wishName({ ...v, kind: v.kind as Wish["kind"] })}`); onclose(true); }
-    catch (err) { error = (err as Error).message; flagged = sectionOf(error); if (flagged) open[flagged] = true; }
+    catch (err) { error = errMsg(err); flagged = sectionOf(error); if (flagged) open[flagged] = true; }
     finally { busy = false; }
   }
   // Deleting a planned item can't be taken back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/churning/wishlist/${w!.id}/remove`, { method: "POST" }); toast(`Deleted ${wishName(w!)}`); onclose(true); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/wishlist/${w!.id}/remove`, { method: "POST" }); toast(`Deleted ${wishName(w!)}`); onclose(true); });
   }
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
   const open = $state<Record<Key, boolean>>({ expect: false, timing: false });

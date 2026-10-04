@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { act, errMsg } from "$lib/act";
   // Rows you opened stay open when the page redraws after a save.
   const openAccounts = new Set<string>();
 
@@ -135,11 +136,11 @@
 
   // The same setting as the account picker in Overview's forecast settings.
   async function useForForecast() {
-    try {
+    await act(async () => {
       await api("/api/settings", { method: "POST", body: { primary_account: a.id } });
       toast.success(`${label} is now the forecast account`);
       await refreshState();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   function rename() {
@@ -150,8 +151,7 @@
   // Hiding (or showing again) saves just that, then the list moves the row without redrawing the page; hiding offers Undo.
   const setHiddenOnServer = (on: boolean) => api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body: { hidden: on ? 1 : 0 } });
   async function setHidden(on: boolean) {
-    try { await setHiddenOnServer(on); }
-    catch (err) { toast.error((err as Error).message); return; }
+    if (!(await act(async () => { await setHiddenOnServer(on); }))) return;
     hidden = on;
     openAccounts.delete(a.id);
     const id = a.id, what = label, moved = onhidden;
@@ -174,7 +174,7 @@
     try {
       await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
       if (rerender) { toast.success("Saved"); reload(); }
-    } catch (err) { if (rerender) toast.error((err as Error).message); else throw err; }
+    } catch (err) { if (rerender) toast.error(errMsg(err)); else throw err; }
   }
 
   // A loan's interest rate and monthly payment, the ones Plaid doesn't supply (an empty payment is worked out from
@@ -192,7 +192,7 @@
       await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body: { provider: v } });
       toast.success(v === "plaid" ? "This account now comes from Plaid; its transactions arrive with the next sync" : "Back to SimpleFIN");
       if (v === "plaid") api("/api/sync", { method: "POST" }).then(() => reload(), () => {});
-    } catch (err) { toast.error((err as Error).message); reload(); }
+    } catch (err) { toast.error(errMsg(err)); reload(); }
   }
   let kindSelect = $state<HTMLSelectElement | null>(null);
 
@@ -224,15 +224,15 @@
     removal = null;
     removing = true;
     try { removal = await api<AccountRemoval>(`/api/accounts/${encodeURIComponent(a.id)}/removal`); }
-    catch (err) { toast.error((err as Error).message); removing = false; }
+    catch (err) { toast.error(errMsg(err)); removing = false; }
   }
   async function remove() {
-    try {
+    if (!(await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, { method: "POST" });
       toast.success(`${label} deleted`);
       openAccounts.delete(a.id);
       reload();
-    } catch (err) { toast.error((err as Error).message); return false; }
+    }))) return false;
   }
   // Money and rates look alike everywhere here: "$" before the figure, "%" after, commas while you're elsewhere.
   const prefix = "pointer-events-none absolute top-[1.125rem] left-3 -translate-y-1/2 text-sm text-muted-foreground";

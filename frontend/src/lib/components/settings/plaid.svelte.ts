@@ -4,6 +4,7 @@
 import { api } from "$lib/api";
 import { refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
+import { act, errMsg } from "$lib/act";
 
 interface PlaidLinkMeta { link_session_id?: string; request_id?: string; institution?: { name?: string } | null }
 interface PlaidLinkError { display_message?: string | null; error_message?: string | null }
@@ -50,7 +51,7 @@ export function runPlaidLink(token: string, itemId: string | null, kind: string,
       token,
       ...(receivedRedirectUri ? { receivedRedirectUri } : {}),
       onSuccess: async (publicToken, metadata) => {
-        try {
+        await act(async () => {
           toast(kind === "investments" ? "Connected. Pulling holdings and activity…" : "Connected. Reading accounts and statements…");
           const r = itemId
             ? await api<Linked>(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
@@ -62,7 +63,7 @@ export function runPlaidLink(token: string, itemId: string | null, kind: string,
             ? `Found ${s(r.accounts, "account")}` + (r.matched?.length ? ` · matched ${r.matched.join(", ")}` : "") +
               (r.statements ? ` · ${s(r.statements, "card statement")}` : "")
             : `Synced ${s(r.accounts, "account")}, ${r.holdings} holdings, ${r.transactions} activities`);
-        } catch (err) { toast.error((err as Error).message); }
+        });
         resolve(true);
       },
       onExit: (err, metadata) => {
@@ -89,19 +90,18 @@ export async function resumePlaidOAuth(): Promise<boolean> {
     const linked = await runPlaidLink(p.link_token, p.item_id, p.kind, back);
     if (linked) { if (p.item_id) reload(); else showAccounts(); }
     return linked;
-  } catch (err) { toast.error((err as Error).message); return false; }
+  } catch (err) { toast.error(errMsg(err)); return false; }
 }
 
 /** Your choice for one Plaid account (a Runway account id, "new", "ignore", or "" to unmatch), with the toast that says what happened.
  *  Bank accounts match your accounts; an investment item's accounts match its candidates, so the message differs. */
 export async function matchPlaidAccount(plaidAccountId: string, target: string, bank = true): Promise<boolean> {
-  try {
+  return act(async () => {
     await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: plaidAccountId, target } });
     toast.success(target === "new" ? "Added to your accounts" : target === "ignore" ? "Left out" : !target ? "Unmatched"
       : !bank ? "Matched: it's counted once" : "Matched. Choose where its data comes from under Accounts.");
     await refreshState(); reload();
-    return true;
-  } catch (err) { toast.error((err as Error).message); return false; }
+  });
 }
 
 /** Adds each of these Plaid accounts as its own account (New from Plaid's "Add all"), one after another, then says how
@@ -115,7 +115,7 @@ export async function addPlaidAccounts(ids: string[]): Promise<number> {
     }
     toast.success(added === 1 ? "Added to your accounts" : `Added ${added} accounts`);
   } catch (err) {
-    toast.error(added ? `Added ${added} of ${ids.length}: ${(err as Error).message}` : (err as Error).message);
+    toast.error(added ? `Added ${added} of ${ids.length}: ${errMsg(err)}` : errMsg(err));
   }
   if (added) { try { await refreshState(); } catch { /* the reload below still shows them */ } reload(); }
   return added;
@@ -133,5 +133,5 @@ export async function connectPlaid(kind: string): Promise<void> {
   try {
     if (!(await openPlaidLink(null, kind))) return;
     showAccounts();
-  } catch (err) { toast.error((err as Error).message); }
+  } catch (err) { toast.error(errMsg(err)); }
 }

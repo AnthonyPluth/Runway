@@ -10,6 +10,7 @@
   import { toast } from "svelte-sonner";
   import X from "@lucide/svelte/icons/x";
   import type { Tx } from "./types";
+  import { errMsg } from "$lib/act";
 
   // Spread one transaction across categories: each part gets its own category and amount, and they must add up.
   // Amounts are typed as plain numbers; the transaction's own sign (a charge or a deposit) is kept. Save waits until
@@ -61,7 +62,7 @@
       refreshState();
       onsaved();
       returnFocus?.focus();
-    } catch (err) { error = (err as Error).message; }
+    } catch (err) { error = errMsg(err); }
     busy = false;
   }
   function save(e: SubmitEvent) {
