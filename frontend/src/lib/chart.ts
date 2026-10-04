@@ -24,13 +24,22 @@ export const xScale = (first: number, last: number, left: number, width: number)
 
 /** Dragging sideways across a chart moves its readout; dragging up or down still scrolls the page. (Svelte's own
  * touch handlers are passive, so they couldn't stop the page scrolling sideways.) With `atStart`, the touch itself
- * also moves it. */
+ * also moves it. Which of the two a drag is gets decided once, from its first few pixels: a drag that has gone sideways
+ * keeps following the finger however far it drifts up or down, rather than freezing on a day. */
+const LOCK_PX = 6;
 function touchDrag(el: Element, onMove: (clientX: number) => void, atStart: boolean) {
-  let start: Touch | null = null;
-  const down = (e: Event) => { start = (e as TouchEvent).touches[0]; if (atStart) onMove(start.clientX); };
+  let start: Touch | null = null, vertical = false, locked = false;
+  const down = (e: Event) => {
+    start = (e as TouchEvent).touches[0]; vertical = locked = false;
+    if (atStart) onMove(start.clientX);
+  };
   const drag = (e: Event) => {
     const t = (e as TouchEvent).touches[0];
-    if (start && Math.abs(t.clientY - start.clientY) > Math.abs(t.clientX - start.clientX)) return;
+    if (start && !locked) {
+      const dx = Math.abs(t.clientX - start.clientX), dy = Math.abs(t.clientY - start.clientY);
+      if (Math.max(dx, dy) >= LOCK_PX) { locked = true; vertical = dy > dx; }
+    }
+    if (vertical) return;
     onMove(t.clientX);
     if (e.cancelable) e.preventDefault();
   };
