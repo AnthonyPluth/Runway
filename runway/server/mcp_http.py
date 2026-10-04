@@ -13,7 +13,7 @@ from typing import Any
 from .. import db, mcp_access
 from ..mcp_server import ToolError
 from . import routes
-from .common import ApiError, _current
+from .common import ApiError, Response, _current
 
 # The ways to prove a caller may use the MCP server: each takes (conn, Authorization header, this server's resource)
 # and answers what the caller may do (mcp_access.Access), or None.
@@ -134,6 +134,9 @@ def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mc
     query = {k: [str(v)] for k, v in params.items() if v not in (None, "")}
     _current.user = None   # an assistant: no signed-in person
     try:
-        return routes.dispatch(found, query, body or {})
+        result = routes.dispatch(found, query, body or {})
     except ApiError as e:   # what was wrong, busy, or a server error's reference: as the web app is told
         raise ToolError(str(e)) from None
+    if isinstance(result, Response):   # a download or a stream is the web app's (BLOCKED keeps them out anyway)
+        raise ToolError("Not found")
+    return result

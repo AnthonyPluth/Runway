@@ -1,4 +1,4 @@
-"""Bank and brokerage connections: SimpleFIN, and Plaid's settings, Link and each connection's sync."""
+"""Bank and brokerage connections: syncing, SimpleFIN, and Plaid's settings, Link and each connection's sync."""
 from __future__ import annotations
 
 import json
@@ -11,8 +11,8 @@ from sqlalchemy import func, select
 from ... import categorize, db, monitoring, plaid, plaidbank, recurring, simplefin
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, InvAccount, PlaidAccount, PlaidItem
-from ..common import ApiError, text
-from ..sync import _inv_lock, _sync_lock, refresh_prices
+from ..common import ApiError, own_session, text
+from ..sync import _inv_lock, _sync_lock, refresh_prices, run_sync, sync_on_visit
 
 
 def api_connect(conn, _q, body):
@@ -199,3 +199,15 @@ def api_plaid_match(conn, _q, body):
         return plaidbank.match(conn, pid, target)
     except ValueError as e:
         raise ApiError(str(e)) from e
+
+
+@own_session
+def api_sync(_conn, _q, _b):
+    """Sync the banks now (the Sync button)."""
+    return run_sync()
+
+
+@own_session
+def api_sync_auto(_conn, _q, _b):
+    """Runway was opened: catch up a sync that's due (sync_on_visit)."""
+    return sync_on_visit()

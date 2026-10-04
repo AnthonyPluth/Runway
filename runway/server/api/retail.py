@@ -12,7 +12,7 @@ from sqlalchemy import select
 from ... import carta_web, categorize, db, monitoring, retail, validate
 from ... import settings_keys as sk
 from ...models import RetailCharge
-from ..common import ApiError, _current, row_id, text
+from ..common import ApiError, Response, _current, download, own_session, row_id, text
 from . import transactions
 
 
@@ -306,3 +306,12 @@ def extension_zip() -> bytes | None:
                 full = os.path.join(root, f)
                 z.write(full, os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR)))
     return buf.getvalue()
+
+
+@own_session
+def api_extension_zip(_conn, _q, _b) -> Response:
+    """The browser extension, to download and load unpacked."""
+    zipped = extension_zip()
+    if zipped is None:
+        raise ApiError("The extension isn't included with this copy of Runway.", 404)
+    return download(zipped, "application/zip", "runway-orders-extension.zip")

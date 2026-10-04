@@ -25,7 +25,7 @@ def built_app(static: str) -> None:
 def serving(static: str):
     """Serve from `static` (Runway's own files) and `static`/app (the built app)."""
     app = os.path.join(static, "app")
-    return mock.patch.multiple(server.handler, STATIC=static, APP_DIR=app, APP_INDEX=os.path.join(app, "index.html"))
+    return mock.patch.multiple(server.static, STATIC=static, APP_DIR=app, APP_INDEX=os.path.join(app, "index.html"))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

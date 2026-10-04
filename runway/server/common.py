@@ -1,6 +1,6 @@
-"""The pieces every part of the server shares: the error a handler raises and what a server error says, reading what a
-request sends (ids, whole numbers, texts), the signed-in person for this request, request references, and which host
-names Runway answers to."""
+"""The pieces every part of the server shares: the error a handler raises and what a server error says, an answer
+that isn't JSON (Response) and how a route takes its body, reading what a request sends (ids, whole numbers, texts),
+the signed-in person for this request, request references, and which host names Runway answers to."""
 from __future__ import annotations
 
 import ipaddress
@@ -9,6 +9,8 @@ import re
 import secrets
 import threading
 import urllib.parse
+from collections.abc import Callable, Generator
+from dataclasses import dataclass, field
 from datetime import date
 
 from dateutil.relativedelta import relativedelta
@@ -32,6 +34,49 @@ def server_error(e: BaseException, method: str, route: str) -> ApiError:
     monitoring.log(f"[error {ref}] {method} {route}", "error", ref=ref)
     monitoring.report(e, values=False, ref=ref)
     return ApiError(f"Something went wrong on Runway's side (reference {ref}; the details are in its log).", 500)
+
+
+@dataclass
+class Response:
+    """A route's answer when it isn't JSON: a download, a logo, a stream. Sent as Content-Type, `headers`,
+    Content-Length (not for a stream), Cache-Control, the ETag, the security headers every answer has, and `csp`, a
+    stricter policy on top of the usual one. A request that already has this `etag` (If-None-Match) gets a 304."""
+    body: bytes
+    content_type: str
+    status: int = 200
+    headers: dict[str, str] = field(default_factory=dict)
+    cache: str = "no-store"
+    etag: str | None = None
+    csp: str | None = None
+    sent: Callable[[], None] | None = None   # run once the body has gone out (never for a HEAD)
+    stream: Generator[bytes] | None = None   # Server-Sent Events: written and flushed a piece at a time, not `body`
+
+
+def download(data: bytes, content_type: str, filename: str, sent: Callable[[], None] | None = None) -> Response:
+    """A file the browser saves (as `filename`) rather than shows."""
+    return Response(data, content_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'}, sent=sent)
+
+
+class BadJson(ValueError):
+    """A request's body isn't JSON: not UTF-8, not JSON, or nested deeper than Python reads (Handler._read_json)."""
+
+
+NOT_READ = object()   # Handler._read_json's answer when it has already answered the request (too large, a bad length)
+
+
+def upload(limit: int):
+    """A route whose body is a file of up to `limit` bytes, handed to its handler as it is (bytes) rather than JSON."""
+    def mark(fn):
+        fn.upload = limit
+        return fn
+    return mark
+
+
+def own_session(fn):
+    """A route whose handler opens its own database sessions (a sync, a restore), so it's given None for `conn`: a
+    connection held open for minutes would only hold a place in the pool (and, on SQLite, an old snapshot)."""
+    fn.own_session = True
+    return fn
 
 
 # ------------------------------------------------------------------------------------------ reading a request

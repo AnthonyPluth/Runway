@@ -75,7 +75,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | Path | What |
 |---|---|
 | `run.py` | Starts the server; `backup`, `restore` and `demo` commands |
-| `runway/server/` | Web server: `handler.py` (requests, sign-in, security headers, static files, `serve()`), `routes.py` (the API's route table: finding a request's route and answering it, for the web app and `/mcp` alike) and `api/` (the API, one module per area), `sync.py` (background sync) |
+| `runway/server/` | Web server: `handler.py` (who may reach what, security headers, request limits, reading bodies and sending answers, `serve()`), `routes.py` (the API's route table: finding a request's route and answering it, for the web app and `/mcp` alike) and `api/` (the API, one module per area), `oauth_http.py` (OAuth for `/mcp` and its consent page), `static.py` (the web app's files), `sync.py` (background sync) |
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
 | `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
 | `runway/tracked.py` | Hand-tracked holdings |
@@ -99,7 +99,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 
 ## API handlers
 
-A handler in `runway/server/api/` is listed in `routes.py`'s `ROUTES`, takes `(conn, query, body, *ids)` and returns the JSON to answer. It checks everything it's sent before using it: numbers, amounts of money, whole numbers, days and on/off switches with `runway/validate.py` (a switch sent as `"false"` is off; an amount is under `validate.MAX_AMOUNT`), and ids, query-string numbers and text fields with `server/common.py`'s `row_id`, `query_int` and `text`. What it can't use, it refuses with `ApiError`: a 4xx and a message saying what's wrong.
+A handler in `runway/server/api/` is listed in `routes.py`'s `ROUTES`, takes `(conn, query, body, *ids)` and returns the JSON to answer, or a `common.Response` for anything else (a download, a logo, a stream: `common.download` writes a download's headers). A route that takes a file instead of JSON is marked `@common.upload(limit)`, and one that opens its own database sessions (a sync, a restore) `@common.own_session`. A route that shouldn't be an assistant's goes in `mcp_access.BLOCKED`. It checks everything it's sent before using it: numbers, amounts of money, whole numbers, days and on/off switches with `runway/validate.py` (a switch sent as `"false"` is off; an amount is under `validate.MAX_AMOUNT`), and ids, query-string numbers and text fields with `server/common.py`'s `row_id`, `query_int` and `text`. What it can't use, it refuses with `ApiError`: a 4xx and a message saying what's wrong.
 
 Anything else a handler raises is a bug. `routes.dispatch`, which answers the web app's calls (`/api/…`) and the assistants' (`/mcp`) alike, turns it into a 500 with only a reference, and logs and reports it (`monitoring.report(values=False)`: the error's type and where it was raised, never what it said, which can quote the request or name a row). A database busy with something else (SQLite's lock, or a Postgres lock timeout, deadlock or serialization failure: `db.is_busy`) is a 503, to try again.
 

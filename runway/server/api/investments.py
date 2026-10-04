@@ -1,6 +1,7 @@
 """Investments: the portfolio, live prices, cost basis, accounts you track by hand, and the retirement plan."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -8,8 +9,8 @@ from sqlalchemy import delete, select
 from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked, validate
 from ... import settings_keys as sk
 from ...models import CostOverride, Holding, ManualContribution, ManualState, Security
-from ..common import ApiError, text
-from ..sync import refresh_prices
+from ..common import ApiError, Response, own_session, text
+from ..sync import refresh_prices, run_investment_sync, run_sync
 
 
 def api_plan_save(conn, _q, body):
@@ -106,3 +107,38 @@ def api_tracked_save(conn, _q, body, acct_id):
 def api_investments(conn, q, _b):
     period = q.get("period", ["1Y"])[0]
     return portfolio.overview(conn, period if period in ("1M", "3M", "YTD", "1Y", "2Y", "MAX") else "1Y")
+
+
+@own_session
+def api_investments_sync(_conn, _q, _b):
+    """Investments' Sync: positions from Plaid (and from SimpleFIN, which come with the bank sync), then prices."""
+    with db.session() as conn:
+        has_sf = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL))
+    bank = run_sync() if has_sf else None   # positions from SimpleFIN arrive with the regular bank sync
+    out = run_investment_sync()
+    out["bank"] = bank
+    return out
+
+
+def api_quote_stream(conn, _q, _b) -> Response:
+    """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it
+    closed, one update and then the browser is told to come back in a few minutes."""
+    tickers = live_tickers(conn)
+    key = db.get_setting(conn, sk.FINNHUB_API_KEY)   # with one, trades come from Finnhub's shared connection
+
+    def events():
+        market = "closed"
+        stream = prices.quote_stream(tickers, live=finnhub.feed if key else None, live_key=key)
+        try:
+            yield b"retry: 5000\n\n"
+            for update in stream:
+                if update is None:
+                    yield b": still here\n\n"
+                else:
+                    market = update["market"]
+                    yield b"event: quotes\ndata: " + json.dumps(update).encode() + b"\n\n"
+            if market != "open":
+                yield f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode()
+        finally:
+            stream.close()   # lets go of this page's symbols on the shared Finnhub connection at once
+    return Response(b"", "text/event-stream", stream=events())

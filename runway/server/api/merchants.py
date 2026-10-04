@@ -1,6 +1,7 @@
-"""Merchant logos: choosing one, and the Logo.dev keys and background fetch."""
+"""Merchant logos: serving one, choosing one, and the Logo.dev keys and background fetch."""
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 from typing import Any
@@ -10,7 +11,18 @@ from sqlalchemy import update
 from ... import db, merchants, monitoring, validate
 from ... import settings_keys as sk
 from ...models import Merchant
-from ..common import ApiError, text
+from ..common import ApiError, Response, text
+
+
+def api_merchant_logo_file(conn, _q, _b, mid) -> Response:
+    """A merchant's logo, as an image. Kept by the browser but checked each time (its ETag), so it's gone at sign-out on
+    a shared machine; opened by itself, it's inert (a sandbox)."""
+    found = merchants.logo(conn, mid)
+    if not found or found[1] not in merchants.TYPES:   # a backup can hold anything; only ever serve an image
+        return Response(b"", "text/plain", 404)
+    data, ctype = found
+    return Response(data, ctype, cache="private, no-cache", etag='"' + hashlib.sha256(data).hexdigest()[:20] + '"',
+                    csp="default-src 'none'; sandbox")
 
 
 def api_merchant_logo_options(conn, q, _b):
