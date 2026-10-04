@@ -1,6 +1,9 @@
 """Amazon and Target orders: reading what the browser extension sends, matching charges to transactions, and splitting."""
+import hashlib
+import hmac
 import json
 import os
+import random
 import tempfile
 import threading
 import unittest
@@ -593,7 +596,141 @@ class TokenTests(Base):
             self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
 
 
+class TokenDetailTests(Base):
+    """The extension's key exactly as it's made, kept and checked, so a change to any of it is on purpose."""
+
+    def test_made_and_kept(self):
+        token = retail.new_token(self.c, {"sub": "u1", "email": "a@example.com", "name": "A"})
+        self.assertRegex(token, r"^rwx_[A-Za-z0-9_-]{43}$")
+        self.assertEqual(db.get_setting(self.c, "retail_token_hash"), hashlib.sha256(token.encode()).hexdigest())
+        self.assertEqual(db.get_setting(self.c, "retail_token_owner"), '{"sub": "u1", "email": "a@example.com"}')
+        made = db.get_setting(self.c, "retail_token_created")
+        self.assertRegex(made, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")   # local time, to the second, no zone
+        self.assertLess(abs((datetime.fromisoformat(made) - datetime.now()).total_seconds()), 5)
+        self.assertIsNone(db.get_setting(self.c, "retail_token_used"))
+        self.assertEqual(retail.token_expires(self.c), (datetime.fromisoformat(made) + timedelta(days=90)).isoformat())
+        self.assertEqual(retail.TOKEN_DAYS, 90)
+        # a new key replaces the old one, and starts unused
+        self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        again = retail.new_token(self.c, {"sub": "u2"})
+        self.assertEqual(db.get_setting(self.c, "retail_token_owner"), '{"sub": "u2", "email": null}')
+        self.assertIsNone(db.get_setting(self.c, "retail_token_used"))
+        self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "unknown")
+        self.assertIsNone(retail.token_check(self.c, f"Bearer {again}"))
+        retail.new_token(self.c, None)
+        self.assertIsNone(db.get_setting(self.c, "retail_token_owner"))
+
+    def test_the_header(self):
+        self.assertEqual(retail.token_check(self.c, "Bearer rwx_x"), "unknown")   # no key at all
+        token = retail.new_token(self.c)
+        with mock.patch("hmac.compare_digest", wraps=hmac.compare_digest) as compare:
+            self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        compare.assert_called_once_with(hashlib.sha256(token.encode()).hexdigest(),
+                                        db.get_setting(self.c, "retail_token_hash"))   # in constant time
+        self.assertIsNone(retail.token_check(self.c, f"  Bearer   {token}  "))
+        self.assertIsNone(retail.token_check(self.c, f"Bearer\t{token}"))
+        for refused in (f"bearer {token}", f"Basic {token}", f"Bearer {token} x", f"Bearer{token}", token, "",
+                        f"Bearer {token[:-1]}", f"Bearer {token}x", f"Bearer {hashlib.sha256(token.encode()).hexdigest()}"):
+            self.assertEqual(retail.token_check(self.c, refused), "unknown", refused)
+
+    def test_last_use_is_noted_once_a_minute(self):
+        token = retail.new_token(self.c)
+        recent = (datetime.now() - timedelta(seconds=30)).isoformat(timespec="seconds")
+        db.set_setting(self.c, "retail_token_used", recent)
+        retail.token_check(self.c, f"Bearer {token}")
+        self.assertEqual(db.get_setting(self.c, "retail_token_used"), recent)
+        db.set_setting(self.c, "retail_token_used", (datetime.now() - timedelta(seconds=61)).isoformat(timespec="seconds"))
+        retail.token_check(self.c, f"Bearer {token}")
+        used = db.get_setting(self.c, "retail_token_used")
+        self.assertRegex(used, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
+        self.assertLess(abs((datetime.fromisoformat(used) - datetime.now()).total_seconds()), 5)
+        db.set_setting(self.c, "retail_token_used", "not a date")   # unreadable: noted again
+        retail.token_check(self.c, f"Bearer {token}")
+        self.assertNotEqual(db.get_setting(self.c, "retail_token_used"), "not a date")
+        retail.token_check(self.c, "Bearer rwx_other")   # a refused call isn't a use
+        db.set_setting(self.c, "retail_token_used", None)
+        retail.token_check(self.c, "Bearer rwx_other")
+        self.assertIsNone(db.get_setting(self.c, "retail_token_used"))
+
+    def test_when_it_ends(self):
+        retail.new_token(self.c, {"sub": "u1", "email": "a@example.com"})
+        db.set_setting(self.c, "retail_token_created", "2026-01-01T10:00:00")
+        self.assertEqual(retail.token_expires(self.c), "2026-04-01T10:00:00")
+        self.assertIsNone(retail.token_problem(self.c, datetime(2026, 4, 1, 9, 59, 59)))
+        self.assertEqual(retail.token_problem(self.c, datetime(2026, 4, 1, 10, 0, 0)), "expired")
+        with mock.patch.object(oidc, "access_lapsed", return_value=True) as lapsed:
+            self.assertEqual(retail.token_problem(self.c, datetime(2026, 4, 2)), "expired")   # expired first
+            self.assertEqual(retail.token_problem(self.c, datetime(2026, 1, 2)), "owner_gone")
+        lapsed.assert_called_once_with(self.c, "u1", "a@example.com")
+        for owner in ("not json", "[]", '"u1"', "null"):   # an owner that can't be read: the key only expires
+            db.set_setting(self.c, "retail_token_owner", owner)
+            with mock.patch.object(oidc, "access_lapsed", return_value=True) as lapsed:
+                self.assertIsNone(retail.token_problem(self.c, datetime(2026, 1, 2)), owner)
+            lapsed.assert_not_called()
+        db.set_setting(self.c, "retail_token_created", "garbled")   # a date it can't read: no expiry
+        self.assertIsNone(retail.token_expires(self.c))
+        self.assertIsNone(retail.token_problem(self.c, datetime(2099, 1, 1)))
+
+    def test_removed(self):
+        retail.new_token(self.c, {"sub": "u1"})
+        retail.token_check(self.c, "Bearer x")
+        db.set_setting(self.c, "retail_token_used", "2026-01-01T10:00:00")
+        retail.remove_token(self.c)
+        for key in ("retail_token_hash", "retail_token_created", "retail_token_owner", "retail_token_used"):
+            self.assertIsNone(db.get_setting(self.c, key), key)
+        st = retail.status(self.c)
+        self.assertEqual((st["token"], st["token_created"], st["token_used"], st["token_expires"], st["token_problem"]),
+                         (False, None, None, None, None))
+        db.set_setting(self.c, "retail_token_created", "2020-01-01T00:00:00")   # without a key there's no problem to show
+        self.assertIsNone(retail.status(self.c)["token_problem"])
+
+
+def old_allocate(amount: float, items: list[dict], fallback: str | None, order_total: float | None = None) -> list[dict]:
+    """retail.allocate as it was before money.allocate_cents."""
+    items = [i for i in items if (i.get("amount") or 0) > 0]
+    if not items:
+        return []
+    items = retail._shipment(items, amount, order_total)
+    by_cat: dict[str, dict] = {}
+    for it in items:
+        cat = it.get("category") or fallback
+        if not cat:
+            return []
+        g = by_cat.setdefault(cat, {"weight": 0.0, "titles": []})
+        g["weight"] += it["amount"]
+        g["titles"].append(it.get("title") or "")
+    total_w = sum(g["weight"] for g in by_cat.values())
+    sign, cents = (-1 if amount < 0 else 1), abs(round(amount * 100))
+    parts = []
+    for cat, g in sorted(by_cat.items(), key=lambda kv: -kv[1]["weight"]):
+        share = cents * g["weight"] / total_w
+        parts.append({"category": cat, "cents": int(share), "rest": share - int(share), "titles": g["titles"]})
+    for p in sorted(parts, key=lambda p: -p["rest"])[:cents - sum(p["cents"] for p in parts)]:
+        p["cents"] += 1
+    out = []
+    for p in parts:
+        if p["cents"] == 0:
+            continue
+        note = "; ".join(t for t in p["titles"] if t)
+        out.append({"category": p["category"], "amount": sign * p["cents"] / 100,
+                    "note": (note[:197] + "…") if len(note) > 200 else note})
+    return out
+
+
 class AllocateTests(unittest.TestCase):
+    def test_as_it_worked_them_out(self):
+        rng = random.Random(20261004)
+        for _ in range(4000):
+            n = rng.randint(1, 9)
+            items = [{"amount": rng.choice([round(rng.uniform(0.01, 300), 2), 1, 1, 0.5, 3.333, 19.99, 0, -2]),
+                      "category": rng.choice(["A", "B", "C", "D", None]), "title": rng.choice(["", "x", "y" * 150])}
+                     for _ in range(n)]
+            amount = rng.choice([round(rng.uniform(-900, 900), 2), -10.0, -0.01, -0.03, 0.07, -100.0, -1.005, 2.675])
+            total = rng.choice([None, None, round(sum(max(i["amount"], 0) for i in items) * rng.uniform(1, 1.2), 2)])
+            fallback = rng.choice([None, "Shopping"])
+            self.assertEqual(retail.allocate(amount, items, fallback, total), old_allocate(amount, items, fallback, total),
+                             (amount, items, fallback, total))
+
     def test_adds_up_exactly(self):
         items = [{"amount": 1, "category": "A"}, {"amount": 1, "category": "B"}, {"amount": 1, "category": "C"}]
         parts = retail.allocate(-10.00, items, None)
