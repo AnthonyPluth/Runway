@@ -260,6 +260,11 @@ class BackupTests(unittest.TestCase):
             self.assertEqual((done["counts"]["transactions"], done["safety_copy"], done["unreadable_secrets"], done["warning"]),
                              (20, None, [], None))   # nothing was here to keep a copy of
 
+    def test_every_secret_has_a_label(self):
+        self.assertEqual(set(backup.SECRET_LABELS), set(sk.SECRETS))
+        self.assertEqual(backup.unreadable_summary([sk.PLAID_SECRET, "plaid:abc"]), "Plaid secret, 1 Plaid connection")
+        self.assertEqual(backup.unreadable_summary([]), "")
+
     def test_preview_says_what_a_backup_holds(self):
         src = self.fill(self.a)
         src.execute(insert(Budget).values(category="Shopping", amount=200))
@@ -426,6 +431,25 @@ class RestoreCommandTests(unittest.TestCase):
             self.assertIn("A copy of what was here before is at " + dst, r.stdout)
             self.assertNotIn("Note:", r.stdout)
             self.assertTrue([f for f in os.listdir(dst) if f.startswith("runway-before-restore-")])
+            self.assertNotIn("can't be read", r.stdout)
+
+            # Secrets this key can't read (made under another): named as Settings has them, Plaid's as a count, never
+            # a connection's id.
+            data["revision"] = backup.head()
+            data["tables"]["settings"]["rows"] += [[sk.OPENROUTER_API_KEY, "enc:v1:not-this-key"],
+                                                   [sk.CARTA_ACCESS_TOKEN, "enc:v1:x"], [sk.CARTA_REFRESH_TOKEN, "enc:v1:y"]]
+            items = data["tables"]["plaid_items"]
+            for item_id in ("item-sekrit-1", "item-sekrit-2"):
+                items["rows"].append([{"item_id": item_id, "access_token": "enc:v1:not-this-key"}.get(c) for c in items["columns"]])
+            locked = os.path.join(tmp, "locked.json.gz")
+            with open(locked, "wb") as f:
+                f.write(gzip.compress(json.dumps(data, default=str).encode()))
+            r = self.run_py(dst, "restore", locked, "--yes")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("These can't be read with this Runway's secret key: OpenRouter API key, Carta sign-in, "
+                          "2 Plaid connections.", r.stdout)
+            self.assertNotIn("sekrit", r.stdout + r.stderr)
+            self.assertNotIn(sk.OPENROUTER_API_KEY, r.stdout)
 
             data["revision"] = "0999"
             with open(old, "wb") as f:

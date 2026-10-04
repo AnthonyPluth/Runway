@@ -38,6 +38,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateColumn
 
 from . import db, monitoring, schema, secretbox
+from . import settings_keys as sk
 from .models import PlaidItem, Setting
 
 FORMAT = "runway-backup"
@@ -237,6 +238,27 @@ def unreadable_secrets(conn) -> list[str]:
         except secretbox.SecretError:
             out.append(f"plaid:{r['item_id']}")
     return out
+
+
+# What each secret is called where it's entered again (Settings), for saying which ones a restore couldn't read.
+SECRET_LABELS = {
+    sk.SIMPLEFIN_ACCESS_URL: "SimpleFIN access", sk.PLAID_SECRET: "Plaid secret", sk.PLAID_PENDING_LINK: "a Plaid connection in progress",
+    sk.OPENROUTER_API_KEY: "OpenRouter API key", sk.REALIE_API_KEY: "Realie API key", sk.FINNHUB_API_KEY: "Finnhub API key",
+    sk.LOGODEV_TOKEN: "Logo.dev publishable key", sk.LOGODEV_SECRET: "Logo.dev secret key",
+    sk.VAPID_PRIVATE_KEY: "notifications' signing key (devices sign up for notifications again)",
+    sk.CARTA_CLIENT_SECRET: "Carta client secret", sk.CARTA_ACCESS_TOKEN: "Carta sign-in", sk.CARTA_REFRESH_TOKEN: "Carta sign-in",
+    sk.CARTA_WEB_CAPTURE: "what was read from Carta",
+}
+
+
+def unreadable_summary(unreadable: list[str]) -> str:
+    """unreadable_secrets() for people: each setting by its name in Settings, and Plaid connections as a count. Only
+    these fixed labels and a count are said, never anything read from the rows (a connection's id)."""
+    labels = list(dict.fromkeys(label for key, label in SECRET_LABELS.items() if key in unreadable))
+    plaid = sum(1 for u in unreadable if u.startswith("plaid:"))
+    if plaid:
+        labels.append(f"{plaid} Plaid connection{'s' if plaid != 1 else ''}")
+    return ", ".join(labels)
 
 
 # ------------------------------------------------------------------------------------------------ restoring
