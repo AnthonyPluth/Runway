@@ -7,7 +7,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { helpCls, linkCls, rowCls } from "./ui";
-  import { act } from "$lib/act";
+  import { act, errMsg } from "$lib/act";
 
   // Real-time stock prices through Finnhub. Runway keeps one connection to it on the server, so the key never reaches
   // your browser. Without a key, live prices come from Yahoo, as before.
@@ -16,7 +16,9 @@
   // The connection only runs while prices are being streamed (the Investments page open with the market open).
   interface Status { configured: boolean; active: boolean; connected: boolean; symbols: number; limit: number; error: string | null }
   let st = $state<Status | null>(null);
-  const loadStatus = () => api<Status>("/api/finnhub/status").then((r) => (st = r)).catch(() => {});
+  // When it can't be read, the last status doesn't stay up as if it were current: the card says so, with Retry.
+  let statusError = $state("");
+  const loadStatus = () => api<Status>("/api/finnhub/status").then((r) => { st = r; statusError = ""; }).catch((err) => { st = null; statusError = errMsg(err); });
   loadStatus();
 
   // Checked with one quote before it's saved, so a mistyped key is caught here (the error shows under the field).
@@ -48,5 +50,8 @@
       {/if}
       <Button variant="outline" size="sm" class="mt-2" onclick={loadStatus}>Refresh status</Button>
     </div>
+  {:else if configured && statusError}
+    <p class="text-sm text-muted-foreground">Couldn’t load the connection status: {statusError}
+      <Button variant="link" class="h-auto p-0" onclick={loadStatus}>Retry</Button></p>
   {/if}
 </ServiceRow>

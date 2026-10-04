@@ -53,6 +53,8 @@
   async function removeDevice(ep: string, sub: PushSubscription | null) {
     await act(async () => {
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: ep } });
+      // Runway has already forgotten the device; dropping this browser's own subscription is housekeeping, and a failure
+      // leaves nothing that would send a notification.
       if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => {});
       toast.success("Removed · notifications are off on that device");
     });

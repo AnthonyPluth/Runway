@@ -67,6 +67,7 @@
     return { day: d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) }), full: when(app.state!.last_backup) };
   });
   // The browser saves the file itself, so there's no telling when it's done: look again once it likely is.
+  // (Only the "last backup" line depends on it, and the next state check corrects it, so a failed look says nothing.)
   function downloaded() { setTimeout(() => { refreshState().catch(() => {}); }, 3000); }
 
   async function restore() {
