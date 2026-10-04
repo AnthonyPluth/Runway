@@ -129,11 +129,15 @@ jobs:
           # shellcheck disable=SC2046   # one -k argument per module
           poetry run unittest-parallel -t . -s tests -j 4 $(python tests/shard.py "$SHARD")
       # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and the
-      # report goes to Codecov (the README's backend badge).
+      # report goes to Codecov (the README's backend badge), along with each test's result (JUnit XML, from
+      # tests/junit_result.py) for Codecov's test analytics.
       - name: Run tests (sqlite) and measure coverage
         if: matrix.database == 'sqlite'
+        env:
+          JUNIT_DIR: junit
+          PYTHONPATH: .            # so unittest-parallel finds tests/junit_result.py
         run: |
-          poetry run unittest-parallel -t . -s tests -j 4 --coverage --coverage-rcfile pyproject.toml
+          poetry run unittest-parallel -t . -s tests -j 4 --coverage --coverage-rcfile pyproject.toml --result tests.junit_result.JUnitResult
           poetry run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
           poetry run coverage xml -q -o coverage.xml
       - name: Upload coverage to Codecov
@@ -145,6 +149,16 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false   # a Codecov outage never holds up a release
+      - name: Upload test results to Codecov
+        if: matrix.database == 'sqlite' && !cancelled()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
+        with:
+          report_type: test_results
+          files: junit/*.xml
+          flags: backend
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
       - name: Check dependencies for known vulnerabilities
         if: matrix.database == 'sqlite'
         run: poetry run pip-audit
@@ -179,7 +193,7 @@ jobs:
         run: npm run lint
       - name: Unit tests (Vitest), measuring coverage
         if: needs.changes.outputs.web_tests == 'all'
-        run: npm run coverage
+        run: npm run coverage -- --reporter=default --reporter=junit --outputFile.junit=junit.xml
       # A pull request that changes only files under src/ runs just the tests that import them (see `changes`), without
       # coverage: a share of the tests would report most of the app as untested.
       - name: Unit tests (Vitest), only those the change can affect
@@ -195,6 +209,16 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
         with:
           files: frontend/coverage/lcov.info
+          flags: frontend
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+      - name: Upload test results to Codecov
+        if: needs.changes.outputs.web_tests == 'all' && !cancelled()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
+        with:
+          report_type: test_results
+          files: frontend/junit.xml
           flags: frontend
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
