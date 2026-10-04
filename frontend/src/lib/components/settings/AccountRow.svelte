@@ -12,12 +12,12 @@
     NO_LIABILITY_ACCOUNTS: "Plaid didn't find card statements at this bank.",
   };
   const statementNote = (code?: string | null) => STATEMENT_NOTES[code ?? ""] || "Plaid hasn’t sent a statement yet; it usually arrives with the next sync.";
-  const KINDS = ["checking", "savings", "credit", "loan", "investment"];
 </script>
 
 <script lang="ts">
   import { commas } from "$lib/commas";
   import { api } from "$lib/api";
+  import { ACCOUNT_KINDS, isBankKind, isCash, isPlaidStub } from "$lib/accounts";
   import { app, refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
@@ -85,13 +85,13 @@
   const showOwner = $derived(owners.length > 1 || (!!owner && !owners.includes(owner)));
   const link = $derived(a.plaid_link);
   // Where balances and transactions come from: a choice once the account is matched to a Plaid account.
-  const canSwitch = $derived(!a.id.startsWith("pl:") && !!link?.transactions);
+  const canSwitch = $derived(!isPlaidStub(a.id) && !!link?.transactions);
   const where = $derived(`${link?.institution || "Plaid"}${link?.mask ? ` ••${link.mask}` : ""}`);
-  const own = $derived(a.id.startsWith("pl:"));
+  const own = $derived(isPlaidStub(a.id));
   // The Plaid account behind this one (its connection says when it last synced), and the ones it could be linked to.
   const behind = $derived(plaidFor(plaid, a.id));
   const options = $derived(linkable(plaid));
-  const linkKind = $derived(["checking", "savings", "credit", "loan"].includes(a.kind));
+  const linkKind = $derived(isBankKind(a.kind));
   // An investment account has no plaid_link: a Plaid account is tied to it by that account's own choice (among its connection's candidates).
   const invKind = $derived(a.kind === "investment");
   const invOptions = $derived(linkableInvestments(plaid, a.id));
@@ -112,7 +112,7 @@
   // actions. With no choice made, a lone checking account is the one the forecast uses.
   const forecast = $derived(a.id === app.state?.primary_account
     || (!app.state?.primary_account && a.kind === "checking" && cash.filter((c) => c.kind === "checking" && !c.hidden).length === 1));
-  const canForecast = $derived((a.kind === "checking" || a.kind === "savings") && !hidden && !forecast);
+  const canForecast = $derived(isCash(a.kind) && !hidden && !forecast);
   const label = $derived(name.trim() || a.name);
   const summary = $derived.by(() => {
     const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean }[] = [];
@@ -417,7 +417,7 @@
         {a.kind} account ·
         {#if changingType}
           <select class={`${selectCls} w-36`} aria-label="Account type" bind:this={kindSelect} bind:value={kind} onchange={() => save(true)}>
-            {#each KINDS as k (k)}<option>{k}</option>{/each}
+            {#each ACCOUNT_KINDS as k (k)}<option>{k}</option>{/each}
           </select>
         {:else}
           <button type="button" class="font-medium text-foreground underline-offset-4 hover:underline"

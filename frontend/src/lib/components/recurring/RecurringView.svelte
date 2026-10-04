@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { loadAccounts } from "$lib/accounts";
   import { actGet, act } from "$lib/act";
   // Which items you've opened: they stay open when the page loads again (after a save, a sync), like the classic app.
   const openRecurring = new Set<string>();
@@ -46,7 +47,7 @@
   async function load() {
     loading = true;
     try {
-      const [a, list] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
+      const [a, list] = await Promise.all([loadAccounts(), api<Item[]>("/api/recurring")]);
       accounts = a; items = list; failed = false;
       if (!loaded) {
         // The Add form starts open when there's nothing yet, with your primary account chosen.

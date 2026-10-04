@@ -37,7 +37,7 @@ const matchCall = () => vi.mocked(api).mock.calls.find(([p]) => p === "/api/plai
 describe("Settings → Accounts: hidden accounts", () => {
   it("collapses them into a counted line that expands, leaving the others shown", async () => {
     serve(status([]));
-    render(AccountsSection, { accounts: [acct(), acct({ id: "old1", name: "Old checking", hidden: 1 }), acct({ id: "old2", name: "Old savings", kind: "savings", hidden: 1 })] });
+    render(AccountsSection, { accounts: [acct(), acct({ id: "old1", name: "Old checking", hidden: true }), acct({ id: "old2", name: "Old savings", kind: "savings", hidden: true })] });
     const section = await screen.findByRole("region", { name: "Hidden accounts" });
     expect(section).toHaveTextContent("2 hidden accounts");
     expect(screen.getByText("Checking")).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe("Settings → Accounts: hidden accounts", () => {
 
   it("moves an account you hide into them without reloading, and back with Undo", async () => {
     serve(status([]));
-    render(AccountsSection, { accounts: [acct(), acct({ id: "sav", name: "Savings", kind: "savings" }), acct({ id: "old1", name: "Old checking", hidden: 1 })] });
+    render(AccountsSection, { accounts: [acct(), acct({ id: "sav", name: "Savings", kind: "savings" }), acct({ id: "old1", name: "Old checking", hidden: true })] });
     expect(await screen.findByRole("region", { name: "Hidden accounts" })).toHaveTextContent("1 hidden account");
     const row = screen.getByText("Savings").closest("details")!;
     await userEvent.click(within(row).getByRole("button", { name: "Hide" }));

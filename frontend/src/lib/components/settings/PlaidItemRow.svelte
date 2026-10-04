@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isPlaidStub } from "$lib/accounts";
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -55,8 +56,8 @@
   // connection's accounts that SimpleFIN also has go back to it, and the ones only Plaid had keep their history.
   const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const investments = $derived(it.bank ? 0 : it.accounts.length);
-  const viaSimplefin = $derived(it.bank ? accounts.filter((p) => p.account_id && !p.account_id.startsWith("pl:")).length : 0);
-  const plaidOnly = $derived(it.bank ? accounts.filter((p) => p.account_id?.startsWith("pl:")).length : 0);
+  const viaSimplefin = $derived(it.bank ? accounts.filter((p) => p.account_id && !isPlaidStub(p.account_id)).length : 0);
+  const plaidOnly = $derived(it.bank ? accounts.filter((p) => isPlaidStub(p.account_id)).length : 0);
   let removing = $state(false);
 
   let syncing = $state(false);

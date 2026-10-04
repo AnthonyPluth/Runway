@@ -319,7 +319,7 @@ describe("hiding and renaming an account", () => {
 
   it("shows a hidden one again", async () => {
     const onhidden = vi.fn();
-    render(AccountRow, { a: acct({ hidden: 1 }), cash: [acct()], byName: {}, onhidden });
+    render(AccountRow, { a: acct({ hidden: true }), cash: [acct()], byName: {}, onhidden });
     await userEvent.click(within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Show again" }));
     await waitFor(() => expect(onhidden).toHaveBeenCalledWith("sav", false));
     expect(toast.success).toHaveBeenCalledWith("Savings is shown again");

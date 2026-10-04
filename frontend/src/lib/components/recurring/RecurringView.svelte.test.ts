@@ -14,7 +14,7 @@ import type { Account } from "$lib/types";
 import { toast } from "svelte-sonner";
 import Recurring from "./RecurringView.svelte";
 
-const accounts: Account[] = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "a2", name: "Old", kind: "checking", hidden: 1 }];
+const accounts: Account[] = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "a2", name: "Old", kind: "checking", hidden: true }];
 const item = (extra: Partial<RecurringItem> = {}): RecurringItem => ({
   id: 1, name: "Rent", account_id: "a1", amount: -1500, frequency: "monthly", anchor_date: "2026-03-01", active: 1, matched_count: 0, next_date: "2026-04-01", ...extra,
 });

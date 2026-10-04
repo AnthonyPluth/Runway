@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isBankKind, isPlaidStub } from "$lib/accounts";
   import { fmt } from "$lib/format";
   import { accountName } from "$lib/types";
   import { cn } from "$lib/utils";
@@ -16,9 +17,9 @@
 
   const inv = $derived(!!it && !it.bank);
   const sel = $derived(p.ignored ? "ignore" : p.account_id || (preselect ? "new" : ""));
-  const own = $derived(!!p.account_id?.startsWith("pl:"));
+  const own = $derived(isPlaidStub(p.account_id));
   // Yours that could be this one: not from Plaid themselves, and not already linked to another Plaid account.
-  const options = $derived(mine.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind)
+  const options = $derived(mine.filter((a) => !isPlaidStub(a.id) && isBankKind(a.kind)
     && (!a.plaid_account_id || a.plaid_account_id === p.id)));
   const candidates = $derived((it?.candidates ?? []).filter((a) => !a.linked_to || a.linked_to === p.id));
 </script>

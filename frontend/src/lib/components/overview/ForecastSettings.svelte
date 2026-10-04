@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { loadAccounts } from "$lib/accounts";
+  import { isCash } from "$lib/accounts";
   import { api } from "$lib/api";
   import { app, refreshState } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
@@ -25,8 +27,8 @@
   // The account list, each time the sheet opens (from its trigger or from elsewhere).
   $effect(() => {
     if (!forecastSheet.open) return;
-    api<Account[]>("/api/accounts").then(
-      (all) => (cash = all.filter((a) => !a.hidden && (a.kind === "checking" || a.kind === "savings"))),
+    loadAccounts().then(
+      (all) => (cash = all.filter((a) => !a.hidden && (isCash(a.kind)))),
       (err) => toast.error(errMsg(err)));
   });
 

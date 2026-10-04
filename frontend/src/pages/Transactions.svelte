@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { loadAccounts } from "$lib/accounts";
   import { api } from "$lib/api";
   import { app, refreshState, route, setQuery } from "$lib/app.svelte";
   import { catLabel, catPath, categories, loadCategories } from "$lib/categories.svelte";
@@ -31,7 +32,7 @@
   import { undoable } from "$lib/undo";
   import { undoBatched } from "$lib/undoBatch";
   import { cn } from "$lib/utils";
-  import { accountName, type Account, type Overview } from "$lib/types";
+  import { accountName, type Overview } from "$lib/types";
   import { tick, untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import Search from "@lucide/svelte/icons/search";
@@ -63,7 +64,7 @@
   });
 
   // What the page needs before the list: categories, accounts (for the filter) and recurring items (for ↻).
-  const loadSetup = () => Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
+  const loadSetup = () => Promise.all([loadCategories(), loadAccounts(), api<RecurringItem[]>("/api/recurring")]);
   let setup = $state(loadSetup());
   // Upcoming (projected) items for the forecast account, and recurring charges on cards, on All only.
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
