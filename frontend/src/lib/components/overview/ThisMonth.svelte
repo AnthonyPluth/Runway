@@ -11,6 +11,7 @@
 
 <script lang="ts">
   import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { app } from "$lib/app.svelte";
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
@@ -26,8 +27,8 @@
   const month = thisMonth();
   const fresh = Promise.all([
     api<Pace>("/api/month_pace"),
-    api<BudgetMonth>(`/api/budget?month=${month}`),
-    api<TxList>("/api/transactions?limit=5&ignored=0"),   // what you marked Ignore stays off Overview, as on Transactions
+    apiCall<"GET /api/budget">(`/api/budget?month=${month}`),
+    apiCall<"GET /api/transactions">("/api/transactions?limit=5&ignored=0"),   // what you marked Ignore stays off Overview, as on Transactions
   ]);
   let data = $state.raw(last ?? fresh);
   fresh.then((r) => { data = last = r; }, () => {});

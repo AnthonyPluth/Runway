@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { app } from "$lib/app.svelte";
   import { catLook } from "$lib/categories.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
@@ -54,7 +54,7 @@
   // Rolling over: what's left at the end of a month adds to the next, starting this month.
   async function setRollover(on: boolean) {
     await act(async () => {
-      await api("/api/budget", { method: "POST", body: { category: c.name, rollover: on } });
+      await apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: c.name, rollover: on } });
       toast.success(on ? `${c.name} rolls over from this month on` : `${c.name} no longer rolls over`);
     });
     onchanged();

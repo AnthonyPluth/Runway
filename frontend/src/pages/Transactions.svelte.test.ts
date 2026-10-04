@@ -11,7 +11,7 @@ import { app, route } from "$lib/app.svelte";
 import { txFilters } from "$lib/filters.svelte";
 import { pickCategory } from "../test/pick";
 import { toast } from "svelte-sonner";
-import { category, tx } from "../test/fixtures";
+import { category, tx, txSplit } from "../test/fixtures";
 import { accounts, lastList, none, resetTxPage, rows, serve, summary } from "../test/txPage";
 import Transactions from "./Transactions.svelte";
 
@@ -173,7 +173,7 @@ describe("Transactions page", () => {
 
   it("under a category filter, changes only a split one's part in it, and loads the list again", async () => {
     txFilters.transactions.category = "Groceries";
-    const split = tx({ id: "s", payee: "Market", amount: -100, is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Coffee", amount: -40 }],
+    const split = tx({ id: "s", payee: "Market", amount: -100, is_split: 1, splits: [txSplit("Groceries", -60), txSplit("Coffee", -40)],
       match: { amount: -60, categories: ["Groceries"] } });
     serve([split], 1, (path, opts) => (opts?.method === "POST" ? { was: [] } : undefined));
     render(Transactions);

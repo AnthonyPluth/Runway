@@ -14,7 +14,7 @@ import { acct, resetRow, shown, show } from "../../../test/accountRow";
 beforeEach(resetRow);
 
 describe("a loan's terms, for the retirement planner", () => {
-  const terms = { rate: null, payment: null, source: null, plaid: false, plaid_payment: false, set_rate: null, set_payment: null, inferred_payment: null };
+  const terms = { rate: null, payment: null, maturity: null, source: null, plaid: false, plaid_payment: false, set_rate: null, set_payment: null, inferred_payment: null };
   const loan = (over: Partial<NonNullable<SettingsAccount["loan"]>> = {}) =>
     acct({ id: "mtg", name: "Mortgage", kind: "loan", balance: -250000, loan: { ...terms, ...over } });
 

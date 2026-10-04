@@ -192,8 +192,11 @@
       "method": "GET",
       "path": "/api/accounts",
       "handler": "runway/server/api/accounts.py:api_accounts",
-      "web": [],
+      "web": [
+        "frontend/src/lib/accounts.ts"
+      ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_api_queries.py",
         "tests/test_http_pinned.py",
@@ -347,6 +350,7 @@
         "frontend/src/lib/components/transactions/txList.svelte.ts"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_api_validation.py",
         "tests/test_categorize.py",
@@ -371,6 +375,7 @@
         "frontend/src/lib/components/transactions/TxAdd.svelte"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_api_validation.py",
         "tests/test_mcp.py",
         "tests/test_routes.py",
@@ -518,6 +523,7 @@
         "frontend/src/lib/components/transactions/TxDetail.svelte"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_tx_edits.py"
       ],
       "docs": [
@@ -643,6 +649,7 @@
         "frontend/src/lib/components/overview/ThisMonth.svelte"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_categorize.py",
         "tests/test_http_server.py",
@@ -662,6 +669,7 @@
         "frontend/src/lib/components/budget/BudgetView.svelte"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_api_validation.py",
         "tests/test_categorize.py",
