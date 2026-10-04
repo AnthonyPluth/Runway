@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, mcp_access, mcp_oauth, mcp_server, server
 from runway.server import mcp_http
-from runway.models import (Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
+from runway.models import (Account, Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
                            RetailItemMemory, RetailOrder, Rule, Transaction, TxSplit)
 from tests.shared import forget_oauth, hold_mcp_switch, tag
 
@@ -228,9 +228,10 @@ class PagesTests(RunwayServer):
                          {"churning:write": mcp_access.WRITABLE, "categorize:write": mcp_access.CATEGORIZABLE})
 
     def test_categorizing_needs_its_own_scope_and_switch(self):
-        tx, item = "mcp-" + self.tag, None
+        tx, item, acct = "mcp-" + self.tag, None, "mcp-acct-" + self.tag
         with db.session() as conn:
-            conn.execute(insert(Transaction).values(id=tx, account_id="mcp-acct", posted="2026-09-20", amount=-12,
+            conn.execute(insert(Account).values(id=acct, name="Checking", kind="checking"))
+            conn.execute(insert(Transaction).values(id=tx, account_id=acct, posted="2026-09-20", amount=-12,
                                                     payee="Corner Market", category="Shopping", needs_review=1))
             conn.execute(insert(RetailOrder).values(id="costco|" + self.tag, retailer="costco", order_number=self.tag,
                                                     channel="store", placed="2026-09-26", total=10, details=1))
@@ -308,6 +309,7 @@ class PagesTests(RunwayServer):
                 conn.execute(delete(Transaction).where(Transaction.id == tx))
                 conn.execute(delete(RetailItem).where(RetailItem.order_id == "costco|" + self.tag))
                 conn.execute(delete(RetailOrder).where(RetailOrder.id == "costco|" + self.tag))
+                conn.execute(delete(Account).where(Account.id == acct))
 
 
 class AnythingTests(RunwayServer):

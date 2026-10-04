@@ -66,6 +66,8 @@ poetry run alembic revision --autogenerate -m "add a column"   # writes runway/m
 poetry run alembic check                                       # the schema and migrations agree
 ```
 
+A column that refers to another table's row (an account's id, above all) gets a foreign key, `schema.refers(table, column, "accounts.id", ondelete)`: `CASCADE` when the row belongs to what it refers to (an account's transactions), `SET NULL` when it only points at it (the account a card is paid from). Deleting an account (`deleted_accounts.remove`) relies on them, and `tests/test_deleted_accounts.py` fails for a column named like an account id without one, or a settings key named by an account id that isn't in `settings_keys.PER_ACCOUNT`. Ids kept on purpose after what they name is gone (the deleted accounts list, investment accounts' ids, Plaid's) have none. A backup restores with the keys checked when the restore commits, so rows may come in any order.
+
 Runway applies it on its next start. Queries, in the app and in the tests, are SQLAlchemy statements over the ORM models (`Connection.execute()` doesn't take SQL text), compiled for whichever database is in use; [Queries with SQLAlchemy](/Runway/contributing/orm/) is the guide.
 
 ## Code layout
@@ -85,7 +87,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/mcp_server.py`, `mcp_access.py`, `mcp_oauth.py` | The MCP server's tools, what an assistant may reach, and OAuth for connecting one |
 | `runway/db.py`, `schema.py`, `models.py`, `backup.py` | Database connections (SQLite or Postgres), the schema and its ORM models, backups |
-| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
+| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0039) |
 | `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components (`components/settings/` holds Settings' tabs) |
 | `extension/` | The browser extension (Amazon, Target, Costco and Carta) |

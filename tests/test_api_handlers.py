@@ -60,6 +60,13 @@ class HandlerTests(DbCase):
                        .where(Account.id == "demo-checking"))
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
+        # The account a card is paid from: one of yours (the database refuses another), or none.
+        with self.assertRaisesRegex(ApiError, "Pick one of your accounts"):
+            accounts.api_account_update(self.c, {}, {"pay_from": "nope"}, "demo-card")
+        accounts.api_account_update(self.c, {}, {"pay_from": "demo-checking"}, "demo-card")
+        self.assertEqual(self.one(select(Account.pay_from).where(Account.id == "demo-card"))[0], "demo-checking")
+        accounts.api_account_update(self.c, {}, {"pay_from": ""}, "demo-card")
+        self.assertIsNone(self.one(select(Account.pay_from).where(Account.id == "demo-card"))[0])
 
     def test_card_payment_plan(self):
         plan = lambda: {k: v for k, v in next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-card").items()

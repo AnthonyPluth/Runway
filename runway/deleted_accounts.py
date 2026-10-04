@@ -3,9 +3,14 @@
 Runway's accounts come from the banks (SimpleFIN, Plaid), so you can't add one; but you can delete any of them. That
 takes the account and everything that belongs to it: its transactions (and their splits), its card statements (Plaid's
 and the ones you entered), its investment data (holdings, activity, daily values, the funds you entered, cost basis
-you set), its recurring items and the rules that only apply to it, and the one-off amounts you changed on its
-forecast. Whatever else pointed at it lets go: a budget paid with it, a home's loan, a churning card or bank bonus
-linked to it, a card paid from it, and the forecast's account.
+you set), its recurring items and the rules that only apply to it, the one-off amounts you changed on its forecast,
+and its settings (how a card is paid, its APR). Whatever else pointed at it lets go: a budget paid with it, a home's
+loan, a churning card or bank bonus linked to it, a card paid from it, and the forecast's account.
+
+The database's foreign keys (schema.py, migration 0039) do part of it when the account's row goes: its transactions,
+recurring items, rules and entered statements go with it (ON DELETE CASCADE), and the columns pointing at it let go
+(SET NULL). The rest is kept by id in places a foreign key can't reach (settings keys, forecast overrides, Plaid and
+investment data, a transaction's splits) and is done here by hand.
 
 What stops the next sync bringing it straight back is a row in deleted_accounts (the tombstone): SimpleFIN's sync skips
 the account, Plaid's skips its investment accounts, and its Plaid bank or card account is set ignored. Restoring removes
@@ -26,10 +31,9 @@ from sqlalchemy import delete, func, or_, select, update
 from . import db, plaidbank, sfinvest
 from . import settings_keys as sk
 from .schema import now_text
-from .models import (Account, Asset, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount, Holding,
-                     HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition, ManualState,
-                     ManualStatement, Override, PlaidAccount, Recurring, RecurringDismissed, RetailCharge, Rule, Transaction,
-                     TxSplit)
+from .models import (Account, CardStatement, CostOverride, DeletedAccount, Holding, HoldingSnapshot, InvAccount, InvSnapshot,
+                     InvTransaction, ManualContribution, ManualPosition, ManualState, ManualStatement, Override, PlaidAccount,
+                     Recurring, RecurringDismissed, RetailCharge, Rule, Setting, Transaction, TxSplit)
 
 INVESTMENT_DATA = (Holding, InvTransaction, InvSnapshot, HoldingSnapshot, ManualPosition, ManualContribution, ManualState,
                    CostOverride)
@@ -77,24 +81,22 @@ def remove(conn, account_id: str) -> dict:
     pid = acct["plaid_account_id"] or (account_id[3:] if account_id.startswith("pl:") and conn.execute(
         select(PlaidAccount.plaid_account_id).where(PlaidAccount.plaid_account_id == account_id[3:])).fetchone() else None)
 
-    # Its transactions, their splits, and the retailer charges matched to them (which stay, unmatched).
+    # Its transactions' splits, and the retailer charges matched to them (which stay, unmatched); the transactions
+    # themselves go with the account (as do its rules: left without it, a rule would apply to every account).
     txs = _tx_ids(account_id)
     conn.execute(update(RetailCharge).where(RetailCharge.tx_id.in_(txs)).values(tx_id=None, match_source=None, applied=None))
     conn.execute(delete(TxSplit).where(TxSplit.tx_id.in_(txs)))
-    conn.execute(delete(Transaction).where(Transaction.account_id == account_id))
-    # Its recurring items, and what was said about their dates (amounts changed, missed payments dismissed).
+    # Its recurring items (they go with it too): what was said about their dates (amounts changed, missed payments
+    # dismissed), and any other account's transactions matched to them.
     rec_ids = list(conn.execute(select(Recurring.id).where(Recurring.account_id == account_id)).scalars())
     for rid in rec_ids:
         conn.execute(delete(Override).where(Override.key.startswith(f"rec:{rid}:", autoescape=True)))
         conn.execute(delete(RecurringDismissed).where(RecurringDismissed.key.startswith(f"rec:{rid}:", autoescape=True)))
     if rec_ids:
         conn.execute(update(Transaction).where(Transaction.recurring_id.in_(rec_ids)).values(recurring_id=None))
-        conn.execute(delete(Recurring).where(Recurring.id.in_(rec_ids)))
-    conn.execute(delete(Rule).where(Rule.account_id == account_id))   # left without it, a rule would apply to every account
-    # Its card statements, and the amounts you changed on its forecast.
+    # Its card statements (the ones you entered go with it), and the amounts you changed on its forecast.
     for prefix in ("card", "stmt"):
         conn.execute(delete(Override).where(Override.key.startswith(f"{prefix}:{account_id}:", autoescape=True)))
-    conn.execute(delete(ManualStatement).where(ManualStatement.account_id == account_id))
     if pid:
         conn.execute(delete(CardStatement).where(CardStatement.plaid_account_id == pid))
         conn.execute(update(PlaidAccount).where(PlaidAccount.plaid_account_id == pid).values(ignored=1))
@@ -103,18 +105,15 @@ def remove(conn, account_id: str) -> dict:
         for model in INVESTMENT_DATA:
             conn.execute(delete(model).where(model.account_id == iid))
         conn.execute(delete(InvAccount).where(InvAccount.id == iid))
-    db.set_setting(conn, sk.sf_raw(account_id), None)
+    # Its settings, and the forecast's account if it was this one.
+    conn.execute(delete(Setting).where(Setting.key.in_([key(account_id) for key in sk.PER_ACCOUNT])))
     seen = json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}")
     if seen.pop(account_id, None) is not None:
         db.set_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps(seen))
-    # What pointed at it lets go.
-    conn.execute(update(Category).where(Category.pay_with == account_id).values(pay_with=None))
-    conn.execute(update(Asset).where(Asset.loan_account_id == account_id).values(loan_account_id=None))
-    conn.execute(update(ChurnCard).where(ChurnCard.account_id == account_id).values(account_id=None))
-    conn.execute(update(ChurnBankBonus).where(ChurnBankBonus.account_id == account_id).values(account_id=None))
-    conn.execute(update(Account).where(Account.pay_from == account_id).values(pay_from=None))
     if db.get_setting(conn, sk.PRIMARY_ACCOUNT) == account_id:
         db.set_setting(conn, sk.PRIMARY_ACCOUNT, None)
+    # The account, and with it (foreign keys) its transactions, recurring items, rules and entered statements; whatever
+    # else pointed at it lets go.
     conn.execute(delete(Account).where(Account.id == account_id))
     db.upsert(conn, DeletedAccount, {"id": account_id, "name": db.account_label(acct), "kind": acct["kind"],
                                      "plaid_account_id": pid, "inv_ids": json.dumps(inv) if inv else None, "restored_at": None},

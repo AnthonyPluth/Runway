@@ -96,6 +96,7 @@ class SessionLayerTests(DbCase):
                   update=lambda ex: {"value": Setting.value + ex.value})
         self.assertEqual(db.get_setting(self.c, "k"), "3x")
         db.insert_ignore(self.c, Setting, {"key": "k", "value": "y"})
+        self.c.execute(insert(Asset).values(id=1, name="House", kind="home"))
         db.insert_ignore(self.c, AssetValue, [{"asset_id": 1, "date": "2024-01-01", "value": 1.0}] * 2,
                          key=["asset_id", "date"])
         self.assertEqual(db.get_setting(self.c, "k"), "3x")

@@ -160,11 +160,12 @@ class ImportTests(DbCase):
                             ("carta:42", grant("carta:2", 50.0, months=48), {"b": 2})], "gone": []}
         again = {"companies": [{"id": "carta:42", "name": "Carta company 42", "unnamed": True, "price": None, "price_date": None}],
                  "grants": [("carta:42", grant("carta:1", 120.0), {"a": 3})], "gone": ["carta:2"]}
-        self.c.execute(insert(EquityGrant).values(id="m1", company_id="carta:42", kind="rsu", quantity=5,
-                                                  source="manual"))
         for found in (first, again):
             with mock.patch.object(carta_web, "read", return_value=found):
                 carta_web.finish(self.c)
+            if found is first:   # a grant you add yourself to the company, between imports
+                self.c.execute(insert(EquityGrant).values(id="m1", company_id="carta:42", kind="rsu", quantity=5,
+                                                          source="manual"))
         company = dict(self.c.execute(select(EquityCompany.id, EquityCompany.name, EquityCompany.share_price,
                                              EquityCompany.price_as_of, EquityCompany.source)).fetchone())
         self.assertEqual(company, {"id": "carta:42", "name": "Acme", "share_price": 4.25, "price_as_of": "2026-03-01", "source": "carta"})

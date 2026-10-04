@@ -438,18 +438,31 @@ def migrate(path: str | None = None) -> None:
     tests running in parallel) take turns: the others wait for the first to finish, then find nothing left to do.
     A test's own schema (a path) is a database of its own, so it has a lock of its own: tests migrating different
     schemas don't queue behind each other, while two migrating the same one still take turns."""
-    with engine(path).begin() as sa_conn:
-        if sa_conn.dialect.name == "postgresql":   # the lock is released when this transaction ends
-            if path is None:
-                sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({MIGRATE_LOCK})")
-            else:
-                sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK}, hashtext(current_schema()))")
-        tables = set(inspect(sa_conn).get_table_names())
-        cfg = alembic_config(sa_conn)
-        if tables and "alembic_version" not in tables:
-            _upgrade_legacy(sa_conn)
-            command.stamp(cfg, BASELINE)
-        command.upgrade(cfg, "head")
+    with engine(path).connect() as sa_conn:
+        sqlite = sa_conn.dialect.name == "sqlite"
+        if sqlite:
+            # SQLite changes a table by making it again (Alembic's batch mode): with foreign keys on, dropping the old
+            # copy would take every row referring to it along (ON DELETE CASCADE). So they're off while migrating (set
+            # before a transaction starts: inside one it does nothing), and checked afterwards.
+            sa_conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            sa_conn.commit()
+        with sa_conn.begin():
+            if not sqlite:   # the lock is released when this transaction ends
+                if path is None:
+                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({MIGRATE_LOCK})")
+                else:
+                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK}, hashtext(current_schema()))")
+            tables = set(inspect(sa_conn).get_table_names())
+            cfg = alembic_config(sa_conn)
+            if tables and "alembic_version" not in tables:
+                _upgrade_legacy(sa_conn)
+                command.stamp(cfg, BASELINE)
+            command.upgrade(cfg, "head")
+            if sqlite:
+                broken = sorted({r[0] for r in sa_conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()})
+                if broken:   # the migrations left a row referring to one that isn't there (table names only: no data)
+                    raise RuntimeError(f"Migrating the database left rows in {', '.join(broken)} that refer to rows that "
+                                       "aren't there.")
 
 
 def init(path: str | None = None) -> None:

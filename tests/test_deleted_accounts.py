@@ -1,16 +1,17 @@
 """Deleting an account (runway/deleted_accounts.py): everything that belongs to it goes, what pointed at it lets go, a
 sync (SimpleFIN's, Plaid's banks and cards, Plaid's investments) doesn't bring it back, and restoring it does."""
+import inspect
 import json
 from unittest import mock
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, deleted_accounts, forecast, plaid, plaidbank, simplefin
+from runway import db, deleted_accounts, forecast, plaid, plaidbank, schema, simplefin
 from runway import settings_keys as sk
 from runway.models import (Account, Asset, Budget, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount,
                            Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition,
                            ManualState, ManualStatement, Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed,
-                           RetailCharge, RetailOrder, Rule, Transaction, TxSplit)
+                           RetailCharge, RetailOrder, Rule, Setting, Transaction, TxSplit)
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from runway.server.sync import _sync_lock
@@ -134,6 +135,39 @@ class DeleteAccountTests(LedgerCase):
         self.assertIsNone(db.get_setting(c, sk.sf_raw("brk")))
         self.assertEqual(json.loads(db.get_setting(c, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}"), {"other": 1})
         self.assertEqual(deleted_accounts.inv_ids(c), {"sf:brk", "w1"})
+
+    def test_nothing_is_left_referring_to_it(self):
+        # Every column that refers to an account, and every setting named by one: a row for each, pointing at the
+        # account, and none left once it's deleted. A new column or settings key that refers to an account and isn't
+        # covered (a foreign key to accounts.id, or a key in settings_keys.PER_ACCOUNT) fails the first checks.
+        named = {name for name, fn in vars(sk).items() if inspect.isfunction(fn) and fn.__module__ == sk.__name__
+                 and set(inspect.signature(fn).parameters) & {"acct_id", "account_id", "card_id"}}
+        self.assertEqual(named, {fn.__name__ for fn in sk.PER_ACCOUNT})
+        refs = [(t, fk.parent) for t in schema.metadata.sorted_tables for fk in t.foreign_keys if fk.column is schema.accounts.c.id]
+        looks_like = {(t.name, c.name) for t in schema.metadata.sorted_tables for c in t.columns
+                      if c.name in ("account_id", "pay_from", "pay_with") or c.name.endswith("_account_id")}
+        not_accounts = {(t, "account_id") for t in ("holdings", "inv_transactions", "inv_snapshots", "holding_snapshots",
+                                                    "manual_positions", "manual_contributions", "manual_state", "cost_overrides",
+                                                    "inv_accounts")}   # investment accounts' ids (or 'ignore'): removed by hand
+        not_accounts |= {(t, "plaid_account_id") for t in ("accounts", "deleted_accounts", "card_statements", "plaid_accounts",
+                                                            "loan_terms")}   # Plaid's ids
+        self.assertEqual(looks_like - not_accounts, {(t.name, col.name) for t, col in refs})
+        c = self.conn
+        self.acct("gone", "credit", -10.0)
+        for t, col in refs:
+            row = {col.name: "gone"}
+            for other in t.columns:
+                if other.primary_key and other.autoincrement is True:   # its own id: past the ones setUp gave
+                    row[other.name] = 9001
+                elif other.name not in row and not other.nullable and other.server_default is None:
+                    row[other.name] = {"TEXT": f"x-{t.name}-{other.name}", "FLOAT": 1.0, "INTEGER": 1}[str(other.type)]
+            c.execute(insert(t).values(**row))
+        for key in sk.PER_ACCOUNT:
+            db.set_setting(c, key("gone"), "1")
+        api.api_account_remove(c, {}, {}, "gone")
+        for t, col in refs:
+            self.assertEqual(self.count(t, col == "gone"), 0, f"{t.name}.{col.name}")
+        self.assertEqual([k for k in c.execute(select(Setting.key)).scalars() if any(k == key("gone") for key in sk.PER_ACCOUNT)], [])
 
     def test_refused_while_a_sync_runs(self):
         with _sync_lock:
