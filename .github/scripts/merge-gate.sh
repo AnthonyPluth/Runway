@@ -7,7 +7,9 @@
 #   - the newest run of every workflow started by the pull request succeeded (or was skipped), and the ones in
 #     REQUIRED_WORKFLOWS ran at all. CodeQL counts as one of them: GitHub's default setup runs it as a "dynamic" workflow
 #     (not a pull_request one), under the name "PR #<n>";
-#   - every other app's check run (CodeQL, Semgrep, Trivy, zizmor, ...) succeeded, and every commit status did.
+#   - every other app's check run (CodeQL, Semgrep, Trivy, zizmor, ...) succeeded, and every commit status did, and the
+#     ones in REQUIRED_STATUSES were set at all: "Agent review" (.github/workflows/agent-review.yml) is the independent
+#     review, which fails on an agent's pull request with a blocking finding and passes on anyone else's.
 # Anything still running makes it "pending". Workflows and apps that aren't about whether the change is sound are left
 # out (IGNORED_*). When it passes on one of Dependabot's pull requests, it merges it (see the end).
 #
@@ -20,6 +22,7 @@ set -euo pipefail
 
 CONTEXT="Merge gate"
 REQUIRED_WORKFLOWS=("Docker image" "Security scans" "CodeQL")   # take CodeQL out if its default setup is turned off
+REQUIRED_STATUSES=("Agent review")   # Dependabot's pull requests aren't reviewed (below)
 IGNORED_WORKFLOWS='^(Preview|Cancel runs on close|Merge gate)$'   # a preview deployment runs for an hour
 IGNORED_APPS='^(codecov|github-actions)$'   # Codecov's statuses are informational; Actions' runs are counted above
 IGNORED_STATUSES="^(${CONTEXT}|codecov/.*)$"
@@ -50,10 +53,12 @@ IFS=$'\t' read -r number author head_repo draft <<< "$prs"
 echo "Pull request #$number by $author at $SHA"
 # CodeQL's default setup doesn't analyse Dependabot's pull requests (its check says the configurations "were not found"),
 # so none of its runs ever comes: waiting for one would keep the gate pending, and the merge below, forever. A run that
-# does come still counts, as for any workflow; the tests and the security scans are still required.
+# does come still counts, as for any workflow; the tests and the security scans are still required. Nor does the agent
+# review run on them (no agent wrote them), so its status isn't asked for either.
 if [ "$author" = "dependabot[bot]" ]; then
   required=(); for w in "${REQUIRED_WORKFLOWS[@]}"; do [ "$w" = CodeQL ] || required+=("$w"); done
   REQUIRED_WORKFLOWS=("${required[@]}")
+  REQUIRED_STATUSES=()
 fi
 
 list() { local out="" x; for x in "$@"; do out+="${out:+, }$x"; done; echo "$out"; }
@@ -90,6 +95,9 @@ evaluate() {
   # 3. Commit statuses: the newest of each context (the API lists newest first).
   statuses=$(gh api --paginate "repos/$REPO/commits/$SHA/statuses?per_page=100" --jq '.[] | [.context, .state] | @tsv')
   newest=$(awk -F'\t' 'NF && !seen[$1]++' <<< "$statuses")
+  for s in "${REQUIRED_STATUSES[@]}"; do
+    grep -qxF "$s" <<< "$(cut -f1 <<< "$newest")" || pending+=("$s (not started)")
+  done
   while IFS=$'\t' read -r context result; do
     [ -n "${context:-}" ] || continue
     [[ "$context" =~ $IGNORED_STATUSES ]] && continue
