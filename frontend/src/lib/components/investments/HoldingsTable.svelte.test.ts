@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -88,6 +88,32 @@ describe("HoldingsTable", () => {
   it("hides a ticker that is really an exchange-qualified code", () => {
     setup([holding({ ticker: "NASDAQ:VTI" })]);
     expect(screen.getAllByRole("row")[1].querySelector("b")).toHaveTextContent("");
+  });
+
+  describe("on a phone", () => {
+    const phone = () => vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    beforeEach(phone);
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("folds the total gain under the value instead of a column of its own", () => {
+      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
+      const row = screen.getAllByRole("row")[1];
+      const valueCell = within(row).getByText("$2,500.00").closest("td")!;
+      expect(within(valueCell).getByText("+$500.00 (+25.0%)")).toHaveClass("text-good");
+      expect(screen.getAllByRole("columnheader").filter((h) => h.className.includes("max-[700px]:hidden")).map((h) => h.textContent!.trim())).toContain("Total gain");
+    });
+
+    it("still sorts by gain, from a button beside Value", async () => {
+      setup([holding({ ticker: "AAA", gain: 100 }), holding({ security_id: "s2", ticker: "BBB", gain: 900 })]);
+      await userEvent.click(screen.getByRole("button", { name: "Sort by total gain" }));
+      expect(inv.sort).toEqual({ key: "gain", dir: -1 });
+    });
+
+    it("shows a dash under the value when the cost basis is unknown", () => {
+      setup([holding({ value: 2500, gain: null, gain_pct: null })]);
+      const valueCell = within(screen.getAllByRole("row")[1]).getByText("$2,500.00").closest("td")!;
+      expect(within(valueCell).getByText("—")).toBeInTheDocument();
+    });
   });
 
   describe("sorting", () => {
