@@ -21,7 +21,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
   - `{"goto": "#route"}` opens a route of the app (or a full URL).
   - `{"click": selector}`, `{"fill": {"selector": …, "text": …}}`, `{"press": {"selector": …, "key": "Enter"}}`.
   - `{"wait_for": selector}` waits for it to appear; `{"expect_text": {"selector": …, "text": …}}` fails unless it contains the text.
-  - `{"screenshot": "name"}` saves `flow-<flow name>-<name>-<viewport>.png`.
+  - `{"screenshot": "name"}` saves `flow-<flow name>-<name>-<viewport>.png` (full page) and `…-<viewport>-top.png` (the top of the page, the size of the viewport).
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
 
 Flows run against the demo data only.

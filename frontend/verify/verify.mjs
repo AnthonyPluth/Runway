@@ -1,4 +1,4 @@
-// Drives the running app with Playwright and collects proof: a screenshot of each page at phone, tablet and desktop
+// Drives the running app with Playwright and collects proof: a screenshot of each page (full page, and the top of it) at phone, tablet and desktop
 // widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
 // demo database and the server; run alone it needs a server that already has the demo data.
 //
@@ -26,6 +26,10 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   }
   return undefined;
 }
+
+/** The two files one screenshot makes: the full page, and `-top`, just the viewport (the top of the page), which is the one
+ *  that fits in a pull request (`make pr-screenshots`). */
+export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
 /** A flow is { name, page?, viewports?, steps: [ { goto | click | fill | press | wait_for | expect_text | screenshot } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
@@ -105,7 +109,13 @@ async function main() {
     page.on("response", (r) => { if (r.status() >= 500) problems.push(`${where}: ${r.status()} from ${r.request().method()} ${new URL(r.url()).pathname}`); });
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     const files = [];
-    const shot = async (name) => { const f = `${name}-${viewport}.png`; await page.screenshot({ path: join(out, f), fullPage: true }); files.push(f); };
+    const shot = async (name) => {
+      const { full, top } = screenshotFiles(name, viewport);
+      await page.screenshot({ path: join(out, full), fullPage: true });
+      files.push(full);
+      await page.screenshot({ path: join(out, top) });
+      files.push(top);
+    };
     try {
       await work(page, shot);
     } catch (e) {
