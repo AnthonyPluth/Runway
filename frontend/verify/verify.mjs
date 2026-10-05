@@ -105,6 +105,7 @@ async function main() {
       await work(page, shot);
     } catch (e) {
       problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
+      // The failure screenshot is best effort: the step's own error is already recorded above.
       await shot(`${label.replace(/\W+/g, "-")}-FAILED`).catch(() => {});
     }
     for (const c of consoleErrors) problems.push(`${where}: console error: ${c.slice(0, 300)}`);
@@ -121,7 +122,7 @@ async function main() {
     }
   }
   for (const flow of flows) {
-    if (args.length && flow.page && !args.includes(flow.page)) continue;
+    if (args.length && !args.includes(flow.page ?? "overview")) continue;
     for (const viewport of flow.viewports ?? Object.keys(VIEWPORTS)) {
       await visit(`flow ${flow.name}`, viewport, async (page, shot) => {
         await page.goto(`${base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });

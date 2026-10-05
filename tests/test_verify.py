@@ -5,6 +5,14 @@ from unittest import mock
 from runway import verify
 
 
+class ServerCommandTests(unittest.TestCase):
+    def test_the_demo_server_listens_on_loopback_whatever_runway_host_says(self):
+        with mock.patch.dict("os.environ", {"RUNWAY_HOST": "0.0.0.0"}):
+            command = verify.server_command(8123)
+        self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
+        self.assertEqual(command[command.index("--port") + 1], "8123")
+
+
 class CleanEnvTests(unittest.TestCase):
     def test_the_demo_server_never_sees_real_data_settings(self):
         base = {"PATH": "/bin", "DATABASE_URL": "postgresql://real", "RUNWAY_DATA": "/real", "OIDC_ISSUER": "https://idp",

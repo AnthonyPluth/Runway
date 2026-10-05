@@ -31,6 +31,12 @@ def clean_env(data: str, base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def server_command(port: int) -> list[str]:
+    """run.py on the loopback address only: without --host it takes RUNWAY_HOST, and a demo server shouldn't listen on
+    every address (nor refuse to start for lack of the sign-in that clean_env removes)."""
+    return [sys.executable, os.path.join(ROOT, "run.py"), "--host", "127.0.0.1", "--port", str(port), "--no-sync"]
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -74,7 +80,7 @@ def run(pages: list[str]) -> int:
         port = free_port()
         log_path = os.path.join(data, "server.log")
         with open(log_path, "w") as log:
-            server = subprocess.Popen([sys.executable, os.path.join(ROOT, "run.py"), "--port", str(port), "--no-sync"],
+            server = subprocess.Popen(server_command(port),
                                       env=env, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
             url = f"http://127.0.0.1:{port}"
             try:
