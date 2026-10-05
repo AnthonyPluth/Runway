@@ -27,3 +27,6 @@ coverage.xml
 # test results (CI sends them to Codecov)
 junit/
 frontend/junit.xml
+
+# make verify: screenshots and the report
+artifacts/

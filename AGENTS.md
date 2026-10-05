@@ -21,6 +21,7 @@ Python goes through Poetry (Python 3.14).
 - `make test-parallel`: the same tests across 4 processes, as CI runs them (`make check` uses it); `make test-pg` runs them against `$DATABASE_URL` (Postgres).
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
+- `make verify`: runs the real app on demo data in a browser at phone, tablet and desktop widths, saving screenshots and a report to `artifacts/verify/` (`PAGES="budget setup"` limits the pages). UI PRs attach `make verify` output (demo data only).
 - `make fleet-checks`: the checks that replaced instructions (`tools/fleet_checks.py`, part of `make check`): one Alembic head, a test in `tests/test_migrations.py` for each new migration, the workflows' conventions, and the `Co-Authored-By` trailer on your commits since `origin/main`.
 - `make feature-map`: regenerate the feature map; `make feature-map-check` checks it is current and every route has a test (part of `make check`).
 - `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.

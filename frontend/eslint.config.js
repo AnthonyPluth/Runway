@@ -87,7 +87,7 @@ export default defineConfig(
     },
   },
   {
-    files: ["frontend/*.{js,ts}"],
+    files: ["frontend/*.{js,ts}", "frontend/verify/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
   },
   {

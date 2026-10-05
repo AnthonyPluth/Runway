@@ -17,7 +17,7 @@ UNITTEST_PARALLEL ?= poetry run unittest-parallel -t . -s tests -j 4
 SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg fix \
-	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build feature-map feature-map-check fleet-checks
+	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check fleet-checks
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check fleet-checks test-parallel frontend-check docs-build
@@ -83,6 +83,12 @@ docs: docs/node_modules
 # Builds the site into docs/dist and checks every link between its pages, as docs.yml does.
 docs-build: docs/node_modules
 	cd docs && $(NPM) run build
+
+# Runs the real app on made-up demo data and drives it with Playwright: each page at phone, tablet and desktop widths, plus
+# the scripted flows in frontend/verify/flows. Screenshots, console errors and failed requests go to artifacts/verify/; it
+# fails on a console error or a 5xx. `make verify PAGES="budget setup"` visits only those pages.
+verify: frontend/node_modules frontend-build
+	$(PYTHON) run.py verify $(PAGES)
 
 # The feature map (docs/feature-map.json and its docs page): each route's handler, web app callers, tests and docs.
 # feature-map-check fails when it is out of date or a route has no test (tools/feature_map_allowlist.txt only shrinks).
