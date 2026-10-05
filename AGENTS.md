@@ -16,7 +16,7 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
-- `tools/`: scripts for the repo itself; `feature_map.py` generates the feature map.
+- `tools/`: scripts for the repo itself; `feature_map.py` generates the feature map, `api_contract.py` the API contract.
 - `docs/`: the documentation site (Starlight), published to GitHub Pages. Pages are Markdown in `docs/src/content/docs/`; screenshots are in `docs/src/assets/screenshots/`.
 
 ## Commands
@@ -32,6 +32,7 @@ Python goes through Poetry (Python 3.14).
 - `make verify`: runs the real app on demo data in a browser at phone, tablet and desktop widths, saving screenshots and a report to `artifacts/verify/` (`PAGES="budget setup"` limits the pages). UI PRs attach `make verify` output (demo data only).
 - `make fleet-checks`: the checks that replaced instructions (`tools/fleet_checks.py`, part of `make check`): one Alembic head, a test in `tests/test_migrations.py` for each new migration, the workflows' conventions, and the `Co-Authored-By` trailer on your commits since `origin/main`.
 - `make feature-map`: regenerate the feature map; `make feature-map-check` checks it is current and every route has a test (part of `make check`).
+- `make api-contract`: regenerate the API contract (`docs/openapi.json`, `frontend/src/lib/api-types.ts`); `make api-contract-check` checks it is current (part of `make check`).
 - `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.
 
 ## Start from the feature map
@@ -44,6 +45,7 @@ Python goes through Poetry (Python 3.14).
 - One paved path; lint fails on the old way (`.semgrep/runway.yml`, `frontend/eslint.config.js`). Fix a finding with the helper, or justify it with an inline ignore and a reason; don't switch the rule off. Python: HTTP only through `tls.urlopen` (no `urllib.request.urlopen` or `build_opener` outside `runway/tls.py`); request bodies in `runway/server/api/` through `runway/validate.py` (no `bool(body…)`, `float(body…)`, `int(body[…])`); no SQL built from strings (`sa.text(f"…")`); the half cent is `money.CENT` (no `0.005` outside `runway/money.py`); sync and provider modules take the `today` they're given (no bare `date.today()`); no `datetime.utcnow()`; month arithmetic only in `runway/dates.py`. Web app: `errMsg(e)` from `lib/act.ts`, not `(e as Error).message`; `fetch(` only in `lib/api.ts`; `.catch(() => {})` carries a comment saying why; account kinds come from `lib/accounts.ts`, not a hand-written list.
 - Real typography (’ – −) in user-facing strings and comments is intentional; don't "fix" it to ASCII.
 - Schema changes need an Alembic migration in `runway/storage/migrations/`, numbered after main's newest, with its own `test_<revision>_…` in `tests/test_migrations.py` (checked).
+- The API contract: a route it covers has its reply and body types in `runway/server/contract.py`, on its handler's annotations, and the web app calls it with `apiCall<"METHOD /path">(…)` from `lib/contract.ts`. Change a covered reply or body there, run `make api-contract` and commit the generated files; cover a route the same way (see [Development](docs/src/content/docs/contributing/development.md), "The API contract").
 - A change users or contributors would notice updates its page in `docs/src/content/docs/` in the same PR. Link between pages with absolute paths (`/Runway/start/docker/`); a broken one fails the build.
 - Add or update tests with the change. Don't skip, disable or delete a test to get CI passing.
 - Never commit secrets. `.env.example` lists configuration; real values stay in `.env`.

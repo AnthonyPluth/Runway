@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { app, reload } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -120,7 +121,7 @@
   }
   async function showMatches() {
     if (matches) { matches = null; return; }
-    await act(async () => { matches = (await api<{ items: MatchedTx[] }>(`/api/transactions?recurring=${r.id}&limit=50`)).items; });
+    await act(async () => { matches = (await apiCall<"GET /api/transactions">(`/api/transactions?recurring=${r.id}&limit=50`)).items; });
   }
 </script>
 

@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
-import { category, tx } from "../../../test/fixtures";
+import { category, tx, txSplit, txOrder } from "../../../test/fixtures";
 import TxRow from "./TxRow.svelte";
 import { pickCategory, pickedValue } from "../../../test/pick";
 import type { Tx } from "./types";
@@ -34,7 +34,7 @@ describe("TxRow", () => {
   });
 
   it("under a category filter, shows a split one's part: its amount of the whole, and a picker for just that part", async () => {
-    const p = props(tx({ amount: -100, is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Coffee", amount: -40 }],
+    const p = props(tx({ amount: -100, is_split: 1, splits: [txSplit("Groceries", -60), txSplit("Coffee", -40)],
       match: { amount: -60, categories: ["Groceries"] } }), { family: ["Groceries"] });
     render(TxRow, p);
     expect(within(row()).getByText("−$60.00")).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe("TxRow", () => {
   });
 
   describe("split", () => {
-    const split = tx({ is_split: 1, category: null, amount: -30, splits: [{ category: "Groceries", amount: -20 }, { category: "Coffee", amount: -10, note: "beans" }] });
+    const split = tx({ is_split: 1, category: null, amount: -30, splits: [txSplit("Groceries", -20), txSplit("Coffee", -10, { note: "beans" })] });
 
     it("lists each part's category and amount instead of a single category, without a split badge", () => {
       render(TxRow, props(split));
@@ -298,7 +298,7 @@ describe("TxRow", () => {
   });
 
   describe("retail order", () => {
-    const withOrder = tx({ retail: { order_id: "o1", retailer: "amazon", items: 3 } });
+    const withOrder = tx({ retail: txOrder({ items: 3 }) });
 
     it("shows a receipt badge, labelled with the order, and only loads its items when you open it", async () => {
       vi.mocked(api).mockResolvedValue({ id: "o1", retailer: "amazon", order_number: "111", items: [], charges: [], url: "" });
@@ -324,7 +324,7 @@ describe("TxRow", () => {
     });
 
     it("shows the receipt badge as just its icon unless the cell has room for the word", () => {
-      render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
+      render(TxRow, props(tx({ retail: txOrder({ retailer: "target", channel: "store", items: 3 }) })));
       const chip = screen.getByRole("button", { name: "Receipt: Target in store · 3 items" });
       expect(chip).toHaveClass("shrink-0");
       expect(within(chip).getByText("receipt")).toHaveClass("hidden", "@sm/title:inline", "max-sm:inline");

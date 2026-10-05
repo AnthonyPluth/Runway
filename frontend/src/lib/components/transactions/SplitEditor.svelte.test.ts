@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { categories } from "$lib/categories.svelte";
 import { toast } from "svelte-sonner";
-import { category, tx } from "../../../test/fixtures";
+import { category, tx, txSplit } from "../../../test/fixtures";
 import SplitEditor from "./SplitEditor.svelte";
 import type { Tx } from "./types";
 import { pickCategory, pickedValue } from "../../../test/pick";
@@ -160,7 +160,7 @@ describe("SplitEditor", () => {
   });
 
   it("loads an existing split and can remove it", async () => {
-    const { onsaved } = setup(tx({ amount: -30, is_split: 1, splits: [{ category: "Coffee", amount: -10, note: "x" }, { category: "Groceries", amount: -20 }] }));
+    const { onsaved } = setup(tx({ amount: -30, is_split: 1, splits: [txSplit("Coffee", -10, { note: "x" }), txSplit("Groceries", -20)] }));
     expect(amount(1)).toHaveValue("10.00");
     expect(pickedValue(screen.getByRole("combobox", { name: "Category of part 2" }))).toBe("Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Remove split" }));

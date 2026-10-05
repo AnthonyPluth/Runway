@@ -1,54 +1,10 @@
-// The Budget page's API shapes (runway/server.py api_budget).
+// The Budget page's API shapes: GET and POST /api/budget's, from the API contract (lib/api-types.ts, generated from
+// runway/server/contract.py). A category's month is what's been spent (its subcategories included) against its
+// budget, if it has one; an income category's row has the same shape, with `budget` what's expected to come in and
+// `spent` what has. `day` is today's day of the month: 0 for a month still to come, the last day for one that's over.
+import type { BudgetCategory } from "$lib/api-types";
 
-/** A spending category's month: what's been spent (its subcategories included) against its budget, if it has one. */
-export interface BudgetCategory {
-  name: string;
-  parent: string | null;
-  path: string[];
-  depth: number;
-  top: string;
-  has_children: boolean;
-  icon?: string;
-  budget: number | null;
-  /** The account the category's spending goes on (for the budget forecast; set in Settings → Categories); null means automatic. */
-  pay_with: string | null;
-  /** The account it usually goes on, which "Automatic" uses. */
-  usual_account: string | null;
-  /** YYYY-MM the budget has rolled over since (what's left each month adds to the next); null when it doesn't. */
-  rollover_from?: string | null;
-  /** Left over from earlier months and added to this one's budget. */
-  carried?: number;
-  /** The budget plus what was carried: what there is to spend this month. */
-  available?: number | null;
-  spent: number;
-  own_spent: number;
-  /** What there is to spend less what's spent (below zero when it's over); what's still expected isn't taken off. */
-  left: number | null;
-  /** Recurring payments still to come in the month (its subcategories' included), on its accounts and on cards: not in
-   *  `spent` yet. 0 for a month that's over. */
-  expected?: number;
-}
-
-export interface PayAccount { id: string; name: string; kind: string }
-
-/** POST /api/budget: a parent budget raised to cover its subcategories' (after a subcategory's was saved). */
-export interface BudgetSaved { ok: boolean; raised?: { category: string; amount: number }[] }
-
-/** GET /api/budget?month=YYYY-MM */
-export interface BudgetMonth {
-  month: string;
-  days_in_month: number;
-  /** Today's day of the month; 0 for a month still to come, the last day for one that's over. */
-  day: number;
-  categories: BudgetCategory[];   // tree order: each category followed by its subcategories
-  /** Money in this month across the income categories (not Refunds). */
-  income: number;
-  /** The income categories (not Refunds), in tree order and the same shape: `budget` is what's expected to come in,
-   *  `spent` what has (above zero), `left` what's still to come, `expected` the forecast's paychecks still due this month. */
-  income_rows?: BudgetCategory[];
-  uncategorized: number;
-  pay_accounts: PayAccount[];
-}
+export type { BudgetCategory, BudgetMonth, BudgetSaved, PayAccount } from "$lib/api-types";
 
 /** A top-level category plus everything under it. */
 export interface Family { top: BudgetCategory; kids: BudgetCategory[] }

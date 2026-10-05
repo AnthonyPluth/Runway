@@ -16,7 +16,7 @@ export class ApiError extends Error {
 /** `background`: a call Runway makes on its own (the state poll, the sync on opening), not one you asked for.
  * `body`: sent as JSON, except a file (Blob), which goes up as it is (a backup). `failed`: what to call a refusal that
  * says nothing ("Restore failed (500)"), instead of "Request failed (500)". */
-type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean; background?: boolean; failed?: string };
+export type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean; background?: boolean; failed?: string };
 
 // When the session has expired, sending you to sign in throws away the page, and whatever you're typing on it. So
 // this event goes out first, and the app (lib/app.svelte.ts) cancels it while you're editing, and always for a

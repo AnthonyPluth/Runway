@@ -132,7 +132,7 @@ describe("Settings → Accounts: linking from an account row", () => {
   });
 
   it("says why a linked card's bank sends no statement, and offers to enter it", () => {
-    const linked = { ...card, plaid_account_id: "pa1", plaid_link: { transactions: true, institution: "Chase", mask: "4242", closed: null,
+    const linked = { ...card, plaid_account_id: "pa1", plaid_link: { transactions: true, institution: "Chase", mask: "4242", closed: null, due: null,
       statement_note: "PRODUCTS_NOT_SUPPORTED" } };
     show(linked, st);
     expect(screen.getByText("no statement")).toHaveAttribute("title", "This bank doesn't share card statements through Plaid.");
@@ -142,7 +142,7 @@ describe("Settings → Accounts: linking from an account row", () => {
   });
 
   it("shows a linked account's sources and unlinks it with target \"\"", async () => {
-    const linked = acct({ plaid_account_id: "pa2", provider: "simplefin", plaid_link: { transactions: true, institution: "Chase", mask: "1111" } });
+    const linked = acct({ plaid_account_id: "pa2", provider: "simplefin", plaid_link: { transactions: true, institution: "Chase", mask: "1111", closed: null, due: null, statement_note: null } });
     show(linked, st);
     expect(screen.getByText("SimpleFIN + Plaid ••1111")).toBeInTheDocument();
     const section = screen.getByRole("region", { name: "Data source" });
@@ -161,7 +161,7 @@ describe("Settings → Accounts: linking from an account row", () => {
   });
 
   it("lets an account added from Plaid be changed to another account or left out", async () => {
-    const own = acct({ id: "pl:pa1", name: "Freedom", kind: "credit", plaid_account_id: "pa1", provider: "plaid", plaid_link: { transactions: true, institution: "Chase", mask: "4242" } });
+    const own = acct({ id: "pl:pa1", name: "Freedom", kind: "credit", plaid_account_id: "pa1", provider: "plaid", plaid_link: { transactions: true, institution: "Chase", mask: "4242", closed: null, due: null, statement_note: null } });
     const owned = { ...unmatched, account_id: "pl:pa1" };
     show(own, status([item([owned])]));
     expect(screen.getByText("Plaid ••4242")).toBeInTheDocument();

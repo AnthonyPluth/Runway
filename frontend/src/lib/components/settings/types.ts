@@ -1,46 +1,22 @@
 // The shapes of the API replies Settings uses (see runway/server.py, rules.py, plaid.py, retail/, push.py).
+import type { AccountItem, EnteredStatement, PlaidStatement } from "$lib/api-types";
 import type { Account } from "$lib/types";
 
-/** A row of GET /api/accounts, with what Settings → Accounts edits. */
-export interface SettingsAccount extends Account {
-  org?: string | null;
-  pay_from?: string | null;
-  /** Cards: how the forecast pays each statement (in full by default), the fixed amount, and the APR in percent. */
-  pay_mode?: "full" | "minimum" | "fixed";
-  pay_amount?: number | null;
-  apr?: number | null;
-  /** The card's purchase APR from the issuer, through Plaid: used when you haven't entered one. */
-  issuer_apr?: number | null;
-  owed_positive?: number;
-  networth_hidden?: number;
-  provider?: string | null;
-  plaid_account_id?: string | null;
-  plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: string | boolean | number | null;
-    statement_note?: string | null } | null;
-  /** Cards: the statement the forecast uses (Plaid's, else the latest you entered), or null for none. */
-  statement?: CardStatementInfo | null;
-  /** Cards: the statements you entered, newest first. */
-  statements?: ManualStatement[];
-  /** Loans: the terms the retirement planner projects what's owed with (runway/domain/loans.py terms()). */
-  loan?: LoanTerms;
-}
+/** A row of GET /api/accounts (the contract's AccountItem), with what Settings → Accounts edits. Cards: how the forecast
+ *  pays each statement (`pay_mode`, in full by default; `pay_amount`, the fixed amount; `apr` in percent, else the
+ *  issuer's `issuer_apr` through Plaid), the statement the forecast uses (`statement`: Plaid's, else the latest you
+ *  entered) and the ones you entered (`statements`, newest first). Loans: the terms the retirement planner projects
+ *  what's owed with (`loan`, runway/domain/loans.py terms()). */
+export type SettingsAccount = Account & Partial<Omit<AccountItem, "id" | "name" | "kind" | "hidden">>;
 
 /** A loan's terms: `rate` (annual %) and `payment` are what's used; `plaid` when the rate is the lender's, through
  *  Plaid, and `plaid_payment` when the payment is (each then can't be set here); `set_rate`/`set_payment` are what you
  *  set; `inferred_payment` comes from the payments into the account lately. */
-export interface LoanTerms {
-  rate: number | null; payment: number | null; maturity?: string | null; source: "plaid" | "manual" | "inferred" | null;
-  plaid: boolean; plaid_payment: boolean; set_rate: number | null; set_payment: number | null; inferred_payment: number | null;
-}
+export type { LoanTerms, ManualStatement } from "$lib/api-types";
 
-export interface CardStatementInfo {
-  source: "plaid" | "manual"; closed: string; due?: string | null; balance?: number | null; minimum?: number | null;
-  /** Plaid's: the bank it's from. */
-  institution?: string | null;
-  /** One you entered: whether a newer one should have been entered by now, and when it's expected to close. */
-  stale?: boolean; next_close?: string;
-}
-export interface ManualStatement { statement_date: string; balance: number; due_date: string; minimum_payment?: number | null }
+/** A card's statement: Plaid's (with its bank), or one you entered (whether a newer one should have been entered by
+ *  now, and when the next is expected to close). */
+export type CardStatementInfo = PlaidStatement | EnteredStatement;
 /** GET /api/accounts/{id}/removal: what deleting it takes with it. */
 export interface AccountRemoval { name: string; transactions: number; recurring: number; rules: number; statements: number; holdings: number; plaid: boolean }
 /** GET /api/accounts/deleted */

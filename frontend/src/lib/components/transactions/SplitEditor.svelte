@@ -24,7 +24,7 @@
   // svelte-ignore state_referenced_locally
   const sign = t.amount < 0 ? -1 : 1, total = Math.abs(t.amount);
   // svelte-ignore state_referenced_locally
-  const existing = (t.splits ?? []).map((s) => part(s.category, Math.abs(s.amount).toFixed(2), s.note ?? ""));
+  const existing = (t.splits ?? []).map((s) => part(s.category ?? "", Math.abs(s.amount).toFixed(2), s.note ?? ""));
   // svelte-ignore state_referenced_locally
   let parts = $state(existing.length ? existing : [part(t.category ?? "", total.toFixed(2)), part()]);
 

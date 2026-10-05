@@ -17,7 +17,7 @@ import type { BudgetCategory } from "./types";
 
 const cat = (extra: Partial<BudgetCategory> = {}): BudgetCategory => ({
   name: "Groceries", parent: null, path: ["Groceries"], depth: 0, top: "Groceries", has_children: false, budget: 500, pay_with: null,
-  usual_account: null, spent: 200, own_spent: 200, left: 300, ...extra,
+  usual_account: null, rollover_from: null, carried: 0, available: null, spent: 200, own_spent: 200, left: 300, expected: 0, ...extra,
 });
 const pay = [{ id: "c1", name: "Visa", kind: "credit" }, { id: "b1", name: "Checking", kind: "checking" }];
 const setup = (c = cat(), extra: Record<string, unknown> = {}) => {

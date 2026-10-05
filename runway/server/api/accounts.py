@@ -3,6 +3,7 @@ card is paid), the card statements you enter by hand, and deleting an account (a
 from __future__ import annotations
 
 from datetime import date
+from typing import cast
 
 from sqlalchemy import func, select, update
 
@@ -13,6 +14,7 @@ from ... import validate
 from ...storage import settings_keys as sk
 from ...storage.models import Account, CardStatement, LoanTerms, PlaidAccount, PlaidItem
 from ..common import ApiError, text
+from ..contract import AccountItem
 from ..sync import _inv_lock, _sync_lock
 
 
@@ -28,7 +30,7 @@ _v = validate.Validator(ApiError, drop=",$%")
 PAY_FIELDS = {"pay_mode": sk.card_pay_mode, "pay_amount": sk.card_pay_amount, "apr": sk.card_apr}
 
 
-def api_accounts(conn, _q, _b):
+def api_accounts(conn, _q, _b) -> list[AccountItem]:
     accts = db.rows(conn.execute(
         select(Account).order_by(Account.hidden, Account.kind, func.coalesce(Account.display_name, Account.name))))
     p, s = PlaidAccount, CardStatement
@@ -61,7 +63,8 @@ def api_accounts(conn, _q, _b):
     for a in accts:   # loans: the terms the retirement planner projects with (Plaid's, yours, or a payment from history)
         if a["id"] in terms:
             a["loan"] = terms[a["id"]]
-    return accts
+    # (rows are plain dicts to mypy: tests/test_api_contract.py checks the reply against the contract)
+    return cast(list[AccountItem], accts)
 
 
 def card_statement(conn, card: dict, institution: str | None, today: date | None = None) -> dict | None:

@@ -1,4 +1,5 @@
 // The Recurring page's API shapes (runway/server.py api_recurring, api_recurring_suggestions).
+import type { Tx } from "$lib/api-types";
 import type { Missed } from "$lib/types";
 
 /** The fields you edit on a recurring item (and send to POST /api/recurring[/id]). */
@@ -82,12 +83,9 @@ export interface DismissedSuggestion {
 /** GET /api/recurring/{id}/candidates: a transaction that could be the payment a missed date was for. */
 export interface Candidate { id: string; posted: string; amount: number; name: string; pending?: number }
 
-/** A matched transaction, as GET /api/transactions?recurring=… lists it. */
-export interface MatchedTx {
-  id: string; posted: string; description: string; amount: number; category?: string | null;
-  /** How it was linked: by you (from Transactions) or automatically by its merchant text; null from before Runway kept it. */
-  recurring_linked_by?: "you" | "auto" | null;
-}
+/** A matched transaction, as GET /api/transactions?recurring=… lists it. `recurring_linked_by`: how it was linked, by you
+ *  (from Transactions) or automatically by its merchant text; null from before Runway kept it. */
+export type MatchedTx = Pick<Tx, "id" | "posted" | "description" | "amount" | "category" | "recurring_linked_by">;
 
 export const FREQ_OPTIONS: [string, string][] = [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"],
   ["semimonthly", "Twice a month (set days)"], ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"],
