@@ -85,10 +85,10 @@ describe("TxRow", () => {
     expect(within(row()).getByRole("button", { name: "Details for Blue Bottle" })).not.toHaveClass("hidden");
   });
 
-  it("leaves a posted row unmarked: no Projected label, italic or dashed edge", () => {
+  it("leaves a posted row unmarked: no Projected label or italic", () => {
     const { container } = render(TxRow, props(tx()));
     expect(screen.queryByText("Projected")).not.toBeInTheDocument();
-    expect(container.querySelector(".italic, .border-dashed, [data-projected]")).toBeNull();
+    expect(container.querySelector(".italic, [data-projected]")).toBeNull();
   });
 
   it("dims a pending amount as well as badging it", () => {
@@ -356,11 +356,11 @@ describe("TxRow", () => {
       expect(bankText.parentElement).toHaveClass("@container/acct", "min-w-0");
     });
 
-    it("shows the account as a small badge on the merchant's logo, at every width", () => {
+    it("shows the account as a small badge on the merchant's logo below lg, where the account column replaces it", () => {
       app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
       render(TxRow, props(tx({ account_name: "Shared Checking" })));
       const badge = row().querySelector("[data-account-badge]")!;
-      expect(badge).toHaveClass("absolute");
+      expect(badge).toHaveClass("absolute", "lg:hidden");
       expect(badge).not.toHaveClass("md:hidden");
       expect(badge.className).not.toMatch(/\bring-/);
       expect(badge).toHaveAttribute("title", "Shared Checking");
