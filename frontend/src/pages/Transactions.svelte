@@ -182,7 +182,7 @@
   {#if review && app.state?.has_api_key}
     {#if txs.list && txs.count > 0}
       <Button disabled={aiStatus === "asking"} onclick={() => ai?.run()}>
-        {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories with AI"}
+        {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories"}
       </Button>
     {/if}
   {:else if review && app.state?.connected}
