@@ -44,6 +44,7 @@ describe("EventsList", () => {
     expect(screen.getByRole("link", { name: "Pay" })).toHaveClass("italic");
     const rows = container.querySelectorAll("[data-projected]");
     expect(rows).toHaveLength(2);
+    expect(rows[0]).not.toHaveClass("border-dashed");
   });
 
   it("keeps amounts as they were when marked", () => {
