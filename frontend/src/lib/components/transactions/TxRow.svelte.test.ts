@@ -85,6 +85,12 @@ describe("TxRow", () => {
     expect(within(row()).getByRole("button", { name: "Details for Blue Bottle" })).not.toHaveClass("hidden");
   });
 
+  it("leaves a posted row unmarked: no Projected label, italic or dashed edge", () => {
+    const { container } = render(TxRow, props(tx()));
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
+    expect(container.querySelector(".italic, .border-dashed, [data-projected]")).toBeNull();
+  });
+
   it("dims a pending amount as well as badging it", () => {
     render(TxRow, props(tx({ pending: 1 })));
     expect(within(row()).getByText("−$12.50")).toHaveClass("opacity-70");

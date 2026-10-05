@@ -242,4 +242,10 @@ describe("Upcoming", () => {
     expect(screen.getByText("Rent")).toBeInTheDocument();
     expect(screen.getAllByText(/Checking/).length).toBeGreaterThan(0);
   });
+
+  it("marks its rows as projected, so they differ from posted transactions", () => {
+    render(Upcoming, { props: { onchanged: vi.fn(), events: [ev] } });
+    expect(screen.getByText("Projected")).toBeInTheDocument();
+    expect(screen.getByText("Rent")).toHaveClass("italic");
+  });
 });
