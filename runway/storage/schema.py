@@ -1,4 +1,4 @@
-"""Runway's database schema, for SQLite and Postgres alike. Alembic migrations (runway/migrations) create and change it."""
+"""Runway's database schema, for SQLite and Postgres alike. Alembic migrations (runway/storage/migrations) create and change it."""
 from sqlalchemy import Column, Float, ForeignKey, Index, Integer, MetaData, PrimaryKeyConstraint, Table, Text, text
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import FunctionElement

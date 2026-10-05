@@ -35,6 +35,7 @@ from .. import monitoring
 from . import schema, secretbox
 from .models import Account, Category, Setting, Transaction
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repository: runway/storage/db.py is two folders down
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
 DEFAULT_CATEGORIES = [
@@ -71,7 +72,7 @@ DEFAULT_CATEGORIES = [
 
 
 def data_dir() -> str:
-    d = os.environ.get("RUNWAY_DATA") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    d = os.environ.get("RUNWAY_DATA") or os.path.join(ROOT, "data")
     os.makedirs(d, mode=0o700, exist_ok=True)   # the database and (without RUNWAY_SECRET_KEY) its key: Runway's user only
     return d
 
@@ -412,8 +413,8 @@ def account_label_expr(a=None):
 # ------------------------------------------------------------------------------------------------ schema
 
 def alembic_config(connection=None):
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cfg = Config(os.path.join(root, "alembic.ini")) if os.path.exists(os.path.join(root, "alembic.ini")) else Config()
+    ini = os.path.join(ROOT, "alembic.ini")
+    cfg = Config(ini) if os.path.exists(ini) else Config()
     cfg.set_main_option("script_location", os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
     cfg.attributes["connection"] = connection
     return cfg

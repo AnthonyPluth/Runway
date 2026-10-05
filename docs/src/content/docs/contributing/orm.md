@@ -250,7 +250,7 @@ conn.execute(text("... WHERE x = :x"), {"x": x})
 The guard counts `text()` calls without that comment. SQL must still run on both databases. Dynamic table names
 (runway/storage/backup.py) aren't a reason: use `schema.metadata.tables[name]` and `insert(table)`.
 
-Not statements, on purpose: Alembic migrations (`runway/migrations`, with `op.execute`), the driver-level setup in
+Not statements, on purpose: Alembic migrations (`runway/storage/migrations`, with `op.execute`), the driver-level setup in
 `db.py`'s engine functions (`dbapi_conn.execute("PRAGMA ...")`) and its schema upgrade (`exec_driver_sql` DDL), and
 tests that set up an older schema, a column the models don't have, or a SQLite setting: they run SQL with
 `exec_driver_sql` on a SQLAlchemy connection (`conn.sa.exec_driver_sql(...)` for a `db.Connection`; a `PRAGMA` only
