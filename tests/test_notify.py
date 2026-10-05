@@ -7,8 +7,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, notify, oidc, webpush
-from runway.models import Account, CardStatement, NotifyLog, PushSubscription, SyncLog, Transaction, User
+from runway.storage import db
+from runway.domain import notify
+from runway import oidc
+from runway.providers import webpush
+from runway.storage.models import Account, CardStatement, NotifyLog, PushSubscription, SyncLog, Transaction, User
 from tests.test_webpush import PushService, decrypt, receiver
 from tests.shared import DbCase, TODAY
 
@@ -240,7 +243,7 @@ class NotifyTests(DbCase):
             self.assertEqual(notify.subject(self.c), "mailto:new@example.com")
 
     def test_review_big_charge_and_sync_failed_alerts(self):
-        from runway import settings_keys as sk
+        from runway.storage import settings_keys as sk
         self.c.execute(insert(Account).values(id="inv", name="Brokerage", kind="investment", balance=0, owner=None))
         self.c.execute(insert(Account).values(id="old", name="Old", kind="checking", balance=0, hidden=1))
         self.c.execute(update(Account).where(Account.id == "chk").values(owner="Sam"))
@@ -261,7 +264,7 @@ class NotifyTests(DbCase):
         self.assertNotIn("syncfail:2026-09-23", {a["key"] for a in notify.alerts(self.c, TODAY, p)})
 
     def test_sync_failed_alert_with_plaid_only(self):
-        from runway.models import PlaidItem
+        from runway.storage.models import PlaidItem
         self.c.execute(insert(SyncLog).values(ok=0, message="Plaid: ITEM_LOGIN_REQUIRED"))
         p = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False}
         keys = lambda: {a["key"] for a in notify.alerts(self.c, TODAY, p)}
@@ -274,7 +277,7 @@ class NotifyTests(DbCase):
         p = {**notify.DEFAULTS, "card_due": True, "review": False, "low_balance": False, "missed": False}
         got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
         self.assertEqual(got["card:cc:2026-09-25"]["body"], "$400.00 comes out of Checking.")
-        from runway import settings_keys as sk
+        from runway.storage import settings_keys as sk
         db.set_setting(self.c, sk.card_pay_mode("cc"), "fixed")
         db.set_setting(self.c, sk.card_pay_amount("cc"), "150")
         got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}

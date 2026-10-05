@@ -8,8 +8,10 @@ from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, loans, networth, prices, realie
-from runway.models import Account, Asset, AssetValue, LoanTerms, NetworthSnapshot, Transaction
+from runway.storage import db
+from runway.domain import loans, networth
+from runway.providers import prices, realie
+from runway.storage.models import Account, Asset, AssetValue, LoanTerms, NetworthSnapshot, Transaction
 from tests.shared import DbCase, TODAY, own_database
 
 
@@ -310,7 +312,8 @@ class QuoteTests(unittest.TestCase):
 
 class NewCategoryTests(Base):
     def test_ai_can_propose_and_create_a_category(self):
-        from runway import categorize, server
+        from runway.domain import categorize
+        from runway import server
         db.set_setting(self.c, "openrouter_api_key", "k")
         self.c.execute(insert(Transaction), [{"id": "t1", "account_id": "chk", "posted": "2026-09-10", "amount": -45,
                                               "description": "PETSMART #123", "payee": "Petsmart", "needs_review": 1},
@@ -350,7 +353,7 @@ class NewCategoryTests(Base):
 
 class ReplyParsingTests(unittest.TestCase):
     def test_messy_replies(self):
-        from runway import categorize
+        from runway.domain import categorize
         cats = ["Groceries", "Restaurants"]
         think = '<think>Let me consider [the list]... maybe [{"i": 0, "category": "Restaurants"}]</think>\nHere you go:\n```json\n[{"i": 0, "category": "Groceries", "confidence": 0.9}]\n```'
         self.assertEqual(categorize.parse_ai_reply(think, cats), {0: ("Groceries", 0.9)})
@@ -359,7 +362,7 @@ class ReplyParsingTests(unittest.TestCase):
         self.assertIsNone(categorize.extract_json_array("I can't help with that."))
 
     def test_unreadable_reply_is_an_error_not_silence(self):
-        from runway import categorize
+        from runway.domain import categorize
         path = own_database(self)
         c = db.connect(path)
         self.addCleanup(c.close)

@@ -5,8 +5,8 @@ from unittest import mock
 
 from sqlalchemy import insert, select, update
 
-from runway import budgets, categories
-from runway.models import Account, Budget
+from runway.domain import budgets, categories
+from runway.storage.models import Account, Budget
 from tests.shared import LedgerCase
 
 

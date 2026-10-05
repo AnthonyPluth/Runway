@@ -1,0 +1,181 @@
+"""Loans: what's still owed on one at a future date, for the retirement planner's home sales.
+
+A loan's terms (annual interest rate and monthly payment) come from the lender through Plaid Liabilities for mortgages
+and student loans (loan_terms), or from you on the account in Settings → Accounts (accounts.interest_rate and
+monthly_payment) for any other loan. With a rate but no payment, the payment is the one that pays the loan off by its
+maturity date (Plaid's), else what's been paid into the account in a typical recent month. With no rate, nothing is
+guessed: what's owed stays at today's balance.
+
+The balance is amortized month by month: B' = B·(1 + rate/12) − payment, until it's paid off. Net worth pays a loan
+down this way from its last balance's date to today (owed_on), so it goes down between syncs; the planner goes on from
+there.
+"""
+from __future__ import annotations
+
+import statistics
+from datetime import date
+
+from sqlalchemy import select
+
+from .. import dates
+from ..storage import db
+from . import forecast
+from ..dates import days_in_month, month_start, parse_day
+from ..storage.models import Account, LoanTerms, Transaction
+from ..money import CENT
+
+MAX_YEARS = 100          # as far as the planner reaches (a sale up to 100 years out)
+INFER_MONTHS = 6         # recent whole months of payments to infer a monthly payment from
+INFER_MIN_MONTHS = 2     # ... of which at least this many must have payments
+
+
+def payment_to_pay_off(balance: float, annual_rate: float, months: int) -> float:
+    """The level monthly payment that pays `balance` off in `months` months at this annual rate (percent)."""
+    r = annual_rate / 100 / 12
+    if months <= 0:
+        return balance
+    if r == 0:
+        return balance / months
+    return balance * r / (1 - (1 + r) ** -months)
+
+
+def project(balance: float, annual_rate: float, payment: float, years: int = MAX_YEARS) -> tuple[list[float], bool]:
+    """What's owed 0, 1, 2… years from today, until it's paid off (the last entry, 0, holds from then on).
+    The second value is True when the payment doesn't cover the interest: the balance would only grow, so it's held at
+    today's instead (the list is then just today's balance)."""
+    if balance <= 0:
+        return [round(balance, 2)], False
+    r = annual_rate / 100 / 12
+    if payment <= balance * r or payment <= 0:
+        return [round(balance, 2)], True
+    out, b = [round(balance, 2)], balance
+    for _year in range(years):
+        for _month in range(12):
+            b = b * (1 + r) - payment
+            if b <= 0:
+                break
+        b = max(0.0, b)
+        out.append(round(b, 2))
+        if b == 0:
+            break
+    return out, False
+
+
+def months_between(start: date, end: date) -> int:
+    """Monthly payments made after `start` up to `end` (one a month, on start's day of the month or the month's last
+    day if it's shorter); 0 if end is earlier."""
+    due = min(start.day, days_in_month(end))
+    return max(0, dates.months_between(start, end) - (1 if end.day < due else 0))
+
+
+def amortize(balance: float, annual_rate: float, payment: float, months: int) -> float:
+    """What's left of `balance` after `months` monthly payments at this annual rate (percent), as project() works it
+    out a month at a time. A payment that doesn't cover the interest leaves it where it is; it never goes below zero."""
+    r = annual_rate / 100 / 12
+    if balance <= 0 or months <= 0 or payment <= 0 or payment <= balance * r:
+        return balance
+    if r == 0:
+        return max(0.0, balance - payment * months)
+    growth = (1 + r) ** months
+    return max(0.0, balance * growth - payment * (growth - 1) / r)
+
+
+def owed_on(account: dict, t: dict | None, on: date) -> float:
+    """What's owed on an account on `on`, as a positive amount: a loan's last balance paid down month by month since
+    that balance's date on its terms (from terms(): Plaid's, yours or inferred), so it goes down between syncs. Without
+    a rate and payment (or a balance date), and for anything but a loan, the balance as it is."""
+    owed = forecast.owed({**account, "balance": account.get("balance") or 0.0})
+    if account.get("kind") != "loan" or not t or t["rate"] is None or not t["payment"] or not account.get("balance_date"):
+        return round(owed, 2)
+    try:
+        start = parse_day(str(account["balance_date"]))
+    except ValueError:
+        return round(owed, 2)
+    return round(amortize(owed, t["rate"], t["payment"], months_between(start, on)), 2)
+
+
+def payoff_year(owed_today: float, t: dict | None, today: date) -> int | None:
+    """The calendar year of a loan's last payment on these terms, a payment a month from next month: None when it
+    isn't projected (no rate or payment, or one that doesn't cover the interest) or isn't paid off within MAX_YEARS."""
+    if owed_today <= 0:
+        return today.year
+    if not t or t["rate"] is None or not t["payment"]:
+        return None
+    r, payment = t["rate"] / 100 / 12, t["payment"]
+    if payment <= owed_today * r:
+        return None
+    b = owed_today
+    for n in range(1, MAX_YEARS * 12 + 1):
+        b = b * (1 + r) - payment
+        if b < CENT:   # nothing left to the cent
+            return month_start(today, n).year
+    return None
+
+
+def inferred_payments(conn, account_ids: list[str], today: date) -> dict[str, float]:
+    """A typical month's payments into each of these loan accounts (money in: it lowers what's owed), over the last
+    INFER_MONTHS whole months: the median of the months that had any. Accounts without enough history are left out."""
+    if not account_ids:
+        return {}
+    start, end = month_start(today, -INFER_MONTHS), month_start(today)
+    by_month: dict[str, dict[str, float]] = {}
+    for t in conn.execute(select(Transaction.account_id, Transaction.posted, Transaction.amount)
+                          .where(Transaction.account_id.in_(account_ids), Transaction.amount > 0, Transaction.pending == 0,
+                                 Transaction.posted >= start.isoformat(), Transaction.posted < end.isoformat())):
+        months = by_month.setdefault(t["account_id"], {})
+        months[t["posted"][:7]] = months.get(t["posted"][:7], 0.0) + t["amount"]
+    return {aid: round(statistics.median(m.values()), 2) for aid, m in by_month.items() if len(m) >= INFER_MIN_MONTHS}
+
+
+def terms(conn, today: date, account_ids: list[str] | None = None) -> dict[str, dict]:
+    """Each loan account's terms, by account id: {rate, payment, maturity, source, plaid, plaid_payment, set_rate,
+    set_payment, inferred_payment}. `rate` (annual, percent) and `payment` are what a projection uses (None when
+    unknown); `source` says where the payment came from ("plaid", "manual" or "inferred"; None without both).
+    Each figure is Plaid's when Plaid has it, and then can't be set: `plaid` is True when the rate is Plaid's,
+    `plaid_payment` when the payment is. What Plaid leaves out (a new loan's payment, say) you can set, so
+    `set_rate`/`set_payment` are what you set; `inferred_payment` is what recent payments into the account suggest."""
+    q = (select(Account.id, Account.kind, Account.balance, Account.owed_positive, Account.interest_rate,
+                Account.monthly_payment, LoanTerms.interest_rate.label("plaid_rate"),
+                LoanTerms.monthly_payment.label("plaid_payment"), LoanTerms.maturity_date)
+         .outerjoin(LoanTerms, LoanTerms.plaid_account_id == Account.plaid_account_id).where(Account.kind == "loan"))
+    if account_ids is not None:
+        q = q.where(Account.id.in_(account_ids))
+    loans = db.rows(conn.execute(q))
+    hints = inferred_payments(conn, [a["id"] for a in loans], today)
+    out = {}
+    for a in loans:
+        plaid = a["plaid_rate"] is not None
+        # Plaid's payment can be 0 (a student loan in deferment): that's not one to project with, so it's yours to set
+        plaid_payment = bool(a["plaid_payment"])
+        rate = a["plaid_rate"] if plaid else a["interest_rate"]
+        payment = a["plaid_payment"] if plaid_payment else a["monthly_payment"]
+        source = ("plaid" if plaid_payment else "manual") if payment is not None else None
+        maturity = a["maturity_date"]
+        if rate is not None and payment is None and maturity:
+            try:
+                months = dates.months_between(today, date.fromisoformat(maturity))
+            except ValueError:
+                months = 0
+            if months > 0:
+                owed = forecast.owed({**a, "balance": a["balance"] or 0.0})
+                payment, source = round(payment_to_pay_off(max(0.0, owed), rate, months), 2), "plaid"
+        hint = hints.get(a["id"])
+        if rate is not None and payment is None and hint:
+            payment, source = hint, "inferred"
+        out[a["id"]] = {"rate": rate, "payment": payment, "maturity": maturity, "source": source if rate is not None else None,
+                        "plaid": plaid, "plaid_payment": plaid_payment, "set_rate": a["interest_rate"], "set_payment": a["monthly_payment"],
+                        "inferred_payment": hint}
+    return out
+
+
+def owed_by_year(owed_today: float, t: dict | None) -> tuple[list[float], dict]:
+    """What's owed 0, 1, 2… years from today on a loan with these terms (from terms()), and what it was based on:
+    {rate, payment, source, note}. note: "no_rate" (nothing to project with: today's balance stays), "no_payment"
+    (a rate but no payment, set or seen), "payment_below_interest" (the payment doesn't cover the interest), or None."""
+    if not t or t["rate"] is None:
+        return [round(owed_today, 2)], {"rate": None, "payment": None, "source": None, "note": "no_rate"}
+    if t["payment"] is None:
+        return [round(owed_today, 2)], {"rate": t["rate"], "payment": None, "source": None, "note": "no_payment"}
+    years, short = project(owed_today, t["rate"], t["payment"])
+    return years, {"rate": t["rate"], "payment": t["payment"], "source": t["source"],
+                   "note": "payment_below_interest" if short else None}

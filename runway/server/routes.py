@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .. import db
+from ..storage import db
 from .common import ApiError, server_error
 
 from .api.accounts import (

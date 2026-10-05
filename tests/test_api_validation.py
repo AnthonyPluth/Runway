@@ -4,9 +4,12 @@ numbers, or are too large, are refused; so are days that aren't days and whole n
 
 from sqlalchemy import select
 
-from runway import db, demo, mcp_access, validate
-from runway import settings_keys as sk
-from runway.models import Account, Budget, Category, Override, Recurring, Rule, Transaction
+from runway.storage import db
+from runway.domain import demo
+from runway.server import mcp_access
+from runway import validate
+from runway.storage import settings_keys as sk
+from runway.storage.models import Account, Budget, Category, Override, Recurring, Rule, Transaction
 from runway.server.api import (accounts, budget, categories, mcp, merchants, recurring, reports, state, transactions)
 from runway.server.common import ApiError, clamped_int, query_int, row_id
 from tests.shared import TODAY, DbCase, freeze_today
@@ -130,7 +133,7 @@ class AmountTests(DbCase):
         self.assertGreater(transactions.api_transactions(self.c, q(min="-10", max="1e6"), {})["total"], 0)
 
     def test_rule_amounts(self):
-        from runway import rules
+        from runway.domain import rules
         for bad in ("nan", "inf", "1e9", True):
             with self.subTest(v=bad), self.assertRaisesRegex(rules.RuleError, "^Amounts must"):
                 rules.clean(self.c, {"match": "gym", "category": "Shopping", "amount_min": bad})

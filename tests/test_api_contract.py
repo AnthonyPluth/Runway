@@ -10,8 +10,8 @@ from pathlib import Path
 
 from sqlalchemy import insert, select, update
 
-from runway import demo, splits
-from runway.models import Account, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder, Transaction
+from runway.domain import demo, splits
+from runway.storage.models import Account, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder, Transaction
 from runway.server.api import accounts, budget, transactions
 from tests.shared import TODAY, DbCase, freeze_today
 

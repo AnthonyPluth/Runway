@@ -24,7 +24,7 @@ An app that registers but is never approved is forgotten after a day (and at mos
 
 ## Letting it change churning (optional)
 
-An assistant always gets **read**. It can also ask for **churning:write**: marking a benefit used, adding or updating cards, benefits, to-dos and planned items, and checking off a plan (the list is `WRITABLE` in `runway/mcp_access.py`; nothing is ever deleted, and accounts, transactions and settings are out of reach). A change needs both:
+An assistant always gets **read**. It can also ask for **churning:write**: marking a benefit used, adding or updating cards, benefits, to-dos and planned items, and checking off a plan (the list is `WRITABLE` in `runway/server/mcp_access.py`; nothing is ever deleted, and accounts, transactions and settings are out of reach). A change needs both:
 
 - **Change churning** ticked on the approval page (offered only when the assistant asks for it), and
 - **Let assistants change churning** switched on in the card. It's off until you turn it on, applies to every connection, and is checked on every change, so turning it off takes effect at once without revoking anything.
@@ -33,7 +33,7 @@ A connection approved read-only that tries a change is told to reconnect. The ch
 
 ## Letting it categorize (optional)
 
-An assistant can also ask for **categorize:write**: setting a transaction's category (`set_transaction_category`), accepting the category Runway suggested for one that needs review (`accept_transaction_category`), and setting an order item's category (`set_order_item_category`). Only existing categories can be used (the assistant finds them with `list_categories`); it can't split transactions, rename payees, or add, rename or remove categories (the list is `CATEGORIZABLE` in `runway/mcp_access.py`). With `remember`, a transaction's category also becomes a rule for its merchant, and an item's is used for the same item in other orders; that's off unless the assistant asks for it. Like churning, a change needs both:
+An assistant can also ask for **categorize:write**: setting a transaction's category (`set_transaction_category`), accepting the category Runway suggested for one that needs review (`accept_transaction_category`), and setting an order item's category (`set_order_item_category`). Only existing categories can be used (the assistant finds them with `list_categories`); it can't split transactions, rename payees, or add, rename or remove categories (the list is `CATEGORIZABLE` in `runway/server/mcp_access.py`). With `remember`, a transaction's category also becomes a rule for its merchant, and an item's is used for the same item in other orders; that's off unless the assistant asks for it. Like churning, a change needs both:
 
 - **Categorize** ticked on the approval page (offered only when the assistant asks for it), and
 - **Let assistants categorize** switched on in the card. It's separate from the churning switch, off until you turn it on, and checked on every change.
@@ -42,7 +42,7 @@ A connection approved without it that tries to categorize is told to reconnect. 
 
 ## Letting it change anything (optional)
 
-An assistant can also ask for **write**: adding, changing and removing your financial data, as the web app does. That's transactions, budgets, categories, rules, recurring items, forecast amounts, accounts, net worth items, equity, investments, churning and orders, deletes included. It never reaches bank connections (Plaid, SimpleFIN, Carta), API keys and other settings, notifications, logos, backups, or these assistant settings themselves (the blocked list is `BLOCKED` in `runway/mcp_access.py`), and it can't change which bank connection an account comes from. It brings the churning and categorize changes with it. A change needs both:
+An assistant can also ask for **write**: adding, changing and removing your financial data, as the web app does. That's transactions, budgets, categories, rules, recurring items, forecast amounts, accounts, net worth items, equity, investments, churning and orders, deletes included. It never reaches bank connections (Plaid, SimpleFIN, Carta), API keys and other settings, notifications, logos, backups, or these assistant settings themselves (the blocked list is `BLOCKED` in `runway/server/mcp_access.py`), and it can't change which bank connection an account comes from. It brings the churning and categorize changes with it. A change needs both:
 
 - **Change anything** ticked on the approval page (offered only when the assistant asks for it, and never ticked for you), and
 - **Let assistants change anything** switched on in the card. It's separate from the other two, off until you turn it on, and checked on every change.

@@ -1,4 +1,4 @@
-"""OAuth for /mcp over HTTP (runway/mcp_oauth.py does the work): the endpoints an app calls itself (metadata,
+"""OAuth for /mcp over HTTP (runway/server/mcp_oauth.py does the work): the endpoints an app calls itself (metadata,
 registration, tokens, revocation), which need no sign-in and no same-site checks, and the consent page, /oauth/authorize,
 where you approve an assistant: the one OAuth page that needs you signed in. The handler (server/handler.py) decides
 who reaches which; these answer them."""
@@ -10,7 +10,8 @@ import secrets
 import urllib.parse
 from typing import TYPE_CHECKING
 
-from .. import db, mcp_access, mcp_oauth
+from ..storage import db
+from . import mcp_access, mcp_oauth
 from .common import NOT_READ, BadJson
 
 if TYPE_CHECKING:

@@ -8,9 +8,11 @@ import urllib.request
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, merchants, server
-from runway import settings_keys as sk
-from runway.models import Account, Holding, InvAccount, Merchant, MerchantLogo, Security, Transaction
+from runway.storage import db
+from runway.domain import merchants
+from runway import server
+from runway.storage import settings_keys as sk
+from runway.storage.models import Account, Holding, InvAccount, Merchant, MerchantLogo, Security, Transaction
 from tests.shared import DbCase, freeze_today
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
@@ -138,7 +140,7 @@ class MerchantTests(DbCase):
         self.assertIsNone(merchants.logo(self.c, "ticker:BRK.B"))
 
     def test_holdings_get_their_logo_by_ticker_else_by_fund_family(self):
-        from runway import portfolio
+        from runway.domain import portfolio
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
         self.c.execute(insert(InvAccount).values(id="ia", item_id="item", name="Brokerage"))
         self.c.execute(insert(Security), [
@@ -394,7 +396,7 @@ class MerchantTests(DbCase):
         self.c.execute(insert(Merchant), [{"id": "ticker:AAPL", "logo_url": "u", "logo": "x"}, {"id": "site:vanguard.com", "logo_url": "u", "logo": "x"}])
 
     def test_you_choose_a_holdings_logo(self):
-        from runway import portfolio
+        from runway.domain import portfolio
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
         self.holdings_for_logos()
         logos = lambda: {h["name"]: h["logo"] for h in portfolio.holdings(self.c)}
@@ -425,7 +427,7 @@ class MerchantTests(DbCase):
         self.assertEqual(merchants.key(merchants.holding_key("t:AAPL")), "holding t:aapl")
 
     def test_a_missing_website_logo_falls_back_to_runways_pick(self):
-        from runway import portfolio
+        from runway.domain import portfolio
         self.holdings_for_logos()
         self.c.execute(insert(MerchantLogo).values(key=merchants.holding_key("t:AAPL"), website="gone-example.com", hidden=0))
         self.assertEqual({h["name"]: h["logo"] for h in portfolio.holdings(self.c)}["Apple Inc"], "/api/merchants/ticker%3AAAPL/logo")
@@ -500,7 +502,7 @@ class CardPaymentLogoTests(DbCase):
                                                   description=payee.upper(), category=category))
 
     def paid(self):
-        from runway import forecast
+        from runway.domain import forecast
         return forecast.paid_cards(self.c, db.rows(self.c.execute(select(Transaction))))
 
     def test_which_card_a_payment_pays(self):

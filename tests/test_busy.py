@@ -8,7 +8,7 @@ import psycopg.errors
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from runway import db
+from runway.storage import db
 
 
 def wrapped(orig: BaseException) -> OperationalError:

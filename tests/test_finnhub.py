@@ -12,9 +12,10 @@ from unittest import mock
 import websocket
 from sqlalchemy import select
 
-from runway import db, finnhub, prices
-from runway import settings_keys as sk
-from runway.models import Setting
+from runway.storage import db
+from runway.providers import finnhub, prices
+from runway.storage import settings_keys as sk
+from runway.storage.models import Setting
 from runway.server.api import investments, state
 from runway.server.common import ApiError
 from tests.shared import DbCase

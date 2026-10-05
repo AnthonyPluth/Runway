@@ -1,13 +1,14 @@
-"""Card statements entered by hand (runway/statements.py): the forecast uses them as it does Plaid's, Plaid's win, the
+"""Card statements entered by hand (runway/domain/statements.py): the forecast uses them as it does Plaid's, Plaid's win, the
 staleness rules, Overview's warnings, the card-due notification, and the API that adds and removes them."""
 import unittest
 from datetime import date, timedelta
 
 from sqlalchemy import delete, insert, update
 
-from runway import db, forecast, notify, statements
-from runway import settings_keys as sk
-from runway.models import Account, Budget, CardStatement, Category, ManualStatement, Override, Recurring
+from runway.storage import db
+from runway.domain import forecast, notify, statements
+from runway.storage import settings_keys as sk
+from runway.storage.models import Account, Budget, CardStatement, Category, ManualStatement, Override, Recurring
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase, freeze_today
@@ -211,7 +212,7 @@ class StatementApiTests(LedgerCase):
         self.assertEqual((card["statement"], card["statements"]), (None, []))
 
     def test_plaids_statement_is_reported_as_plaids(self):
-        from runway.models import PlaidAccount, PlaidItem
+        from runway.storage.models import PlaidAccount, PlaidItem
         self.c.execute(insert(PlaidItem).values(item_id="item", access_token="x", institution_name="Chase", products="liabilities"))
         self.c.execute(insert(PlaidAccount).values(plaid_account_id="p-cc", item_id="item", type="credit"))
         closed = (self.today - timedelta(days=3)).isoformat()

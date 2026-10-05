@@ -1,7 +1,7 @@
 """Checks that stand in for instructions agents kept getting wrong (AGENTS.md, "Mistakes that keep coming back"): each
 one a correction that used to live as prose and now fails `make check` and CI instead. Standard library only.
 
-- Migrations (runway/migrations/versions/): one Alembic head (two branches that each add the next number both point at
+- Migrations (runway/storage/migrations/versions/): one Alembic head (two branches that each add the next number both point at
   the same parent, and together leave two heads); revision ids unique, four digits, and the start of their file's name;
   and every migration from TESTED_FROM on has its own test in tests/test_migrations.py, a method named
   `test_<revision>_...`.
@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MIGRATIONS = ROOT / "runway/migrations/versions"
+MIGRATIONS = ROOT / "runway/storage/migrations/versions"
 MIGRATION_TESTS = ROOT / "tests/test_migrations.py"
 WORKFLOWS = ROOT / ".github/workflows"
 ACTIONS = ROOT / ".github/actions"

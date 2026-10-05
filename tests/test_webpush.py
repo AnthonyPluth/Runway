@@ -9,7 +9,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from runway import webpush as w
+from runway.providers import webpush as w
 from tests.shared import DbCase
 
 

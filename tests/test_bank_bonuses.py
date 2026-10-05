@@ -1,14 +1,14 @@
-"""Bank account bonuses (runway/bank_bonuses.py): direct deposits counted, deadlines, safe to close, eligibility,
+"""Bank account bonuses (runway/domain/bank_bonuses.py): direct deposits counted, deadlines, safe to close, eligibility,
 the Upcoming items, bonus income per year and the push alert."""
 import unittest
 from datetime import date
 
 from sqlalchemy import insert, select
 
-from runway import bank_bonuses as bb
-from runway import churning, notify
-from runway.churning import ChurnError
-from runway.models import Account, ChurnBankBonus, Transaction
+from runway.domain import bank_bonuses as bb
+from runway.domain import churning, notify
+from runway.domain.churning import ChurnError
+from runway.storage.models import Account, ChurnBankBonus, Transaction
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and bonus dates are written around it

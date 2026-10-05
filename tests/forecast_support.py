@@ -3,8 +3,8 @@ class takes one as a method with `name = fs.name`, so none of the classes is imp
 would run twice)."""
 from unittest import mock
 
-from runway import db
-from runway import settings_keys as sk
+from runway.storage import db
+from runway.storage import settings_keys as sk
 
 
 def card_setup(self):

@@ -13,7 +13,9 @@ import psycopg.errors
 import sentry_sdk
 from sqlalchemy.exc import OperationalError
 
-from runway import categories, mcp_server, monitoring
+from runway.domain import categories
+from runway.server import mcp_server
+from runway import monitoring
 from runway.server import mcp_http, routes
 from runway.server.common import ApiError
 from tests.test_mcp import READ, RunwayServer

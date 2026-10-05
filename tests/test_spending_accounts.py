@@ -2,8 +2,8 @@
 notifications and the planner all use."""
 from sqlalchemy import insert, select
 
-from runway import db
-from runway.models import Account
+from runway.storage import db
+from runway.storage.models import Account
 from tests.shared import DbCase
 
 

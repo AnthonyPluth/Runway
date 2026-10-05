@@ -6,7 +6,7 @@ import type { Account } from "$lib/types";
  *  pays each statement (`pay_mode`, in full by default; `pay_amount`, the fixed amount; `apr` in percent, else the
  *  issuer's `issuer_apr` through Plaid), the statement the forecast uses (`statement`: Plaid's, else the latest you
  *  entered) and the ones you entered (`statements`, newest first). Loans: the terms the retirement planner projects
- *  what's owed with (`loan`, runway/loans.py terms()). */
+ *  what's owed with (`loan`, runway/domain/loans.py terms()). */
 export type SettingsAccount = Account & Partial<Omit<AccountItem, "id" | "name" | "kind" | "hidden">>;
 
 /** A loan's terms: `rate` (annual %) and `payment` are what's used; `plaid` when the rate is the lender's, through

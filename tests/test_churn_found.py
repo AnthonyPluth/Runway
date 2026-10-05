@@ -1,4 +1,4 @@
-"""Churning: credit cards found on your accounts (runway/churn_found.py) and the AI's suggestions for them."""
+"""Churning: credit cards found on your accounts (runway/domain/churn_found.py) and the AI's suggestions for them."""
 import io
 import json
 import unittest
@@ -7,9 +7,10 @@ from unittest import mock
 
 from sqlalchemy import insert, select
 
-from runway import categorize, churn_found, churning, db
-from runway import settings_keys as sk
-from runway.models import Account, ChurnCard, PlaidAccount, PlaidItem
+from runway.domain import categorize, churn_found, churning
+from runway.storage import db
+from runway.storage import settings_keys as sk
+from runway.storage.models import Account, ChurnCard, PlaidAccount, PlaidItem
 from runway.server.api import churning as api
 from runway.server.api import state as api_state
 from runway.server.common import ApiError
@@ -205,10 +206,10 @@ class SuggestTests(DbCase):
         self.assertEqual(len(self.prompts), 2)
 
     def test_the_endpoint_reports_errors(self):
-        with mock.patch("runway.categorize.chat", self.caller(self.REPLY)):
+        with mock.patch("runway.domain.categorize.chat", self.caller(self.REPLY)):
             out = api.api_churn_suggest(self.c, {}, {"issuer": "chase", "product": "Sapphire Reserve"})
         self.assertEqual(out["currency"], "ur")
-        with mock.patch("runway.categorize.chat", self.caller(OSError("down"))):
+        with mock.patch("runway.domain.categorize.chat", self.caller(OSError("down"))):
             with self.assertRaises(ApiError) as cm:
                 api.api_churn_suggest(self.c, {}, {"issuer": "chase", "product": "Sapphire Reserve"})
         self.assertEqual(cm.exception.status, 502)

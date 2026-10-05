@@ -5,9 +5,13 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import categories, categorize, db, payees, server, simplefin
-from runway import settings_keys as sk
-from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
+from runway.domain import categories, categorize, payees
+from runway.storage import db
+from runway import server
+from runway.providers import simplefin
+from runway.storage import settings_keys as sk
+from runway.storage.models import (Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory,
+                                   RetailOrder, Rule, Transaction)
 from tests.shared import TODAY, LedgerCase, freeze_today, ts
 
 
@@ -99,7 +103,7 @@ class BrandNameTests(unittest.TestCase):
         self.assertIsNone(choice({"payee": "Amazon", "description": None}))
 
     def test_a_rule_made_from_the_banks_name_still_matches(self):
-        from runway import rules
+        from runway.domain import rules
         mktp = {"payee": "Amazon", "description": "AMZN Mktp US*2K3AB1", "amount": -20}
         other = {"payee": "Amazon", "description": "AMAZON.COM*ZZ9QW1", "amount": -20}
         for mode in ("exact", "starts", "contains"):
@@ -135,7 +139,7 @@ class BrandNameApiTests(LedgerCase):
         self.assertIsNone(items["chk|5"])
 
     def test_rules_and_recurring_items_made_from_the_brands_name_keep_working_with_the_banks_name(self):
-        from runway import recurring, rules
+        from runway.domain import recurring, rules
         self.call("chk|0", use="bank", all=True)
         self.assertEqual(self.payees()["chk|0"], "Amzn Mktp Us")
         rule = {"match": "amazon", "match_mode": "exact"}
@@ -583,7 +587,7 @@ class CategorizeFixTests(LedgerCase):
             self.assertEqual(cat(card), "Credit Card Payment", card)
 
     def test_your_rules_beat_the_built_in_guess(self):
-        from runway import rules
+        from runway.domain import rules
         rules.save(self.conn, {"match": "chase credit", "category": "Transfer"})
         self.tx("chk", "2026-09-10", -300.0, "CHASE CREDIT CRD AUTOPAY")
         categorize.categorize(self.conn, use_ai=False)
@@ -617,7 +621,7 @@ class CategorizeFixTests(LedgerCase):
 
 class ReportRefundTests(LedgerCase):
     def test_refunds_lower_spending_and_uncategorized_money_in_isnt_income(self):
-        from runway import reports
+        from runway.domain import reports
         self.acct("chk", "checking", 0.0)
         self.tx("chk", "2026-09-01", 3000.0, "ACME PAYROLL", "Income")
         self.tx("chk", "2026-09-05", -400.0, "STORE", "Shopping")

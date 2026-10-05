@@ -5,8 +5,11 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, forecast, plaidapi, recurring
-from runway.models import Account, Budget, CardStatement, Category, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
+from runway.storage import db
+from runway.domain import forecast, recurring
+from runway.providers import plaidapi
+from runway.storage.models import (Account, Budget, CardStatement, Category, Override, PlaidAccount, Recurring,
+                                   RecurringDismissed, Transaction)
 from tests import forecast_support as fs
 from tests.shared import TODAY, LedgerCase
 
@@ -29,7 +32,7 @@ class DateTests(unittest.TestCase):
         self.assertEqual(forecast.scheduled(y, TODAY, date(2027, 12, 31)), [date(2026, 12, 1), date(2027, 12, 1)])
 
     def test_money_moves_on_business_days(self):
-        from runway import bankdays
+        from runway.domain import bankdays
         pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None, "amount": 4180}
         self.assertEqual(forecast.occurrences(pay, date(2026, 1, 31), date(2026, 3, 31)),
                          [date(2026, 2, 13), date(2026, 2, 27), date(2026, 3, 13), date(2026, 3, 31)])
@@ -118,7 +121,7 @@ class ForecastTests(LedgerCase):
         self.assertEqual(fc["total"][0], 5000.0)
         self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 110 / 7, delta=0.01)
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 10.0, delta=0.01)
-        from runway import bankdays
+        from runway.domain import bankdays
         business = [d for d in fc["dates"][1:] if bankdays.is_business_day(date.fromisoformat(d))]
         self.assertTrue(all(self.drop(fc, d) > 0 for d in business))
         self.assertTrue(all(self.drop(fc, d) == 0 for d in fc["dates"][1:] if d not in business))
@@ -130,7 +133,7 @@ class ForecastTests(LedgerCase):
         self.assertAlmostEqual(fc["total"][-1], 5000 - 600 - 110 - 310 - 310 / 30 * 2, delta=0.02)
 
     def test_budgeted_spending_from_checking_goes_out_on_banking_days(self):
-        from runway import bankdays
+        from runway.domain import bankdays
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
@@ -342,7 +345,7 @@ class ForecastTests(LedgerCase):
 
 class ScheduleAndMissedTests(LedgerCase):
     def test_dates_each_year_and_twice_a_month(self):
-        from runway import forecast
+        from runway.domain import forecast
         tax = {"frequency": "dates", "dates": "04-15,10-15", "anchor_date": "2026-01-01", "end_date": None}
         self.assertEqual([d.isoformat() for d in forecast.scheduled(tax, date(2026, 1, 1), date(2027, 12, 31))],
                          ["2026-04-15", "2026-10-15", "2027-04-15", "2027-10-15"])
@@ -368,7 +371,7 @@ class ScheduleAndMissedTests(LedgerCase):
                                                        "dates": "whenever", "anchor_date": "2026-01-01"})
 
     def test_missed_payments(self):
-        from runway import recurring
+        from runway.domain import recurring
         self.acct("chk", "checking", 1000.0)
         self.tx("chk", "2026-06-01", -5.0, "OPENING", "Other")
         self.conn.execute(insert(Recurring).values(id=1, name="Gym", account_id="chk", amount=-40, frequency="monthly",

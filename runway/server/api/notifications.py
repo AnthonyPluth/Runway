@@ -2,7 +2,9 @@
 sign-in, nobody sees or changes another person's devices or what they're told about (notify.devices)."""
 from __future__ import annotations
 
-from ... import notify, oidc, webpush
+from ...domain import notify
+from ... import oidc
+from ...providers import webpush
 from ..common import ApiError, _current
 
 

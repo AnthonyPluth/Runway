@@ -3,7 +3,8 @@
 import random
 import unittest
 
-from runway import forecast, money, rules
+from runway.domain import forecast, rules
+from runway import money
 
 
 def old_to_cents(values: list[float], total: float) -> list[float]:

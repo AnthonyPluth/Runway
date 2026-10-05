@@ -10,8 +10,11 @@ from unittest import mock
 
 from sqlalchemy import insert, select
 
-from runway import backup, categories, db, oidc, secretbox, server, simplefin
-from runway.models import PlaidItem, Setting, SyncLog
+from runway.storage import backup, db, secretbox
+from runway.domain import categories
+from runway import oidc, server
+from runway.providers import simplefin
+from runway.storage.models import PlaidItem, Setting, SyncLog
 from tests.shared import ServerCase, add_database, database_path, fetch, own_database
 from tests.test_web_app import built_app, serving
 

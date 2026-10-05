@@ -11,8 +11,9 @@ from datetime import date, timedelta
 
 from sqlalchemy import insert
 
-from runway import db, server
-from runway.models import Account, Transaction
+from runway.storage import db
+from runway import server
+from runway.storage.models import Account, Transaction
 from tests.shared import ServerCase, fetch, freeze_today, hold_mcp_switch
 
 # Routes that would reach out to another service even with an empty request; they're covered by their own tests.

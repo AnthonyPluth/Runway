@@ -348,7 +348,7 @@ def user_id(user: dict | None) -> str | None:
         return "local"
     if not user.get("sub"):
         return None
-    from . import secretbox   # (it imports this module)
+    from .storage import secretbox   # (it imports this module)
     return hmac.new(secretbox.derived_key("sentry-user"), str(user["sub"]).encode(), hashlib.sha256).hexdigest()[:16]
 
 

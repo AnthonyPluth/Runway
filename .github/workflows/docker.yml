@@ -169,6 +169,10 @@ jobs:
       - name: Type-check (Python with mypy)
         if: matrix.database == 'sqlite'
         run: poetry run mypy
+      # The backend's import boundaries (import-linter's contracts in pyproject.toml; AGENTS.md → Layout).
+      - name: Check import boundaries (Python with import-linter)
+        if: matrix.database == 'sqlite'
+        run: poetry run lint-imports
 
   # The feature map (docs/feature-map.json and its docs page) is generated from the routes, the web app, the tests and
   # the docs, so any of them can make it stale; it runs on every change. So does the API contract (docs/openapi.json and

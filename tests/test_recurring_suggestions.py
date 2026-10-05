@@ -4,11 +4,12 @@ import unittest
 
 from sqlalchemy import insert, select, update
 
-from runway import db, forecast
-from runway import settings_keys as sk
+from runway.storage import db
+from runway.domain import forecast
+from runway.storage import settings_keys as sk
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
-from runway.models import Recurring, Transaction
+from runway.storage.models import Recurring, Transaction
 from tests.shared import TODAY, LedgerCase
 
 

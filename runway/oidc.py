@@ -37,8 +37,9 @@ import urllib.request
 import jwt
 from sqlalchemy import delete, insert, select, update
 
-from . import db, secretbox, tls
-from .models import AuthPending, AuthSession, User
+from .storage import db, secretbox
+from . import tls
+from .storage.models import AuthPending, AuthSession, User
 
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider

@@ -3,8 +3,9 @@ from datetime import date
 
 from sqlalchemy import func, select
 
-from runway import db, demo, forecast
-from runway.models import Account, Recurring
+from runway.storage import db
+from runway.domain import demo, forecast
+from runway.storage.models import Account, Recurring
 from tests.shared import DbCase
 
 

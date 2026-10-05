@@ -5,8 +5,8 @@ from datetime import date
 
 from sqlalchemy import insert, update
 
-from runway import equity, loans, planner
-from runway.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms, Transaction
+from runway.domain import equity, loans, planner
+from runway.storage.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -255,6 +255,6 @@ class SellableTests(LedgerCase):
     def test_a_grant_whose_schedule_cant_be_worked_out_stays_at_today(self):
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})
         gid = equity.save_grant(self.conn, cid, {"kind": "rsu", "quantity": 10, "vest_start": "2024-01-01", "vest_months": 12})
-        from runway.models import EquityGrant
+        from runway.storage.models import EquityGrant
         self.conn.execute(update(EquityGrant).where(EquityGrant.id == gid).values(vest_months=200000))
         self.assertEqual(equity.value_by_year(equity.overview(self.conn, TODAY)["companies"][0], date(2026, 9, 23)), [0])

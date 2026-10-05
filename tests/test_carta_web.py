@@ -4,8 +4,9 @@ from datetime import date
 
 from sqlalchemy import func, insert, select
 
-from runway import carta, carta_web, equity
-from runway.models import EquityCompany, EquityGrant
+from runway.providers import carta, carta_web
+from runway.domain import equity
+from runway.storage.models import EquityCompany, EquityGrant
 from tests.shared import DbCase
 
 HOLDINGS = {

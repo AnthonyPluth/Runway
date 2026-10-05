@@ -17,8 +17,12 @@ from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .. import carta, db, mcp_oauth, mcp_server, monitoring, oidc, retail, secretbox
-from .. import settings_keys as sk
+from ..providers import carta
+from ..storage import db, secretbox
+from . import mcp_oauth, mcp_server
+from .. import monitoring, oidc
+from ..domain import retail
+from ..storage import settings_keys as sk
 from . import mcp_http, oauth_http, routes, static, sync
 from .common import NOT_READ, ApiError, BadJson, Response, _current, header_value, host_allowed, server_error
 from .oauth_http import OAUTH_METADATA, OAUTH_PUBLIC
@@ -542,7 +546,7 @@ class Handler(BaseHTTPRequestHandler):
             raise
 
     def _mcp_rpc(self, method: str) -> None:
-        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process, for an
+        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/server/mcp_server.py's handle() in this process, for an
         OAuth access token issued for this address (mcp_http.authorized), within its scope, the allowlists and the writes
         switch (mcp_http.local_fetch). One JSON-RPC message per POST, answered with application/json; notifications get
         202. There is no server-to-client stream, so GET is 405."""

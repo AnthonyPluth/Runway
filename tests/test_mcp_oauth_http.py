@@ -15,9 +15,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, select, update
 
-from runway import db, mcp_access, mcp_oauth, mcp_server, oidc
+from runway.storage import db
+from runway.server import mcp_access, mcp_oauth, mcp_server
+from runway import oidc
 from runway.server import common
-from runway.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
+from runway.storage.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
 from tests.shared import ServerCase, fetch, forget_oauth, tag
 from tests.test_server import Provider
 

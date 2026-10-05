@@ -8,9 +8,11 @@ from typing import Any
 
 from sqlalchemy import update
 
-from ... import db, merchants, monitoring, validate
-from ... import settings_keys as sk
-from ...models import Merchant
+from ...storage import db
+from ...domain import merchants
+from ... import monitoring, validate
+from ...storage import settings_keys as sk
+from ...storage.models import Merchant
 from ..common import ApiError, Response, text
 
 

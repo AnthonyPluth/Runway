@@ -4,7 +4,15 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 
 ## Layout
 
-- `runway/`: the backend. `server/` holds the HTTP handlers, `migrations/` the Alembic migrations, `static/` the served assets. Domain modules (`forecast.py`, `reports.py`, `networth.py`, `plaid*.py`, and so on) sit at the top level.
+- `runway/`: the backend, in packages whose imports `make lint` checks (import-linter's contracts in `pyproject.toml`):
+  - `server/`: the HTTP handlers (`api/`), the background sync and the MCP server. Nothing else in `runway/` imports it.
+  - `domain/`: what Runway works out from your data (`forecast.py`, `recurring.py`, `categorize.py`, `reports.py`, `networth.py`, `churning.py`, `retail/`, and so on).
+  - `providers/`: the outside services (`plaid*.py`, `simplefin.py`, `carta.py`, `prices.py`, `finnhub.py`, `realie.py`, `webpush.py`). A provider doesn't import another; what they share has a module of its own (`banktx.py`, `banks.py`).
+  - `storage/`: the database (`db.py`, `schema.py`, `models.py`, `settings_keys.py`, `secretbox.py`, `backup.py`) and `migrations/` (Alembic). It imports nothing above it, and only it imports the database drivers and Alembic.
+  - At the top, what everything shares: `tls.py` (the only module that opens outbound connections), `validate.py`, `money.py`, `dates.py`, `monitoring.py`, `oidc.py`.
+  - `static/`: the served assets.
+
+  A broken boundary fails `make lint`: move the code to where its import is allowed rather than adding an exception. A new provider module joins its provider's contract, or gets one of its own.
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
@@ -15,8 +23,8 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 
 Python goes through Poetry (Python 3.14).
 
-- `make check`: each tool once: ruff, mypy, Runway's own Semgrep rules, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
-- `make lint`: ruff, mypy, ESLint and Runway's own Semgrep rules (`.semgrep/runway.yml`, run through `pipx`).
+- `make check`: each tool once: ruff, mypy, import-linter, Runway's own Semgrep rules, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
+- `make lint`: ruff, mypy, import-linter (the backend's import boundaries), ESLint and Runway's own Semgrep rules (`.semgrep/runway.yml`, run through `pipx`).
 - `make test`: `poetry run python -m unittest discover tests`.
 - `make test-parallel`: the same tests across 4 processes, as CI runs them (`make check` uses it); `make test-pg` runs them against `$DATABASE_URL` (Postgres).
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
@@ -36,7 +44,7 @@ Python goes through Poetry (Python 3.14).
 - Match the surrounding code's style, comment density and naming. Ruff and mypy config live in `pyproject.toml`; don't silence a rule to get green.
 - One paved path; lint fails on the old way (`.semgrep/runway.yml`, `frontend/eslint.config.js`). Fix a finding with the helper, or justify it with an inline ignore and a reason; don't switch the rule off. Python: HTTP only through `tls.urlopen` (no `urllib.request.urlopen` or `build_opener` outside `runway/tls.py`); request bodies in `runway/server/api/` through `runway/validate.py` (no `bool(body…)`, `float(body…)`, `int(body[…])`); no SQL built from strings (`sa.text(f"…")`); the half cent is `money.CENT` (no `0.005` outside `runway/money.py`); sync and provider modules take the `today` they're given (no bare `date.today()`); no `datetime.utcnow()`; month arithmetic only in `runway/dates.py`. Web app: `errMsg(e)` from `lib/act.ts`, not `(e as Error).message`; `fetch(` only in `lib/api.ts`; `.catch(() => {})` carries a comment saying why; account kinds come from `lib/accounts.ts`, not a hand-written list.
 - Real typography (’ – −) in user-facing strings and comments is intentional; don't "fix" it to ASCII.
-- Schema changes need an Alembic migration in `runway/migrations/`, numbered after main's newest, with its own `test_<revision>_…` in `tests/test_migrations.py` (checked).
+- Schema changes need an Alembic migration in `runway/storage/migrations/`, numbered after main's newest, with its own `test_<revision>_…` in `tests/test_migrations.py` (checked).
 - The API contract: a route it covers has its reply and body types in `runway/server/contract.py`, on its handler's annotations, and the web app calls it with `apiCall<"METHOD /path">(…)` from `lib/contract.ts`. Change a covered reply or body there, run `make api-contract` and commit the generated files; cover a route the same way (see [Development](docs/src/content/docs/contributing/development.md), "The API contract").
 - A change users or contributors would notice updates its page in `docs/src/content/docs/` in the same PR. Link between pages with absolute paths (`/Runway/start/docker/`); a broken one fails the build.
 - Add or update tests with the change. Don't skip, disable or delete a test to get CI passing.

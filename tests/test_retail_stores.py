@@ -6,10 +6,11 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select, update
 
-from runway import db, retail
-from runway.retail import split as retail_split
-from runway.retail import store
-from runway.models import Category, RetailCharge, RetailItem, RetailOrder
+from runway.storage import db
+from runway.domain import retail
+from runway.domain.retail import split as retail_split
+from runway.domain.retail import store
+from runway.storage.models import Category, RetailCharge, RetailItem, RetailOrder
 from tests.retail_support import Base
 
 

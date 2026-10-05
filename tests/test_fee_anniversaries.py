@@ -6,8 +6,9 @@ from datetime import date, timedelta
 
 from sqlalchemy import insert
 
-from runway import churning, dates, forecast
-from runway.models import ChurnCard
+from runway.domain import churning, forecast
+from runway import dates
+from runway.storage.models import ChurnCard
 from tests.shared import LedgerCase
 
 

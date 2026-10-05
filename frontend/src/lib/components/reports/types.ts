@@ -1,4 +1,4 @@
-// What the report endpoints send back (runway/reports.py and api_cashflow in runway/server.py).
+// What the report endpoints send back (runway/domain/reports.py and api_cashflow in runway/server.py).
 
 /** /api/reports/spending: each month's spending by category, merchant or account. While the last month is under way,
  * `through` is today and each series' `same_point` is what it spent last month and a year before up to the same day. */

@@ -7,8 +7,9 @@ from datetime import date, datetime
 
 from sqlalchemy import insert
 
-from runway import categorize, db
-from runway.models import Account, Transaction
+from runway.domain import categorize
+from runway.storage import db
+from runway.storage.models import Account, Transaction
 from tests.shared import ServerCase, freeze_today
 
 

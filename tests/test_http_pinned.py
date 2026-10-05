@@ -23,9 +23,12 @@ from unittest import mock
 
 from sqlalchemy import delete, insert
 
-from runway import backup, db, mcp_access, mcp_oauth, oidc, prices, server
-from runway import settings_keys as sk
-from runway.models import Merchant
+from runway.storage import backup, db
+from runway.server import mcp_access, mcp_oauth
+from runway import oidc, server
+from runway.providers import prices
+from runway.storage import settings_keys as sk
+from runway.storage.models import Merchant
 from runway.server import common, mcp_http, sync
 from runway.server.api import retail
 from tests.shared import forget_oauth, freeze_today, own_database
@@ -269,7 +272,7 @@ class Pinned(unittest.TestCase):
         with mock.patch.object(mcp_http, "authorized", return_value=mcp_access.Access(frozenset({"read"}), None, None)):
             code, _h, data = self.send("POST", "/mcp", deep, {"Content-Type": "application/json"})
         self.assertEqual((code, json.loads(data)["error"]["code"]), (400, -32700))
-        with mock.patch("runway.retail.token_check", return_value=None):
+        with mock.patch("runway.domain.retail.token_check", return_value=None):
             code, _h, data = self.send("POST", "/api/ext/start", nested)
         self.assertEqual((code, json.loads(data)), (400, {"error": "Bad JSON"}))
         code, _h, data = self.send("POST", "/oauth/register", b"[" * 4000 + b"]" * 4000, {"Content-Type": "application/json"})

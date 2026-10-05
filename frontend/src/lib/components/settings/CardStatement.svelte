@@ -12,7 +12,7 @@
 
   // A card's statement, in its row in Settings → Accounts: Plaid's, read only, when the bank sends it; otherwise the
   // latest one you entered and a form to enter the next (closing date, balance, due date, minimum), with the earlier ones.
-  // The forecast uses it to put the card's payment on its due date (runway/statements.py).
+  // The forecast uses it to put the card's payment on its due date (runway/domain/statements.py).
   let { a, note = "" }: { a: SettingsAccount; note?: string } = $props();
 
   const st = $derived(a.statement ?? null);

@@ -11,8 +11,10 @@ from unittest import mock
 
 from sqlalchemy import select
 
-from runway import db, oidc, retail
-from runway.models import RetailOrder
+from runway.storage import db
+from runway import oidc
+from runway.domain import retail
+from runway.storage.models import RetailOrder
 from tests.shared import ServerCase
 from tests.retail_support import ORDER, Base
 

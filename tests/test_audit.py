@@ -11,8 +11,11 @@ from unittest import mock
 
 from sqlalchemy import insert, select
 
-from runway import backup, categorize, db, networth, notify, oidc, rules, secretbox, simplefin, splits
-from runway.models import Account, Asset, AuthSession, PushSubscription, Setting, Transaction
+from runway.storage import backup, db, secretbox
+from runway.domain import categorize, networth, notify, rules, splits
+from runway import oidc
+from runway.providers import simplefin
+from runway.storage.models import Account, Asset, AuthSession, PushSubscription, Setting, Transaction
 from tests.shared import DbCase
 
 

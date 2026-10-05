@@ -1,13 +1,15 @@
-"""The MCP server over POST /mcp, and its tools and protocol (runway/mcp_server.py) with Runway stood in for by a fake."""
+"""The MCP server over POST /mcp, and its tools and protocol (runway/server/mcp_server.py) with Runway stood in for by a fake."""
 import json
 import os
 import unittest
 
 from sqlalchemy import delete, func, insert, select
 
-from runway import db, mcp_access, mcp_server, server
+from runway.storage import db
+from runway.server import mcp_access, mcp_server
+from runway import server
 from runway.server import mcp_http
-from runway.models import (Account, Transaction)
+from runway.storage.models import Account, Transaction
 from tests.shared import fetch
 from tests.test_mcp import RunwayServer
 
@@ -259,7 +261,7 @@ class ProtocolTests(unittest.TestCase):
                     self.assertNotIn("isError", r["result"], r)
                     self.assertEqual([c for c in fake.calls if len(c) == 3], [want])
             self.assertTrue(ask("tools/call", {"name": "update_card", "arguments": {"card_id": "x", "fields": {}}}, fake)["result"]["isError"])
-        from runway.mcp_access import WRITABLE
+        from runway.server.mcp_access import WRITABLE
         for _name, _args, want in calls:   # every path a tool posts to is one the write key may reach
             self.assertTrue(any(mcp_access_match(p, "/api/" + want[0]) for p in WRITABLE), want[0])
 

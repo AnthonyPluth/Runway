@@ -5,7 +5,7 @@ import unittest
 from datetime import UTC, datetime
 from unittest import mock
 
-from runway import simplefin
+from runway.providers import simplefin
 
 
 def stamp(y, m, d, h=0, mi=0):

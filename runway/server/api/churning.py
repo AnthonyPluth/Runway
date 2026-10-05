@@ -6,8 +6,9 @@ from datetime import date
 
 from sqlalchemy import select
 
-from ... import bank_bonuses, churn_benefits, churn_found, churn_wishlist, churning, db, notify
-from ...models import Category
+from ...domain import bank_bonuses, churn_benefits, churn_found, churn_wishlist, churning, notify
+from ...storage import db
+from ...storage.models import Category
 from ..common import ApiError, _current, row_id
 from .state import owner_choices
 

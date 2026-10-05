@@ -1,6 +1,6 @@
 <script lang="ts">
   // A held stock's or fund's logo, which the investments API gives only once Runway has fetched one from Logo.dev (by ticker,
-  // else by the fund family; runway/merchants.py holding_logos). A letter without one, for cash, and if the image fails.
+  // else by the fund family; runway/domain/merchants.py holding_logos). A letter without one, for cash, and if the image fails.
   let { ticker, name, logo = null }: { ticker: string | null; name: string | null; logo?: string | null } = $props();
   let failed = $state<string | null>(null);   // the logo that failed to load
   const symbol = $derived(ticker && !ticker.includes(":") ? ticker.trim().toUpperCase() : "");

@@ -122,7 +122,7 @@ class MonthKeyTests(unittest.TestCase):
         self.assertEqual(keys, sorted(set(keys)))
 
     def test_as_the_reports_and_portfolio_counted_them(self):
-        from runway import reports
+        from runway.domain import reports
         self.assertEqual(reports.month_list("2026-01", 3), ["2025-11", "2025-12", "2026-01"])
         self.assertEqual(reports.month_list("2026-12", 13)[0], "2025-12")
         self.assertEqual(reports._month_back("2026-01", 1), "2025-12")

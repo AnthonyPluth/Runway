@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from ... import backup, db
-from ... import settings_keys as sk
+from ...storage import backup, db
+from ...storage import settings_keys as sk
 from ..common import ApiError, Response, download, own_session, upload
 from ..sync import _inv_lock, _sync_lock
 from .retail import _retail_categorize_lock

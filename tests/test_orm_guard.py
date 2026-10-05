@@ -1,4 +1,4 @@
-"""Runway queries with SQLAlchemy statements built from runway/models.py (docs/src/content/docs/contributing/orm.md),
+"""Runway queries with SQLAlchemy statements built from runway/storage/models.py (docs/src/content/docs/contributing/orm.md),
 and db.Connection.execute() doesn't take SQL text. This finds any SQL text passed to `execute()`/`executemany()` in
 runway/ and tests/ and fails if there is some, so a query in text doesn't come back (in a code path the tests don't
 run, or in a test).
@@ -6,7 +6,7 @@ run, or in a test).
 What counts as SQL text: a string, f-string, string concatenation or formatting (`"..." + x`, `"..." % x`,
 `"...".format()`, `", ".join()`), or a variable assigned one in the same function, as the first argument. Also any
 SQLAlchemy `text(...)` without a `# raw SQL: <why>` comment on its line or the line above: text() is allowed only for
-SQL that can't be written with SQLAlchemy, and must say why. Not counted: runway/migrations (history, written once),
+SQL that can't be written with SQLAlchemy, and must say why. Not counted: runway/storage/migrations (history, written once),
 the driver-level SQL on a raw DB-API connection (`dbapi_conn.execute("PRAGMA ...")` in db.py's engine setup, or a
 test's own sqlite3 connection named dbapi_conn), and `exec_driver_sql()` on a SQLAlchemy connection (db.py's schema
 upgrade, and tests that set up older schemas).

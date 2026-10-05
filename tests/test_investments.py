@@ -8,9 +8,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, plaid, planner, portfolio, prices
-from runway.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security,
-                           Transaction)
+from runway.storage import db
+from runway.providers import plaid, prices
+from runway.domain import planner, portfolio
+from runway.storage.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta,
+                                   Security, Transaction)
 from tests.shared import DbCase, TODAY, fetch, own_database, serve
 
 
@@ -790,7 +792,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         row = self.c.execute(select(Account.name, Account.kind, Account.balance)
                              .where(Account.id == "pl:a1")).fetchone()
         self.assertEqual((row["name"], row["kind"], row["balance"]), ("Individual ••1234", "investment", 5000))
-        from runway import networth
+        from runway.domain import networth
         self.assertAlmostEqual(networth.summary(self.c)["assets"], 6000)      # counted in net worth (with E*Trade's 1000)
         self.c.execute(update(InvAccount).where(InvAccount.id == "a1").values(balance=5100))
         plaid.update_investment_accounts(self.c, "wf")                       # balances follow each sync

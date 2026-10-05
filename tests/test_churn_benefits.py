@@ -1,14 +1,14 @@
-"""Card benefits (runway/churn_benefits.py): periods on the calendar and the cardmember year, what's left of a credit,
+"""Card benefits (runway/domain/churn_benefits.py): periods on the calendar and the cardmember year, what's left of a credit,
 what the benefits are worth a year against the annual fee, reminders, and the quick-add presets."""
 import unittest
 from datetime import date
 
 from sqlalchemy import func, select
 
-from runway import churn_benefits as cb
-from runway import churning, notify
-from runway.churning import ChurnError
-from runway.models import ChurnBenefit, ChurnBenefitUse
+from runway.domain import churn_benefits as cb
+from runway.domain import churning, notify
+from runway.domain.churning import ChurnError
+from runway.storage.models import ChurnBenefit, ChurnBenefitUse
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and benefit dates are written around it

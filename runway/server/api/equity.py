@@ -6,9 +6,11 @@ import urllib.parse
 
 from sqlalchemy import select
 
-from ... import carta, db, equity
-from ... import settings_keys as sk
-from ...models import EquityGrant
+from ...providers import carta
+from ...storage import db
+from ...domain import equity
+from ...storage import settings_keys as sk
+from ...storage.models import EquityGrant
 from ..common import ApiError, Response, download, host_allowed, text
 
 

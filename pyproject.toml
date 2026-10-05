@@ -14,7 +14,7 @@ dependencies = [
     "holidays (>=0.60,<1.0)",             # bank holidays, for when payments actually land
     "amazon-orders (>=4.6,<5.0)",       # reading Amazon order pages your browser fetched (see extension/)
     "sentry-sdk (>=2.30,<3.0)",         # error reports to Sentry (only when SENTRY_DSN is set; see runway/monitoring.py)
-    "websocket-client (>=1.8,<2.0)",     # live stock prices from Finnhub (only when a key is set; see runway/finnhub.py)
+    "websocket-client (>=1.8,<2.0)",     # live stock prices from Finnhub (only when a key is set; see runway/providers/finnhub.py)
 ]
 
 [tool.poetry]
@@ -30,6 +30,7 @@ coverage = "7.16.2"
 unittest-parallel = "1.8.6"
 pip-audit = "2.10.1"
 zizmor = "1.30.1"
+import-linter = "2.15"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -57,7 +58,7 @@ ignore = [
 
 [tool.coverage.run]
 # CI measures how much of Runway the tests run and sends it to Codecov (the README's backend badge):
-# `coverage run -m unittest discover tests`. The report names files from the repository root (runway/forecast.py, not
+# `coverage run -m unittest discover tests`. The report names files from the repository root (runway/domain/forecast.py, not
 # forecast.py relative to a <source> of runway), which is how Codecov matches them to the repository's files.
 source = ["."]
 omit = ["tests/*"]
@@ -66,6 +67,134 @@ relative_files = true
 [tool.coverage.report]
 include = ["runway/*"]
 skip_empty = true
+
+# The backend's boundaries (AGENTS.md → Layout), checked by import-linter (`lint-imports`, part of `make lint` and CI).
+# Move code to where its imports are allowed rather than adding an exception; an exception below says why it's one.
+[tool.importlinter]
+root_package = "runway"
+include_external_packages = true   # so the network and database libraries can be named below
+
+[[tool.importlinter.contracts]]
+id = "server-on-top"
+name = "Only the server imports the server (the domain, providers, storage and shared modules don't)"
+type = "forbidden"
+source_modules = ["runway.domain", "runway.providers", "runway.storage", "runway.tls", "runway.validate", "runway.money",
+                  "runway.dates", "runway.monitoring", "runway.oidc"]
+forbidden_modules = ["runway.server"]
+
+[[tool.importlinter.contracts]]
+id = "network-through-tls"
+name = "Only runway.tls opens outbound connections"
+type = "protected"
+# Squashed to the top-level package (import-linter can't tell urllib.request from urllib.parse), so urllib isn't here:
+# Semgrep's runway-raw-urlopen keeps urlopen and build_opener in runway/tls.py.
+protected_modules = ["ssl", "socket", "http", "websocket", "requests", "pywebpush"]
+allowed_importers = ["runway.tls"]
+ignore_imports = [
+    "runway.server.handler -> socket",                 # the web server itself: it accepts connections, it doesn't open them
+    "runway.server.handler -> http",
+    "runway.verify -> socket",                         # binds 127.0.0.1:0 to find a free port for the demo server; nothing is sent
+    "runway.providers.simplefin -> socket",            # hangs up on an address that isn't public (DNS rebinding),
+    "runway.providers.simplefin -> http",              # inside tls.opener() and its certificate checks
+    "runway.providers.plaidapi -> http",               # http.client.HTTPException: a reply cut off mid-read
+    "runway.providers.prices -> http",
+    "runway.providers.finnhub -> websocket",           # Finnhub's live prices come over a websocket, with tls's context
+    "runway.providers.webpush -> requests",            # pywebpush sends with requests (a session that doesn't follow redirects)
+    "runway.providers.webpush -> pywebpush",
+]
+broken_contract_guidance = "Make the request with runway.tls.urlopen instead of opening the connection yourself."
+
+# A provider doesn't import another one: a contract per provider (its modules), naming the others. Only direct imports
+# count: one may still reach another through a shared module (banktx, banks, deleted_accounts) or the domain (the
+# forecast reads Plaid's and SimpleFIN's statements), which is where what two of them share belongs.
+[[tool.importlinter.contracts]]
+id = "provider-plaid"
+name = "Plaid doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank"]
+forbidden_modules = ["runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.carta",
+                     "runway.providers.carta_web", "runway.providers.finnhub", "runway.providers.prices",
+                     "runway.providers.realie", "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-simplefin"
+name = "SimpleFIN doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.simplefin", "runway.providers.sfinvest"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.carta", "runway.providers.carta_web", "runway.providers.finnhub",
+                     "runway.providers.prices", "runway.providers.realie", "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-carta"
+name = "Carta doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.carta", "runway.providers.carta_web"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.finnhub",
+                     "runway.providers.prices", "runway.providers.realie", "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-finnhub"
+name = "Finnhub doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.finnhub"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.carta",
+                     "runway.providers.carta_web", "runway.providers.prices", "runway.providers.realie",
+                     "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-prices"
+name = "Prices doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.prices"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.carta",
+                     "runway.providers.carta_web", "runway.providers.finnhub", "runway.providers.realie",
+                     "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-realie"
+name = "Realie doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.realie"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.carta",
+                     "runway.providers.carta_web", "runway.providers.finnhub", "runway.providers.prices",
+                     "runway.providers.webpush"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "provider-webpush"
+name = "Web push doesn't import another provider"
+type = "forbidden"
+source_modules = ["runway.providers.webpush"]
+forbidden_modules = ["runway.providers.plaid", "runway.providers.plaidapi", "runway.providers.plaidbank",
+                     "runway.providers.simplefin", "runway.providers.sfinvest", "runway.providers.carta",
+                     "runway.providers.carta_web", "runway.providers.finnhub", "runway.providers.prices",
+                     "runway.providers.realie"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "storage-at-the-bottom"
+name = "Storage imports nothing from the domain, the providers or the server"
+type = "forbidden"
+source_modules = ["runway.storage"]
+forbidden_modules = ["runway.domain", "runway.providers", "runway.server"]
+
+[[tool.importlinter.contracts]]
+id = "database-through-storage"
+name = "Only runway.storage talks to the database drivers and Alembic"
+type = "protected"
+protected_modules = ["sqlite3", "psycopg", "alembic"]
+allowed_importers = ["runway.storage"]
+broken_contract_guidance = "Reach the database through runway.storage.db (db.session(), db.connect())."
 
 [tool.mypy]
 # Static type checking: `make lint` and CI run `mypy` over the app. Not strict yet: unannotated functions are still

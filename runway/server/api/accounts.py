@@ -7,9 +7,12 @@ from typing import cast
 
 from sqlalchemy import func, select, update
 
-from ... import brands, db, deleted_accounts, forecast, loans, merchants, plaidbank, statements, validate
-from ... import settings_keys as sk
-from ...models import Account, CardStatement, LoanTerms, PlaidAccount, PlaidItem
+from ...domain import brands, deleted_accounts, forecast, loans, merchants, statements
+from ...storage import db
+from ...providers import plaidbank
+from ... import validate
+from ...storage import settings_keys as sk
+from ...storage.models import Account, CardStatement, LoanTerms, PlaidAccount, PlaidItem
 from ..common import ApiError, text
 from ..contract import AccountItem
 from ..sync import _inv_lock, _sync_lock

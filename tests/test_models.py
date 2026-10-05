@@ -1,10 +1,10 @@
-"""The ORM models (runway/models.py) cover every table in runway/schema.py and describe it truthfully."""
+"""The ORM models (runway/storage/models.py) cover every table in runway/storage/schema.py and describe it truthfully."""
 import typing
 import unittest
 
 from sqlalchemy.orm import configure_mappers
 
-from runway import models, schema
+from runway.storage import models, schema
 
 PY = {"TEXT": str, "FLOAT": float, "INTEGER": int}
 

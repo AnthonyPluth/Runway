@@ -4,10 +4,10 @@ from datetime import date, timedelta
 
 from sqlalchemy import insert
 
-from runway import demo
+from runway.domain import demo
 from runway.server.api import churning as api
 from runway.server.common import ApiError
-from runway.models import User
+from runway.storage.models import User
 from tests.shared import TODAY, DbCase, freeze_today
 
 # (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)

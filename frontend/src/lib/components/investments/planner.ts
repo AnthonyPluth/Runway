@@ -75,7 +75,7 @@ export function saleProceeds(a: PlanAsset, year: number, thisYear: number, infla
 }
 
 /** The first year the monthly payment on the loan against an asset is no longer spent: the year after its last
- *  payment (runway/loans.py works that out), or the year the asset is sold if that's sooner. null when its payment
+ *  payment (runway/domain/loans.py works that out), or the year the asset is sold if that's sooner. null when its payment
  *  isn't known, or it never ends. */
 export function paymentEnds(a: PlanAsset, sellYear: number | null): number | null {
   if (!a.loan?.payment) return null;
