@@ -1,4 +1,7 @@
+import os
 import subprocess
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -19,6 +22,35 @@ class CleanEnvTests(unittest.TestCase):
                 "SENTRY_DSN": "https://k@sentry", "RUNWAY_SECRET_KEY": "real", "SIMPLEFIN_TOKEN": "t", "RUNWAY_PUBLIC_URL": "https://r"}
         env = verify.clean_env("/tmp/demo", base)
         self.assertEqual(env, {"PATH": "/bin", "RUNWAY_DATA": "/tmp/demo", "RUNWAY_NO_SYNC": "1", "PYTHONUNBUFFERED": "1"})
+
+
+class RunPyFileArgumentTests(unittest.TestCase):
+    """run.py's file argument takes several words now (verify's pages); backup and restore still take one file."""
+
+    def run_py(self, tmp, *args):
+        return subprocess.run([sys.executable, os.path.join(verify.ROOT, "run.py"), *args], cwd=tmp,
+                              env=verify.clean_env(tmp), capture_output=True, text=True, timeout=120)
+
+    def test_backup_still_saves_to_the_one_file_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            done = self.run_py(tmp, "backup", "out.json.gz")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            with open(os.path.join(tmp, "out.json.gz"), "rb") as f:
+                self.assertEqual(f.read(2), b"\x1f\x8b")
+
+    def test_backup_and_restore_refuse_a_second_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for command in ("backup", "restore"):
+                done = self.run_py(tmp, command, "a.json.gz", "b.json.gz")
+                self.assertEqual(done.returncode, 2, command)
+                self.assertIn("only one file, please", done.stderr)
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_restore_without_a_file_still_asks_which(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            done = self.run_py(tmp, "restore")
+            self.assertNotEqual(done.returncode, 0)
+            self.assertIn("Which backup file?", done.stderr)
 
 
 class RunTests(unittest.TestCase):

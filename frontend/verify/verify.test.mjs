@@ -17,7 +17,7 @@ describe("flowProblems", () => {
 
   it("rejects a viewport it doesn't know", () => expect(flowProblems({ ...ok, viewports: ["watch"] })).toEqual(["unknown viewport watch"]));
 
-  it("covers every page of the app", () => expect(PAGES).toContain("setup"));
+  it("includes the setup page", () => expect(PAGES).toContain("setup"));
 });
 
 describe("findChromium", () => {
