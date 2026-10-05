@@ -203,7 +203,7 @@
           <span>{dayLabel(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case" title={d.transfers ? "Transfers not counted" : undefined}>{fmtSigned(d.net)}</span>{/if}
         </h3>
-        <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:3.75rem]">
+        <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:5.25rem]">
           {#each d.rows as { t, i } (t.id)}
             <TxRow {t} {review} {recurring} {family} {oneAccount} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
               focused={focused === t.id} onsave={(c) => onsave(t, c)} onaccept={onaccept && (() => onaccept(t))} {onchanged} onopen={onopen && (() => onopen(t))} />
