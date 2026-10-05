@@ -56,7 +56,8 @@
     changed = true;
     if (h.lots.length === 1) finish();   // one account: done as soon as it's saved
   };
-  // Under 700px the secondary columns fold into the holding's cell, and the cost basis button goes with them (rendered once).
+  // Under 700px the secondary columns fold into the holding's cell, and the cost basis button goes with them (rendered once);
+  // the total gain folds under the value, so the table never needs scrolling sideways.
   const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 700px)") : null;
   const narrow = $state({ on: narrowQuery?.matches ?? false });
   $effect(() => {
@@ -68,7 +69,7 @@
   });
   const COLS: [SortKey, string, string][] = [
     ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right max-[700px]:hidden"], ["price", "Price", "text-right max-[700px]:hidden"], ["value", "Value", "text-right"],
-    ["day_change", "Today", "text-right max-[700px]:hidden"], ["gain", "Total gain", "text-right"], ["allocation", "Weight", "text-right max-[700px]:hidden"],
+    ["day_change", "Today", "text-right max-[700px]:hidden"], ["gain", "Total gain", "text-right max-[700px]:hidden"], ["allocation", "Weight", "text-right max-[700px]:hidden"],
     ["cost_basis", "Cost basis", "text-right max-[700px]:hidden"],
   ];
 </script>
@@ -96,6 +97,11 @@
             <button class="cursor-pointer whitespace-nowrap hover:text-foreground" onclick={() => sortBy(k)}>
               {label}{inv.sort.key === k ? (inv.sort.dir < 0 ? " ↓" : " ↑") : ""}
             </button>
+            {#if narrow.on && k === "value"}
+              <button class="ml-2 cursor-pointer whitespace-nowrap hover:text-foreground" aria-label="Sort by total gain" onclick={() => sortBy("gain")}>
+                Gain{inv.sort.key === "gain" ? (inv.sort.dir < 0 ? " ↓" : " ↑") : ""}
+              </button>
+            {/if}
           </th>
         {/each}
       </tr>
@@ -130,7 +136,15 @@
             {x.is_cash ? "—" : fmt(x.price)}
             {#if x.live}<LiveDot class="ml-1.5 size-[7px] align-[2px]" label="Live price" title={`Live price · ${liveAt(x.live_time)}`} />{/if}
           </td>
-          <td class="text-right font-semibold tabular-nums">{fmt(x.value)}</td>
+          <td class="text-right tabular-nums">
+            <span class="font-semibold">{fmt(x.value)}</span>
+            {#if narrow.on}
+              <div class="text-xs">
+                {#if x.gain == null}<span class="text-muted-foreground">—</span>
+                {:else}<span class={gainCls(x.gain)}>{signed(x.gain)} ({pct(x.gain_pct)})</span>{/if}
+              </div>
+            {/if}
+          </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}
