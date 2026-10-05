@@ -14,7 +14,7 @@ assert _spec and _spec.loader
 ps = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ps)
 
-TRAILERS = ["Co-Authored-By: Claude Test <noreply@anthropic.com>", "Claude-Session: https://example.test/s"]
+TRAILERS = ["Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "Claude-Session: https://example.test/s"]
 
 
 def run(cwd, *args):
@@ -87,9 +87,16 @@ class Arguments(unittest.TestCase):
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 ps.parse_args(bad)
 
-    def test_trailers_come_from_the_environment_then_flags_else_a_default(self):
+    def test_trailers_come_from_the_environment_then_flags(self):
         self.assertEqual(ps.trailers_from({"PR_SCREENSHOTS_TRAILERS": "A: 1\n\nB: 2\n"}, ["C: 3"]), ["A: 1", "B: 2", "C: 3"])
-        self.assertEqual(ps.trailers_from({}, []), list(ps.DEFAULT_TRAILERS))
+        self.assertEqual(ps.trailers_from({}, []), [])
+
+    def test_a_commit_without_a_trailer_naming_the_model_is_refused(self):
+        ps.check_trailers(TRAILERS)
+        for bad in ([], ["Claude-Session: https://example.test/s"], ["Co-Authored-By: Claude <noreply@anthropic.com>"],
+                    ["Co-Authored-By: Claude Test <noreply@anthropic.com>"]):
+            with self.assertRaisesRegex(ps.ScreenshotError, "naming the model"):
+                ps.check_trailers(bad)
 
     def test_commit_message_ends_with_the_trailers(self):
         self.assertTrue(ps.commit_message(5, TRAILERS).endswith("\n".join(TRAILERS) + "\n"))
@@ -123,6 +130,12 @@ class Publishing(unittest.TestCase):
         p = self.shots / name
         p.write_bytes(data)
         return p
+
+    def test_publish_without_a_model_trailer_is_refused_before_anything_is_pushed(self):
+        with self.assertRaisesRegex(ps.ScreenshotError, "naming the model"):
+            ps.publish(self.repo, 5, [self.shot("a-phone-top.png")], "origin", sleep=self.waits.append, log=lambda m: None)
+        self.assertEqual(run(self.remote, "branch", "--list", ps.BRANCH).strip(), "")
+        self.assertEqual(self.waits, [])
 
     def publish(self, pr, files):
         return ps.publish(self.repo, pr, files, "origin", TRAILERS, sleep=self.waits.append, log=lambda m: None)

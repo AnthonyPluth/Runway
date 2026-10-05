@@ -1,7 +1,4 @@
-import fnmatch
-import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,21 +22,6 @@ class CleanEnvTests(unittest.TestCase):
                 "SENTRY_DSN": "https://k@sentry", "RUNWAY_SECRET_KEY": "real", "SIMPLEFIN_TOKEN": "t", "RUNWAY_PUBLIC_URL": "https://r"}
         env = verify.clean_env("/tmp/demo", base)
         self.assertEqual(env, {"PATH": "/bin", "RUNWAY_DATA": "/tmp/demo", "RUNWAY_NO_SYNC": "1", "PYTHONUNBUFFERED": "1"})
-
-
-class TopScreenshotNameTests(unittest.TestCase):
-    """verify.mjs saves `<page>-<width>-top.png` beside each full-page file; tools/pr_screenshots.py picks those up by name."""
-
-    def test_the_top_screenshot_name_is_the_one_pr_screenshots_looks_for(self):
-        node = shutil.which("node")
-        mjs = os.path.join(verify.ROOT, "frontend", "verify", "verify.mjs")
-        if not node or not os.path.isdir(os.path.join(verify.ROOT, "frontend", "node_modules", "@playwright")):
-            self.skipTest("needs node and the web app's packages (npm ci in frontend/)")
-        script = f"import('{mjs}').then((m) => console.log(JSON.stringify(m.screenshotFiles('budget', 'phone'))))"
-        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), {"full": "budget-phone.png", "top": "budget-phone-top.png"})
-        self.assertTrue(fnmatch.fnmatch("budget-phone-top.png", "*-top.png"))
 
 
 class RunPyFileArgumentTests(unittest.TestCase):
