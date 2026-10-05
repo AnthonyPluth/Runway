@@ -119,6 +119,23 @@ describe("Transactions page", () => {
       expect(screen.getByRole("button", { name: "Suggest categories with AI" })).toBeEnabled();
     });
 
+    it("leaves out the AI button when there's nothing to review, and takes it away once the last one is done", async () => {
+      app.state = { connected: true, review_count: 0, has_api_key: true };
+      serve([], 0);
+      const { unmount } = render(Transactions, { page: "review" });
+      expect(await screen.findByText(/All caught up/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Suggest categories with AI" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Settings › Connections" })).not.toBeInTheDocument();
+      unmount();
+      app.state = { connected: true, review_count: 1, has_api_key: true };
+      serve([tx({ id: "a", payee: "Alpha", category: null, needs_review: 1 })], 1);
+      render(Transactions, { page: "review" });
+      await screen.findByText("Alpha");
+      expect(screen.getByRole("button", { name: "Suggest categories with AI" })).toBeEnabled();
+      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Suggest categories with AI" })).not.toBeInTheDocument());
+    });
+
     const waiting = (): Tx[] => [tx({ id: "a", payee: "Alpha", category: "Coffee", needs_review: 1, category_source: "ai", confidence: 0.95 }),
       tx({ id: "b", payee: "Bravo", category: "Groceries", needs_review: 1, category_source: "rule", confidence: 0.6 }),
       tx({ id: "c", payee: "Charlie", category: null, needs_review: 1 })];
