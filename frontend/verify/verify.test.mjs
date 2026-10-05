@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findChromium, flowProblems, PAGES } from "./verify.mjs";
+import { findChromium, flowProblems, PAGES, unknownPages } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -16,6 +16,12 @@ describe("flowProblems", () => {
   });
 
   it("rejects a viewport it doesn't know", () => expect(flowProblems({ ...ok, viewports: ["watch"] })).toEqual(["unknown viewport watch"]));
+
+  it("rejects a page the app doesn't have, so a typo can't pass for a clean run", () => {
+    expect(flowProblems({ ...ok, page: "setings" })).toEqual(["unknown page setings"]);
+    expect(unknownPages(["budget", "setings"])).toEqual(["setings"]);
+    expect(unknownPages(PAGES)).toEqual([]);
+  });
 
   it("includes the setup page", () => expect(PAGES).toContain("setup"));
 });

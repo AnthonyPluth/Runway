@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.request
 
 from . import tls
 
@@ -49,7 +50,8 @@ def wait_ready(url: str, server: subprocess.Popen, timeout: float = 60) -> None:
         if server.poll() is not None:
             raise RuntimeError(f"the server exited with code {server.returncode} before it was ready")
         try:
-            with tls.urlopen(url, 2, allow_http=True):
+            # No proxy: the server is on this machine, and a system HTTP proxy that doesn't exempt 127.0.0.1 would never reach it.
+            with tls.urlopen(url, 2, allow_http=True, handlers=(urllib.request.ProxyHandler({}),)):
                 return
         except (urllib.error.URLError, OSError):
             time.sleep(0.2)

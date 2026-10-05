@@ -61,6 +61,15 @@ class RunTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exited with code 3"):
             verify.wait_ready("http://127.0.0.1:1", server, timeout=5)
 
+    def test_the_readiness_check_skips_the_system_proxy(self):
+        server = mock.Mock(spec=subprocess.Popen)
+        server.poll.return_value = None
+        with mock.patch.dict("os.environ", {"HTTP_PROXY": "http://proxy:3128", "http_proxy": "http://proxy:3128"}), \
+                mock.patch("runway.tls.urlopen") as opened:
+            verify.wait_ready("http://127.0.0.1:8123", server, timeout=5)
+        (handler,) = opened.call_args.kwargs["handlers"]
+        self.assertEqual(handler.proxies, {})
+
     def test_a_server_that_never_answers_times_out_with_the_address(self):
         server = mock.Mock(spec=subprocess.Popen)
         server.poll.return_value = None

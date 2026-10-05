@@ -30,6 +30,8 @@ export function findChromium(env = process.env, exists = existsSync, list = read
 /** A flow is { name, page?, viewports?, steps: [ { goto | click | fill | press | wait_for | expect_text | screenshot } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
 const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", expect_text: "object", screenshot: "string" };
+export const unknownPages = (names) => names.filter((n) => !PAGES.includes(n));
+
 export function flowProblems(flow) {
   const out = [];
   if (!flow || typeof flow.name !== "string" || !/^[\w-]+$/.test(flow.name)) out.push("needs a name of letters, digits, - or _");
@@ -39,6 +41,7 @@ export function flowProblems(flow) {
     if (keys.length !== 1 || !(keys[0] in ACTIONS)) out.push(`step ${i + 1} must have exactly one of ${Object.keys(ACTIONS).join(", ")}`);
     else if (typeof s[keys[0]] !== ACTIONS[keys[0]]) out.push(`step ${i + 1}: ${keys[0]} takes a ${ACTIONS[keys[0]]}`);
   }
+  if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
   for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS)) out.push(`unknown viewport ${v}`);
   return out;
 }
@@ -73,6 +76,8 @@ async function main() {
   const out = opt("--out", join(here, "../../artifacts/verify"));
   const flowsDir = opt("--flows", join(here, "flows"));
   if (!base) { console.error("verify: no server address (--url or RUNWAY_VERIFY_URL)"); process.exit(2); }
+  const unknown = unknownPages(args);
+  if (unknown.length) { console.error(`verify: no such page: ${unknown.join(", ")} (pages: ${PAGES.join(", ")})`); process.exit(2); }
   const pages = args.length ? args : PAGES;
 
   const flows = existsSync(flowsDir) ? readdirSync(flowsDir).filter((f) => f.endsWith(".json")).sort().map((f) => {
