@@ -22,8 +22,8 @@
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
   // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
-  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones): a dashed left
-  // edge, an italic name and a "Projected" label, which a screen reader gets as text too. Amounts are untouched.
+  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones):
+  // an italic name and a "Projected" label, which a screen reader gets as text too. Amounts are untouched.
   let { events, limit = 8, accounts = false, marked = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
     limit?: number; accounts?: boolean; marked?: boolean; all?: boolean; onchanged: () => void;
@@ -106,7 +106,7 @@
     {@const rid = e.key ?? `${e.date}-${e.name}-${i}`}
     {@const open = !!(e.estimate && !e.overridden && explained[rid])}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
-    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start", marked && "border-l-2 border-dashed border-muted-foreground/50"]} data-projected={marked || undefined}>
+    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start"]} data-projected={marked || undefined}>
       <!-- Logos as they are, with nothing behind them, as in Transactions; with several accounts' items together, the
            item's account is its bank on the logo's corner, as there, not a line of its own. -->
       <span class="relative shrink-0">
