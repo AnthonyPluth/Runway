@@ -93,6 +93,7 @@ allowed_importers = ["runway.tls"]
 ignore_imports = [
     "runway.server.handler -> socket",                 # the web server itself: it accepts connections, it doesn't open them
     "runway.server.handler -> http",
+    "runway.verify -> socket",                         # binds 127.0.0.1:0 to find a free port for the demo server; nothing is sent
     "runway.providers.simplefin -> socket",            # hangs up on an address that isn't public (DNS rebinding),
     "runway.providers.simplefin -> http",              # inside tls.opener() and its certificate checks
     "runway.providers.plaidapi -> http",               # http.client.HTTPException: a reply cut off mid-read

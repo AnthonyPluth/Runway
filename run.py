@@ -6,6 +6,8 @@ Backups:  poetry run python run.py backup [file.json.gz]   save everything to a 
           poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip;
                                                            stop Runway first)
 Sample:   poetry run python run.py demo                     fill an empty database with made-up data (for previews)
+Verify:   poetry run python run.py verify [page…]           run the app on made-up data in a browser at phone, tablet and
+                                                           desktop widths; screenshots and a report go to artifacts/verify/
 """
 import argparse
 import os
@@ -23,10 +25,16 @@ if __name__ == "__main__":
                         "https://anthonypluth.github.io/Runway/start/docker/)")
     p.add_argument("--no-sync", action="store_true", default=os.environ.get("RUNWAY_NO_SYNC") == "1",
                    help="don't sync with SimpleFIN in the background")
-    p.add_argument("command", nargs="?", choices=["serve", "backup", "restore", "demo"], default="serve")
-    p.add_argument("file", nargs="?", help="backup file (for backup / restore)")
+    p.add_argument("command", nargs="?", choices=["serve", "backup", "restore", "demo", "verify"], default="serve")
+    p.add_argument("file", nargs="*", help="backup file (for backup / restore), or the pages to visit (for verify; default all)")
     p.add_argument("--yes", action="store_true", help="restore without asking")
     a = p.parse_args()
+    if a.command == "verify":
+        from runway import verify
+        sys.exit(verify.run(a.file))
+    if len(a.file) > 1:
+        p.error("only one file, please")
+    a.file = a.file[0] if a.file else None
     if a.command == "serve":
         serve(host=a.host, port=a.port, auto_sync=not a.no_sync)
     else:
