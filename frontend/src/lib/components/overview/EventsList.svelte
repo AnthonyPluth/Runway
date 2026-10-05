@@ -22,9 +22,11 @@
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
   // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
-  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged }: {
+  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones): a dashed left
+  // edge, an italic name and a "Projected" label, which a screen reader gets as text too. Amounts are untouched.
+  let { events, limit = 8, accounts = false, marked = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
-    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void;
+    limit?: number; accounts?: boolean; marked?: boolean; all?: boolean; onchanged: () => void;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
   // Estimated statements whose breakdown is open under the row (by the row's id): its asterisk toggles it.
@@ -104,7 +106,7 @@
     {@const rid = e.key ?? `${e.date}-${e.name}-${i}`}
     {@const open = !!(e.estimate && !e.overridden && explained[rid])}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
-    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start"]}>
+    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start", marked && "border-l-2 border-dashed border-muted-foreground/50"]} data-projected={marked || undefined}>
       <!-- Logos as they are, with nothing behind them, as in Transactions; with several accounts' items together, the
            item's account is its bank on the logo's corner, as there, not a line of its own. -->
       <span class="relative shrink-0">
@@ -121,8 +123,9 @@
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           {#if e.recurring_id}
             <!-- A recurring item's name opens it in Recurring, to change every one. -->
-            <a class="truncate hover:underline" href={`#recurring?item=${e.recurring_id}`} title="Open in Recurring">{e.name}</a>
-          {:else}<span class="truncate">{e.name}</span>{/if}
+            <a class={["truncate hover:underline", marked && "italic pr-0.5"]} href={`#recurring?item=${e.recurring_id}`} title="Open in Recurring">{e.name}</a>
+          {:else}<span class={["truncate", marked && "italic pr-0.5"]}>{e.name}</span>{/if}
+          {#if marked}<Badge variant="outline" class="text-muted-foreground" title="Not posted yet: projected from your recurring items"><span class="sr-only">Not posted yet: </span>Projected</Badge>{/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           <!-- A recurring date edited to $0 is one you skipped (Recurring's "Skip the next one"); reset puts it back. -->

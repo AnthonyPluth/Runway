@@ -24,5 +24,5 @@
 </script>
 
 {#if events.length}
-  <Group title="Upcoming · projected" inset="3.75rem" class="mb-6"><EventsList {events} {limit} accounts={!oneAccount} bind:all={showAll} {onchanged} /></Group>
+  <Group title="Upcoming · projected" inset="3.75rem" class="mb-6"><EventsList {events} {limit} marked accounts={!oneAccount} bind:all={showAll} {onchanged} /></Group>
 {/if}

@@ -29,6 +29,30 @@ beforeEach(() => {
 });
 
 describe("EventsList", () => {
+  it("leaves a row plain unless `marked`: no label, no italic, no dashed edge", () => {
+    const { container } = show([ev()]);
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-projected]")).toBeNull();
+    expect(screen.getByText("Rent")).not.toHaveClass("italic");
+  });
+
+  it("marks a projected row by more than colour: a label (with a screen-reader sentence), italic name and dashed edge", () => {
+    const { container } = show([ev(), ev({ name: "Pay", amount: 2000, key: "k2", recurring_id: 7 })], { marked: true });
+    expect(screen.getAllByText("Projected")).toHaveLength(2);
+    expect(screen.getAllByText("Not posted yet:", { exact: false })).toHaveLength(2);
+    expect(screen.getByText("Rent")).toHaveClass("italic");
+    expect(screen.getByRole("link", { name: "Pay" })).toHaveClass("italic");
+    const rows = container.querySelectorAll("[data-projected]");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveClass("border-dashed", "border-l-2");
+  });
+
+  it("keeps amounts as they were when marked", () => {
+    show([ev({ amount: -1500 }), ev({ name: "Pay", amount: 2000, key: "k2" })], { marked: true });
+    expect(screen.getByRole("button", { name: "−$1,500.00" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+$2,000.00" })).toBeInTheDocument();
+  });
+
   it("points to Recurring when nothing is scheduled", () => {
     show([]);
     expect(screen.getByRole("link", { name: "Recurring" })).toHaveAttribute("href", "#recurring");
