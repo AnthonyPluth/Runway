@@ -35,6 +35,15 @@ Python goes through Poetry (Python 3.14).
 - `make api-contract`: regenerate the API contract (`docs/openapi.json`, `frontend/src/lib/api-types.ts`); `make api-contract-check` checks it is current (part of `make check`).
 - `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.
 
+## Starting work
+
+- **One issue, one session.** Work starts from an issue with its scope, acceptance criteria, dependencies and the model to use (see [CLAUDE.md](CLAUDE.md)); start a fresh session for each one, on that model, rather than running many pieces of work through one long session.
+- **Decisions belong in the issue.** If the issue doesn't settle something a user would notice, ask instead of choosing. Otherwise keep existing behaviour exactly; a change that isn't asked for is a regression.
+- **Done means checked.** An issue says how its result is checked (`make check`, `make verify` for anything on screen, a test that fails before the change); the PR shows that output, not a description of it.
+- **Verify in proportion.** Run the tests your change touches while working, and `make check` once before pushing. CI runs the Postgres suites on every pull request: run `make test-pg` yourself only for changes to the database, migrations or tests' isolation, on a database of your own that you drop afterwards.
+- **A correction becomes a check.** When a mistake is pointed out, fix it and add what would have caught it (a lint rule in `.semgrep/` or `frontend/eslint.config.js`, a test, or a check in `tools/fleet_checks.py`). A sentence here is the last resort, for what can't be checked.
+- **Parallel work stays apart.** Agents working at once take separate areas. Two pull requests that change the same files, or both add a migration, land one at a time: the second merges `main` in and re-runs its checks.
+
 ## Start from the feature map
 
 [`docs/feature-map.json`](docs/feature-map.json) (readable as the [Feature map](docs/src/content/docs/contributing/feature-map.md) page) lists every API route with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. Start there to find where a feature lives. It is generated: after changing routes, `api(` calls, tests or docs, run `make feature-map` and commit the result (`make check` and CI fail when it is stale). A new route needs a test; `tools/feature_map_allowlist.txt` holds the routes that had none, and only shrinks.
