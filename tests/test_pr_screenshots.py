@@ -63,18 +63,26 @@ class Selection(unittest.TestCase):
     def test_named_files_are_used_as_given(self):
         self.assertEqual(ps.select_files([str(self.dir / "a-phone.png")], self.dir), [self.dir / "a-phone.png"])
 
-    def test_refuses_nothing_missing_non_png_and_same_named_files(self):
+    def test_refuses_nothing_missing_and_non_png_files(self):
         with self.assertRaisesRegex(ps.ScreenshotError, "no \\*-top.png"):
             ps.select_files([], self.dir / "empty")
         with self.assertRaisesRegex(ps.ScreenshotError, "doesn't exist"):
-            ps.select_files([str(self.dir / "gone.png")])
+            ps.select_files([str(self.dir / "gone.png")], self.dir)
         with self.assertRaisesRegex(ps.ScreenshotError, "isn't a .png"):
-            ps.select_files([str(self.dir / "notes.txt")])
-        other = self.dir / "sub"
-        other.mkdir()
-        (other / "a-phone.png").write_bytes(b"y")
-        with self.assertRaisesRegex(ps.ScreenshotError, "share a folder"):
-            ps.select_files([str(self.dir / "a-phone.png"), str(other / "a-phone.png")])
+            ps.select_files([str(self.dir / "notes.txt")], self.dir)
+
+    def test_only_screenshots_in_the_verify_folder_are_published(self):
+        elsewhere = self.dir / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "real-instance.png").write_bytes(b"x")
+        with self.assertRaisesRegex(ps.ScreenshotError, "only `make verify`'s screenshots"):
+            ps.select_files([str(elsewhere / "real-instance.png")], self.dir)
+        link = self.dir / "looks-fine-top.png"
+        link.symlink_to(elsewhere / "real-instance.png")
+        with self.assertRaisesRegex(ps.ScreenshotError, "only `make verify`'s screenshots"):
+            ps.select_files([str(link)], self.dir)
+        with self.assertRaisesRegex(ps.ScreenshotError, "only `make verify`'s screenshots"):
+            ps.select_files([str(self.dir / "elsewhere" / ".." / ".." / "x-top.png")], self.dir)
 
 
 class Arguments(unittest.TestCase):
@@ -94,7 +102,8 @@ class Arguments(unittest.TestCase):
     def test_a_commit_without_a_trailer_naming_the_model_is_refused(self):
         ps.check_trailers(TRAILERS)
         for bad in ([], ["Claude-Session: https://example.test/s"], ["Co-Authored-By: Claude <noreply@anthropic.com>"],
-                    ["Co-Authored-By: Claude Test <noreply@anthropic.com>"]):
+                    ["Co-Authored-By: Claude Test <noreply@anthropic.com>"], ["Co-Authored-By: Claude Test 1 <noreply@anthropic.com>"],
+                    TRAILERS[:1] * 2):
             with self.assertRaisesRegex(ps.ScreenshotError, "naming the model"):
                 ps.check_trailers(bad)
 
