@@ -112,13 +112,13 @@ describe("plain words", () => {
 });
 
 describe("a sale's tooltip", () => {
-  it("says what the home's worth in the sale year, in today's dollars (a home that doesn't grow loses to inflation)", () => {
-    expect(saleTitle(home, 2030, Y, plan(), "today")).toBe("House worth $266,546 in 2030, less $50,000 owed on the loan today. In today’s dollars.");
+  it("says what the home's worth in the sale year, in today's dollars (a home keeps up with inflation at least)", () => {
+    expect(saleTitle(home, 2030, Y, plan(), "today")).toBe("House worth $300,000 in 2030, less $50,000 owed on the loan today. In today’s dollars.");
   });
 
   it("names the loan's terms and what's still owed when its payments are projected, or that it's paid off", () => {
-    expect(saleTitle(withLoan({}), 2027, Y, plan(), "today")).toBe("House worth $291,262 in 2027, less $24,272 still owed on the loan at 6.25% and $700 a month as you set it. In today’s dollars.");
-    expect(saleTitle(withLoan({ source: "plaid" }), 2029, Y, plan(), "today")).toBe("House worth $274,542 in 2029; the loan (6.25% and $700 a month from Plaid) is paid off by then. In today’s dollars.");
+    expect(saleTitle(withLoan({}), 2027, Y, plan(), "today")).toBe("House worth $300,000 in 2027, less $24,272 still owed on the loan at 6.25% and $700 a month as you set it. In today’s dollars.");
+    expect(saleTitle(withLoan({ source: "plaid" }), 2029, Y, plan(), "today")).toBe("House worth $300,000 in 2029; the loan (6.25% and $700 a month from Plaid) is paid off by then. In today’s dollars.");
   });
 
   it("says so, and the inflation rate, in future dollars", () => {

@@ -57,12 +57,14 @@ export const loanProjected = (a: PlanAsset) => !!a.loan && a.loan.note == null &
 
 /** Selling an asset in `year`, in today's dollars: what it's worth then and what's still owed on it. Its value grows
  *  by its own yearly change less inflation; with no yearly change set (and for equity, at today's share price) it
- *  keeps pace with inflation, so it holds its value in today's dollars. A loan with known terms is paid down to its
+ *  keeps pace with inflation, so it holds its value in today's dollars. A home is assumed to keep up with inflation at
+ *  least, so a yearly change below it counts as keeping pace (other assets follow theirs down). A loan with known terms is paid down to its
  *  balance that year, in today's dollars like the rest; one without stays at today's balance (a conservative
  *  guess). */
 export function sale(a: PlanAsset, year: number, thisYear: number, inflation: number): { value: number; owed: number } {
   const k = year - thisYear;
-  const real = a.yearly_change == null ? 0 : (1 + a.yearly_change) / (1 + inflation) - 1;
+  const own = a.yearly_change == null ? 0 : (1 + a.yearly_change) / (1 + inflation) - 1;
+  const real = a.kind === "home" ? Math.max(0, own) : own;
   const value = (atYear(a.value_by_year, k) ?? a.value) * Math.pow(1 + real, k);
   const owed = loanProjected(a) ? (atYear(a.owed_by_year, k) ?? a.owed) / Math.pow(1 + inflation, Math.max(0, k)) : a.owed;
   return { value, owed };
