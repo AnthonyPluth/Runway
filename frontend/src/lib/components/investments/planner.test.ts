@@ -314,8 +314,14 @@ describe("saleProceeds", () => {
     expect(saleProceeds({ ...house, yearly_change: 0.03 }, Y + 10, Y, 0.03)).toBeCloseTo(250_000, 6);
   });
 
+  it("counts a home that rises less than inflation as keeping pace, but not other assets or a falling one's loan", () => {
+    expect(saleProceeds({ ...house, yearly_change: 0.01 }, Y + 10, Y, 0.03)).toBeCloseTo(250_000, 6);
+    expect(saleProceeds({ ...house, yearly_change: -0.05 }, Y + 10, Y, 0.03)).toBeCloseTo(250_000, 6);
+    expect(saleProceeds({ ...house, kind: "other", yearly_change: 0.01 }, Y + 10, Y, 0.03)).toBeCloseTo(300_000 * (1.01 / 1.03) ** 10 - 50_000, 6);
+  });
+
   it("never brings in less than nothing", () => {
-    expect(saleProceeds({ ...house, value: 20_000, yearly_change: -0.1, owed: 25_000 }, Y + 2, Y, 0.03)).toBe(0);
+    expect(saleProceeds({ ...house, kind: "other", value: 20_000, yearly_change: -0.1, owed: 25_000 }, Y + 2, Y, 0.03)).toBe(0);
   });
 
   it("takes off the loan's projected balance that year, in today's dollars", () => {
