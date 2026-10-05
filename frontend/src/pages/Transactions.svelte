@@ -180,9 +180,11 @@
     <Button variant="outline" onclick={openAdd} title="Add a transaction by hand"><Plus />Add</Button>
   {/if}
   {#if review && app.state?.has_api_key}
-    <Button disabled={aiStatus === "asking"} onclick={() => ai?.run()}>
-      {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories with AI"}
-    </Button>
+    {#if txs.list && txs.count > 0}
+      <Button disabled={aiStatus === "asking"} onclick={() => ai?.run()}>
+        {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories"}
+      </Button>
+    {/if}
   {:else if review && app.state?.connected}
     <p class="text-sm text-muted-foreground">AI suggestions: <a href="#setup/connections" class="font-medium text-primary">Settings › Connections</a></p>
   {/if}
