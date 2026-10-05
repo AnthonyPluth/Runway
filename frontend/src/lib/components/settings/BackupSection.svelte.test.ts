@@ -25,6 +25,10 @@ const choose = async (name = "runway-backup.json.gz") => {
   await userEvent.upload(input, new File([new Uint8Array([0x1f, 0x8b])], name, { type: "application/gzip" }));
 };
 
+// Bits UI's dialog leaves `pointer-events: none` on <body> for ~24 ms after it closes (its scroll-lock cleanup is a timer), so
+// a click made right after the dialog is gone is refused; wait for the page to be clickable again, as a person would.
+const bodyClickable = () => waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+
 describe("Settings → Data: download", () => {
   it("says the file holds the bank keys, and when one was last downloaded", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
@@ -77,6 +81,7 @@ describe("Settings → Data: restore", () => {
     await user.type(within(dialog).getByLabelText(/Type RESTORE to confirm/), "RESTORE");
     await user.click(go);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await bodyClickable();
     expect(fetchMock).toHaveBeenCalledWith("/api/restore", expect.objectContaining({ method: "POST" }));
     expect(toast.success).toHaveBeenCalledWith("Restored");
     expect(reload).toHaveBeenCalled();
@@ -110,6 +115,7 @@ describe("Settings → Data: restore", () => {
     await user.type(within(dialog).getByLabelText(/Type RESTORE to confirm/), "RESTORE");
     await user.click(within(dialog).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await bodyClickable();
     expect(screen.getByRole("alert")).toHaveTextContent(warning);
     cleanup();
     render(BackupSection);
