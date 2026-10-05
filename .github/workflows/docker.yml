@@ -171,7 +171,9 @@ jobs:
         run: poetry run mypy
 
   # The feature map (docs/feature-map.json and its docs page) is generated from the routes, the web app, the tests and
-  # the docs, so any of them can make it stale; it runs on every change. Standard library only: no setup beyond Python.
+  # the docs, so any of them can make it stale; it runs on every change. So does the API contract (docs/openapi.json and
+  # the web app's lib/api-types.ts, from the routes and runway/server/contract.py), which a change to either side can
+  # make stale. Standard library only: no setup beyond Python.
   feature-map:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -181,6 +183,9 @@ jobs:
           persist-credentials: false
       - name: Check the feature map is up to date and every route has a test
         run: python3 tools/feature_map.py --check
+      - name: Check the API contract (docs/openapi.json, frontend/src/lib/api-types.ts) is up to date
+        if: ${{ !cancelled() }}
+        run: python3 tools/api_contract.py --check
 
   # Checks that replaced instructions agents kept getting wrong (tools/fleet_checks.py): one Alembic head, a test for
   # each new migration, the workflows' conventions and, on a pull request, that each of an agent's commits names its

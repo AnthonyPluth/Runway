@@ -34,7 +34,7 @@
   // shows straight away (its SimpleFIN row fills in its accounts when they come), as do Notifications and Advanced,
   // which load their own. Each request is made once per visit, however many tabs use it.
   const once = <T,>(load: () => Promise<T>) => { let p: Promise<T> | null = null; return () => (p ??= load()); };
-  const accountsReq = once(() => loadAccounts<SettingsAccount>());
+  const accountsReq = once(() => loadAccounts());
   const rulesReq = once(() => api<Rule[]>("/api/rules"));
   const categoriesReq = once(() => loadCategories());
   type Data = { accounts: SettingsAccount[]; rules: Rule[] };

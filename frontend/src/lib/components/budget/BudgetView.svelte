@@ -5,10 +5,10 @@
 </script>
 
 <script lang="ts">
-  import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { loadCategories } from "$lib/categories.svelte";
   import BudgetRow from "$lib/components/budget/BudgetRow.svelte";
-  import type { BudgetCategory, BudgetMonth, BudgetSaved, Family } from "$lib/components/budget/types";
+  import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
   import MonthPicker from "$lib/components/MonthPicker.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -30,7 +30,7 @@
     const n = ++seq;
     try {
       await loadCategories();
-      const r = await api<BudgetMonth>(`/api/budget?month=${month}`);
+      const r = await apiCall<"GET /api/budget">(`/api/budget?month=${month}`);
       if (n === seq) { b = r; error = ""; }
     } catch (err) { if (n === seq) error = errMsg(err); }
   }
@@ -43,7 +43,7 @@
 
   // A subcategory's budget can raise its parent's (the parent's covers its subcategories'): the toast says so.
   async function saveBudget(category: string, amount: string) {
-    const r = await actGet(() => api<BudgetSaved>("/api/budget", { method: "POST", body: { category, amount } }));
+    const r = await actGet(() => apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category, amount } }));
     if (!r) return;
     const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)}`);
     toast.success(amount ? ["Budget saved", ...raised].join(" · ") : "Budget removed");
@@ -173,7 +173,7 @@
             class="h-10 min-w-0 cursor-pointer sm:h-9 rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
             {#snippet choice(c: BudgetCategory)}
-              <option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
+              <option value={c.name}>{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
             {/snippet}
             {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}{@render choice(c)}{/each}
             {#if v.incomeUnbudgeted.length}

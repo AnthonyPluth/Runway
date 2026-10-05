@@ -5,6 +5,7 @@ import re
 import urllib.parse
 import uuid
 from datetime import date, timedelta
+from typing import cast
 
 from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.orm import aliased
@@ -14,6 +15,7 @@ from ... import settings_keys as sk
 from ...models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
 from ...money import CENT
 from ..common import ApiError, _month_range, query_int, row_id, text
+from ..contract import Ok, Tx, TxCreated, TxList, TxNew
 
 # A manual transaction's id: its account's, then this and a random part (a bank's are "|<its id>" or "|pl:<its id>").
 MANUAL = "|manual:"
@@ -162,7 +164,7 @@ def _net(conn, where: list, family: list[str], kind: str) -> float:
     return round(whole + parts, 2)
 
 
-def api_transactions(conn, q, _b):
+def api_transactions(conn, q, _b) -> TxList:
     T = Transaction
     where, family = tx_where(conn, q)
     limit = query_int(q, "limit", 200, 1, 1000)
@@ -191,8 +193,11 @@ def api_transactions(conn, q, _b):
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
     # `sum`: what they add up to, as the day totals count them (_net). `family`: the category and its subcategories,
     # so a receipt can show just their items.
-    return {"items": items, "total": total, "sum": _net(conn, where, family, q.get("kind", [""])[0]),
-            **({"family": family} if family else {})}
+    # (rows are plain dicts to mypy: tests/test_api_contract.py checks the reply against the contract)
+    out: TxList = {"items": cast(list[Tx], items), "total": total, "sum": _net(conn, where, family, q.get("kind", [""])[0])}
+    if family:
+        out["family"] = family
+    return out
 
 
 def source_of(tx_id: str) -> str:
@@ -481,7 +486,7 @@ def api_tx_update(conn, _q, body, tx_id):
     return {"ok": True, "was": was, "tx": _tx(conn, tx_id)}
 
 
-def api_tx_create(conn, _q, body):
+def api_tx_create(conn, _q, body: TxNew) -> TxCreated:
     """Add a transaction by hand (cash, a cheque the bank hasn't shown yet): an account, a date, a name and an amount
     (positive = money in), and optionally a category and a note. It counts like a synced one, in reports and budgets."""
     acct = conn.execute(select(Account.id, Account.kind).where(Account.id == str(body.get("account") or ""))).fetchone()
@@ -574,7 +579,7 @@ def api_tx_import(conn, _q, body):
     return {"ok": True, "added": len(new), "skipped": len(rows) - len(new), "rows": sorted(out, key=lambda r: r["i"])}
 
 
-def api_tx_delete(conn, _q, _b, tx_id):
+def api_tx_delete(conn, _q, _b, tx_id) -> Ok:
     """Delete a transaction you added (a bank's come and go with the bank)."""
     _tx(conn, tx_id)
     if MANUAL not in tx_id:

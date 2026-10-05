@@ -23,7 +23,7 @@ describe("sourceInfo", () => {
   });
 
   it("says SimpleFIN + Plaid for a linked account, with the mask, and lets you switch where it comes from", () => {
-    const i = sourceInfo(acct({ plaid_link: { transactions: true, institution: "Chase", mask: "1234" } }), plaid());
+    const i = sourceInfo(acct({ plaid_link: { transactions: true, institution: "Chase", mask: "1234", closed: null, due: null, statement_note: null } }), plaid());
     expect(i.source).toBe("SimpleFIN + Plaid ••1234");
     expect(i.where).toBe("Chase ••1234");
     expect(i.canSwitch).toBe(true);

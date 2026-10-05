@@ -80,7 +80,7 @@ describe("a card's statement, from Settings", () => {
   const open = () => userEvent.click(document.querySelector("summary")!);
 
   it("shows Plaid's statement read only, with nothing more on the line", async () => {
-    show(cc({ plaid_account_id: "p1", plaid_link: { institution: "Chase", closed: true },
+    show(cc({ plaid_account_id: "p1", plaid_link: { institution: "Chase", mask: null, transactions: true, closed: "2026-09-10", due: "2026-10-05", statement_note: null },
       statement: { source: "plaid", institution: "Chase", closed: "2026-09-10", due: "2026-10-05", balance: 812.4, minimum: 35 } }));
     expect(screen.queryByText("no statement")).toBeNull();
     expect(screen.queryByText(/statement due/)).toBeNull();
@@ -106,9 +106,9 @@ describe("a card's statement, from Settings", () => {
   });
 
   it("shows the latest one entered, its due date on the line, and the earlier ones, each deletable", async () => {
-    show(cc({ statement: { source: "manual", closed: "2026-09-10", due: "2026-10-21", balance: 500, minimum: null, stale: false },
-      statements: [{ statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21" },
-        { statement_date: "2026-08-10", balance: 300, due_date: "2026-09-21", minimum_payment: 25 }] }));
+    show(cc({ statement: { source: "manual", closed: "2026-09-10", due: "2026-10-21", balance: 500, minimum: null, stale: false, next_close: "2026-10-10" },
+      statements: [{ statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21", minimum_payment: null, entered_at: null },
+        { statement_date: "2026-08-10", balance: 300, due_date: "2026-09-21", minimum_payment: 25, entered_at: null }] }));
     expect(screen.getByText("statement due Oct 21")).toBeInTheDocument();
     await open();
     const section = screen.getByRole("region", { name: "Statement" });
@@ -129,8 +129,8 @@ describe("a card's statement, from Settings", () => {
   });
 
   it("sends no minimum back when undoing the delete of one entered without", async () => {
-    show(cc({ statement: { source: "manual", closed: "2026-09-10", due: "2026-10-21", balance: 500, minimum: null, stale: false },
-      statements: [{ statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21", minimum_payment: null }] }));
+    show(cc({ statement: { source: "manual", closed: "2026-09-10", due: "2026-10-21", balance: 500, minimum: null, stale: false, next_close: "2026-10-10" },
+      statements: [{ statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21", minimum_payment: null, entered_at: null }] }));
     await open();
     await userEvent.click(screen.getByRole("button", { name: /^Delete the statement that closed Sep.10$/ }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Statement deleted", expect.anything()));
@@ -140,8 +140,8 @@ describe("a card's statement, from Settings", () => {
   });
 
   it("flags one that's out of date", () => {
-    show(cc({ statement: { source: "manual", closed: "2026-07-10", due: "2026-08-05", balance: 500, stale: true, next_close: "2026-08-10" },
-      statements: [{ statement_date: "2026-07-10", balance: 500, due_date: "2026-08-05" }] }));
+    show(cc({ statement: { source: "manual", closed: "2026-07-10", due: "2026-08-05", balance: 500, minimum: null, stale: true, next_close: "2026-08-10" },
+      statements: [{ statement_date: "2026-07-10", balance: 500, due_date: "2026-08-05", minimum_payment: null, entered_at: null }] }));
     expect(screen.getByText("statement out of date")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enter…" })).toBeInTheDocument();
   });

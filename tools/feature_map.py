@@ -5,7 +5,7 @@ a route has no test and isn't on tools/feature_map_allowlist.txt (which may only
 
 How each part is found (all from the code, never by hand):
 - handler: the name `ROUTES` lists, and the module it is imported from (parsed with `ast`, nothing is imported).
-- web app: an `api(`, `fetch(` or `EventSource(` call in frontend/src whose address is a string or template literal
+- web app: an `api(`, `apiCall(`, `fetch(` or `EventSource(` call in frontend/src whose address is a string or template literal
   (`${...}` is an id); its method is the call's `method: "..."`, else GET. Addresses built in a variable aren't seen.
 - tests: a file in tests/ that names the handler, or an address (a literal or an f-string, with the method written
   next to it when there is one) that the route answers, as the router would.
@@ -42,7 +42,7 @@ AREA_DOCS = {
     "backup": "start/deployment", "restore": "start/deployment",
 }
 
-CALL = re.compile(r"\b(?:api|fetch|EventSource)\s*(?:<[^>(]*>)?\(\s*([`\"'])(/api/[^`\"']*)\1")
+CALL = re.compile(r"\b(?:apiCall|api|fetch|EventSource)\s*(?:<[^>(]*>)?\(\s*([`\"'])(/api/[^`\"']*)\1")
 TEST_PATH = re.compile(r"""["'`](/api/[^"'`\s?#]*)""")
 VERBS = re.compile(r"\b(GET|POST|DELETE|get|post|delete)\b")
 
@@ -166,7 +166,7 @@ def render_page(fm: dict, allowed: set[str]) -> str:
         "`make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).", "",
         f"{len(rows)} routes; {len(untested)} have no test yet.", "",
         "A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). "
-        "A web app caller is an `api(` call with a literal address; one built in a variable isn't seen.", "",
+        "A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.", "",
         "| Route | Handler | Web app | Tests | Docs |", "| --- | --- | --- | --- | --- |",
     ]
     for r in rows:

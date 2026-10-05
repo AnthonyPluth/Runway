@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { categories } from "$lib/categories.svelte";
 import { toast } from "svelte-sonner";
-import { category, tx } from "../../../test/fixtures";
+import { category, tx, txSplit } from "../../../test/fixtures";
 import TxTable from "./TxTable.svelte";
 import { viewport } from "$lib/phone.svelte";
 import { pickCategory, pickedValue } from "../../../test/pick";
@@ -52,7 +52,7 @@ describe("TxTable", () => {
       tx({ id: "p", amount: 3000, payee: "Paycheck", category: "Income" }),
       tx({ id: "t", amount: -500, payee: "To savings", category: "Transfer" }),
       tx({ id: "u", amount: 500, payee: "From checking", category: "Transfer" }),
-      tx({ id: "s", amount: -100, payee: "Split", category: "Groceries", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Transfer", amount: -40 }] }),
+      tx({ id: "s", amount: -100, payee: "Split", category: "Groceries", is_split: 1, splits: [txSplit("Groceries", -60), txSplit("Transfer", -40)] }),
     ], total: 4 });
     expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/\$2,940\.00$/);
     expect(screen.getByText("+$2,940.00")).toHaveAttribute("title", "Transfers not counted");
@@ -65,7 +65,7 @@ describe("TxTable", () => {
 
   it("counts only the matching part of a split one under a category filter", () => {
     setup({ only: "Groceries", items: [
-      tx({ id: "s", amount: -100, payee: "Split", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Shopping", amount: -40 }],
+      tx({ id: "s", amount: -100, payee: "Split", is_split: 1, splits: [txSplit("Groceries", -60), txSplit("Shopping", -40)],
         match: { amount: -60, categories: ["Groceries"] } }),
     ], total: 1 });
     expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/−\$60\.00$/);

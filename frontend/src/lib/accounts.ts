@@ -1,7 +1,7 @@
 // What the web app knows about account types, so the lists aren't repeated page by page. The types are the ones the
 // server accepts (runway/server/api/accounts.py KINDS).
-import { api } from "./api";
-import type { Account } from "./types";
+import { apiCall } from "./contract";
+import type { AccountItem } from "./api-types";
 
 export const ACCOUNT_KINDS = ["checking", "savings", "credit", "loan", "investment"] as const;
 export type AccountKind = (typeof ACCOUNT_KINDS)[number];
@@ -28,8 +28,12 @@ export const isPayingKind = (kind: string) => (PAYING_KINDS as readonly string[]
  * SimpleFIN or you added. */
 export const isPlaidStub = (id: string | null | undefined): boolean => !!id?.startsWith("pl:");
 
-/** GET /api/accounts, with `hidden` as the yes/no it means (the server sends 0 or 1). */
-export async function loadAccounts<T extends Account = Account>(): Promise<T[]> {
-  const rows = await api<(Omit<T, "hidden"> & { hidden?: boolean | number })[]>("/api/accounts");
-  return rows.map((a) => ({ ...a, hidden: !!a.hidden }) as T);
+/** A row of GET /api/accounts as loadAccounts gives it. */
+export type LoadedAccount = Omit<AccountItem, "kind" | "hidden"> & { kind: AccountKind; hidden: boolean };
+
+/** GET /api/accounts, with `hidden` as the yes/no it means (the server sends 0 or 1), and each account's type one of
+ * ACCOUNT_KINDS (the only ones the server keeps: runway/server/api/accounts.py KINDS). */
+export async function loadAccounts(): Promise<LoadedAccount[]> {
+  const rows = await apiCall<"GET /api/accounts">("/api/accounts");
+  return rows.map((a) => ({ ...a, kind: a.kind as AccountKind, hidden: !!a.hidden }));
 }

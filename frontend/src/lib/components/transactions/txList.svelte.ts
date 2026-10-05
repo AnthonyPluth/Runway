@@ -2,7 +2,7 @@
 // loading it again after a change. The page's All and To review tabs each have one. Modelled on reports/chart.svelte.ts's
 // Report: the last list stays on screen while a new one loads, and a slow old answer never replaces a newer one.
 import { errMsg } from "$lib/act";
-import { api } from "$lib/api";
+import { apiCall } from "$lib/contract";
 import { route, setQuery } from "$lib/app.svelte";
 import { debounced } from "$lib/debounce";
 import { clearAll, fromQuery, isFiltered, sameFilters, toQuery, txFilters, txShow, type TxFilters } from "$lib/filters.svelte";
@@ -85,7 +85,7 @@ export class TxListing {
     const qs = this.params(now);
     qs.set("ignored", "only"); qs.set("limit", "1"); qs.set("offset", "0");
     try {
-      const r = await api<TxList>(`/api/transactions?${qs}`);
+      const r = await apiCall<"GET /api/transactions">(`/api/transactions?${qs}`);
       if (mine === this.#seq) this.ignoredCount = r.total;
     } catch { if (mine === this.#seq) this.ignoredCount = null; }
   }
@@ -98,7 +98,7 @@ export class TxListing {
     const same = !!this.list && ignored === this.appliedIgnored && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === this.applied[k]);
     const qs = this.#query(0, same ? Math.min(1000, Math.max(PAGE, this.list!.items.length)) : PAGE);
     try {
-      const data = await api<TxList>(`/api/transactions?${qs}`);
+      const data = await apiCall<"GET /api/transactions">(`/api/transactions?${qs}`);
       if (mine !== this.#seq) return;   // a newer search has been asked for meanwhile
       // The same search again (after a change): the rows are updated where they are, so nothing redraws or jumps. A new
       // search starts the table afresh.
@@ -117,7 +117,7 @@ export class TxListing {
   more = async (): Promise<void> => {
     if (!this.list) return;
     const mine = this.#seq, have = new Set(this.list.items.map((t) => t.id));
-    const data = await api<TxList>(`/api/transactions?${this.#query(this.list.items.length)}`);
+    const data = await apiCall<"GET /api/transactions">(`/api/transactions?${this.#query(this.list.items.length)}`);
     if (mine !== this.#seq || !this.list) return;
     this.list.items.push(...data.items.filter((t) => !have.has(t.id)));
     this.list.total = data.total;

@@ -1,5 +1,6 @@
 // The shapes of Runway's API replies that the pages use (see runway/server.py).
 import type { AccountKind } from "./accounts";
+import type { AccountItem } from "./api-types";
 
 interface User { name?: string; email?: string; local?: boolean }
 export interface Brand {
@@ -85,17 +86,10 @@ export interface Category {
   [key: string]: unknown;
 }
 
-/** GET /api/accounts (a row of the accounts table, plus its Plaid link). */
-export interface Account {
-  id: string;
-  name: string;
-  display_name?: string | null;
-  kind: AccountKind;
-  balance?: number | null;
-  /** Hidden from the lists (a yes/no here: loadAccounts turns the server's 0 or 1 into one). */
-  hidden?: boolean;
-  owner?: string | null;
-}
+/** An account, as the pages use it: what they need of a row of GET /api/accounts (the contract's AccountItem), with its
+ *  type one Runway knows, and `hidden` (hidden from the lists) as a yes/no: loadAccounts turns the server's 0 or 1 into one. */
+export type Account = Pick<AccountItem, "id" | "name"> & Partial<Pick<AccountItem, "display_name" | "balance" | "owner">>
+  & { kind: AccountKind; hidden?: boolean };
 export const accountName = (a: Account) => a.display_name || a.name;
 
 export interface ForecastEvent {

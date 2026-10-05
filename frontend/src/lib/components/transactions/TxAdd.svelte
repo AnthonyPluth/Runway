@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { refreshState } from "$lib/app.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -33,10 +33,10 @@
     busy = true;
     const amount = Math.round(Math.abs(n) * 100) / 100 * (v.way === "in" ? 1 : -1);
     try {
-      const r = await api<{ id: string }>("/api/transactions", { method: "POST",
+      const r = await apiCall<"POST /api/transactions">("/api/transactions", { method: "POST",
         body: { account: v.account, posted: v.posted, payee: v.payee.trim(), amount, category: v.category || null, notes: v.notes } });
       undoable(`Added ${v.payee.trim()}`, async () => {
-        await api(`/api/transactions/${encodeURIComponent(r.id)}`, { method: "DELETE" });
+        await apiCall<"DELETE /api/transactions/{id}">(`/api/transactions/${encodeURIComponent(r.id)}`, { method: "DELETE" });
         refreshState(); onchanged();
       });
       refreshState(); onchanged(); onclose();

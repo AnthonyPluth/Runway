@@ -12,6 +12,7 @@ from ...budgets import budget_carry, month_totals
 from ...models import Account, Budget, Category
 from ...money import CENT
 from ..common import ApiError, _month_range, text
+from ..contract import BudgetCategory, BudgetMonth, BudgetSaved, BudgetSet, RaisedBudget
 
 EXPECTED_DAYS = 366   # how far ahead a month's expected payments are worked out (the forecast's longest horizon)
 # A budget is an amount of money (validate.MAX_AMOUNT), kept as typed.
@@ -19,7 +20,7 @@ _amount = validate.Validator(ApiError, drop="", missing="Enter an amount", not_n
                              too_large="The amount is too large")
 
 
-def api_budget(conn, q, _b):
+def api_budget(conn, q, _b) -> BudgetMonth:
     today = date.today()
     start, end = _month_range(q)
     days = days_in_month(start)
@@ -40,7 +41,7 @@ def api_budget(conn, q, _b):
     carry = budget_carry(conn, cats, budget_rows, start)
     upcoming = upcoming_events(conn, today, start, end)
     coming = subtree_sums(cats, [(e["category"], -e["amount"]) for e in upcoming["out"]])
-    out = []
+    out: list[BudgetCategory] = []
     for c in cats:
         below = [k["name"] for k in cats if c["name"] in k["path"][:-1]]
         spent = round(own[c["name"]] + sum(own[k] for k in below), 2)
@@ -60,7 +61,7 @@ def api_budget(conn, q, _b):
     # the forecast. No rollover and no account: the forecast's paychecks are recurring items, not budgets.
     own_in = {c["name"]: round(totals.get(c["name"], 0.0), 2) for c in icats}
     coming_in = subtree_sums(icats, [(e["category"], e["amount"]) for e in upcoming["in"]])
-    income_rows = []
+    income_rows: list[BudgetCategory] = []
     for c in icats:
         below = [k["name"] for k in icats if c["name"] in k["path"][:-1]]
         received = round(own_in[c["name"]] + sum(own_in[k] for k in below), 2)
@@ -111,7 +112,7 @@ def subtree_sums(cats: list[dict], amounts: list[tuple[str, float]]) -> dict[str
     return out
 
 
-def api_budget_set(conn, _q, body):
+def api_budget_set(conn, _q, body: BudgetSet) -> BudgetSaved:
     cat = text(body.get("category"), "category")
     found = conn.execute(select(Category.is_income).where(Category.name == cat, Category.is_transfer == 0)).fetchone()
     if not found:
@@ -141,13 +142,13 @@ def api_budget_set(conn, _q, body):
     return {"ok": True, "raised": raise_parents(conn, cat)}
 
 
-def raise_parents(conn, cat: str) -> list[dict]:
+def raise_parents(conn, cat: str) -> list[RaisedBudget]:
     """A parent's budget covers its subcategories', so one that's now less than its subcategories' budgets added up
     (those that have one) goes up to that, and so on up the tree. A parent is never lowered, and one without a budget
     is left without one. Returns the budgets raised, nearest first."""
     parents = dict(conn.execute(select(Category.name, Category.parent)).fetchall())
     budgets = dict(conn.execute(select(Budget.category, Budget.amount)).fetchall())
-    raised = []
+    raised: list[RaisedBudget] = []
     for above in reversed(categories.path(parents, cat)[:-1]):
         if above not in budgets:
             continue
