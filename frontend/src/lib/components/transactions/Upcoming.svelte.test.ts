@@ -38,7 +38,8 @@ describe("Upcoming", () => {
     app.state = { connected: true, brands: { a1: { institution: "Chase", initial: "C" } } } as typeof app.state;
     const { unmount, container } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
     expect(container.querySelector("[data-account-badge]")).toHaveAttribute("title", "Checking");
-    expect(screen.getAllByText(/^Checking/).length).toBe(1);
+    // The account's name shows only in the day's balance line (and, on a phone, in the balance under the last amount), not on a line of its own.
+    expect(screen.getAllByText(/^Checking/).map((b) => b.textContent)).toEqual(["Checking · proj. bal $100.00", "Checking ·"]);
     unmount();
     const one = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
     expect(one.container.querySelector("[data-account-badge]")).toBeNull();

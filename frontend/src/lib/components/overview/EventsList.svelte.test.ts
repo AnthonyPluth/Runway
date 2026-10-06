@@ -238,6 +238,37 @@ describe("EventsList", () => {
     expect(day.textContent).toContain("Rent");
   });
 
+  describe("phone balance (under the last amount of the day; CSS hides it from sm up)", () => {
+    const phone = () => [...document.querySelectorAll("[data-phone-balance]")].map((b) => b.textContent);
+
+    it("shows one per account per day, on that account's last item", () => {
+      show([
+        ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),
+        ev({ key: "b", name: "Card", account_id: "chk", balance_after: 2000 }),
+        ev({ key: "c", name: "Rent", account_id: "sav", account: "Savings", balance_after: 700 }),
+        ev({ key: "d", name: "Paycheck", date: "2026-03-16", amount: 3000, account_id: "chk", balance_after: 5000 }),
+      ]);
+      expect(phone()).toEqual(["proj. bal $2,000.00", "proj. bal $700.00", "proj. bal $5,000.00"]);
+      expect(screen.getByText("Card").closest(".cell")!.querySelector("[data-phone-balance]")).toHaveTextContent("proj. bal $2,000.00");
+      expect(screen.getByText("Taxes").closest(".cell")!.querySelector("[data-phone-balance]")).toBeNull();
+    });
+
+    it("names the account when several accounts' items are shown together", () => {
+      show([ev({ account: "Checking", account_id: "chk" })], { accounts: true });
+      expect(phone()).toEqual(["Checking · proj. bal $900.00"]);
+    });
+
+    it("skips an annual fee and an item with no balance", () => {
+      show([ev({ key: "a", name: "Rent", balance_after: 900 }), ev({ key: "f", name: "Fee", kind: "fee", balance_after: 100 }), ev({ key: "n", name: "Gym", balance_after: null })]);
+      expect(phone()).toEqual(["proj. bal $900.00"]);
+    });
+
+    it("marks a negative balance", () => {
+      show([ev({ balance_after: -20 })]);
+      expect(document.querySelector("[data-phone-balance]")).toHaveClass("text-destructive");
+    });
+  });
+
   describe("limit", () => {
     const many = Array.from({ length: 10 }, (_, i) => ev({ name: `Bill ${i}`, key: `k${i}` }));
 

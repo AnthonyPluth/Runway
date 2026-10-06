@@ -159,7 +159,8 @@
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
         {#if d.last.has(e)}
-          <span class={["text-[13px] whitespace-nowrap text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}>bal {fmt(e.balance_after ?? 0)}</span>
+          <span class={["text-[13px] whitespace-nowrap text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}
+            data-phone-balance>{accounts && e.account ? `${e.account} · ` : ""}proj. bal {fmt(e.balance_after ?? 0)}</span>
         {/if}
       </div>
       {#if open && e.estimate}
