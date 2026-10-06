@@ -259,7 +259,7 @@ describe("EventsList", () => {
     });
 
     it("skips an annual fee and an item with no balance", () => {
-      show([ev({ key: "a", name: "Rent", balance_after: 900 }), ev({ key: "f", name: "Fee", kind: "fee", balance_after: 100 }), ev({ key: "n", name: "Gym", balance_after: null })]);
+      show([ev({ key: "a", name: "Rent", balance_after: 900 }), ev({ key: "f", name: "Fee", kind: "fee", balance_after: 100 }), ev({ key: "n", name: "Gym", balance_after: undefined })]);
       expect(phone()).toEqual(["proj. bal $900.00"]);
     });
 
