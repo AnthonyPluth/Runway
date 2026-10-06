@@ -37,15 +37,16 @@
   // (an annual fee or a recurring charge on a card is a card charge: it never moves one).
   const days = $derived.by(() => {
     type Ev = (typeof events)[number];
-    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
+    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[]; last: Set<Ev> }[] = [];
     shown.forEach((e, i) => {
-      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [] });
+      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [], last: new Set() });
       out.at(-1)!.rows.push({ e, i });
     });
     for (const d of out) {
       const last = new Map<string, Ev>();
       for (const { e } of d.rows) if (e.kind !== "fee" && e.balance_after != null) last.set(e.account_id ?? "", e);
       d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
+      d.last = new Set(last.values());
     }
     return out;
   });
@@ -106,7 +107,9 @@
     {@const rid = e.key ?? `${e.date}-${e.name}-${i}`}
     {@const open = !!(e.estimate && !e.overridden && explained[rid])}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
-    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start"]} data-projected={marked || undefined}>
+    <!-- On a phone the row is the same height as a Recent transaction's (the .cell default) and the day's projected balance
+         sits under the last amount; from sm up the rows are tighter and the balance is the day's line below. -->
+    <div class={["cell flex-wrap sm:min-h-12 sm:py-2", open && "items-start"]} data-projected={marked || undefined}>
       <!-- Logos as they are, with nothing behind them, as in Transactions; with several accounts' items together, the
            item's account is its bank on the logo's corner, as there, not a line of its own. -->
       <span class="relative shrink-0">
@@ -155,6 +158,10 @@
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
+        {#if d.last.has(e)}
+          <span class={["text-[13px] whitespace-nowrap text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}
+            data-phone-balance>{accounts && e.account ? `${e.account} · ` : ""}proj. bal {fmt(e.balance_after ?? 0)}</span>
+        {/if}
       </div>
       {#if open && e.estimate}
         <!-- under the name (past the icon), its amounts lined up under the row's -->
@@ -163,7 +170,7 @@
     </div>
   {/each}
   {#each d.balances as b, k (k)}
-    <div class="flex flex-wrap justify-end gap-x-1.5 px-4 pt-0.5 pb-3 text-[13px] text-muted-foreground tabular-nums">
+    <div class="flex flex-wrap justify-end gap-x-1.5 px-4 pt-0.5 pb-3 max-sm:hidden text-[13px] text-muted-foreground tabular-nums">
       {#if accounts && b.account}<span class="truncate">{b.account} ·</span>{/if}
       <span class={b.amount < 0 ? "font-medium text-destructive" : ""}>projected balance {fmt(b.amount)}</span>
     </div>
