@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway.domain import categories, demo, forecast, splits
 from runway.storage import db
+from runway.storage import settings_keys as sk
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
@@ -231,6 +232,18 @@ class HandlerTests(DbCase):
         self.assertEqual(db.get_setting(self.c, "primary_account"), "demo-savings")
         state.api_settings(self.c, {}, {"primary_account": ""})
         self.assertIsNone(db.get_setting(self.c, "primary_account"))
+
+    def test_settings_put_away_alerts(self):
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], [])
+        msgs = fc["warnings"][:1] + ["An alert the sample data doesn’t show"]
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": msgs})
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], msgs)
+        self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])   # put away, not taken away
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": []})
+        self.assertEqual(state.api_overview(self.c, q(days=30), {})["dismissed_warnings"], [])
+        self.assertIsNone(db.get_setting(self.c, sk.OVERVIEW_WARNINGS_DISMISSED))   # an empty list puts the key away too
 
 
     def test_budget(self):
