@@ -64,7 +64,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/categories/remove` | `categories.py:api_category_remove` | `lib/components/settings/CategoryRow.svelte` | `test_api_validation.py`, `test_http_server.py`, `test_mcp.py` | [using/features](/Runway/using/features/) |
 | `POST /api/categories/move` | `categories.py:api_category_move` | `lib/components/settings/CategoryRow.svelte` | `test_api_validation.py` | [using/features](/Runway/using/features/) |
 | `POST /api/categories/look` | `categories.py:api_category_look` | `lib/components/settings/CategoryRow.svelte`, `lib/components/settings/LookPicker.svelte` | `test_mcp_protocol.py` | [using/features](/Runway/using/features/) |
-| `POST /api/categories/pay-with` | `categories.py:api_category_pay_with` | `lib/components/settings/CategoryRow.svelte` | `test_categories_recurring_pinned.py` | [using/features](/Runway/using/features/) |
+| `POST /api/categories/pay-with` | `categories.py:api_category_pay_with` | `lib/components/budget/BudgetRow.svelte` | `test_categories_recurring_pinned.py` | [using/features](/Runway/using/features/) |
 | `GET /api/cashflow` | `reports.py:api_cashflow` | `lib/components/reports/Cashflow.svelte` | `test_categorize.py`, `test_http_server.py`, `test_routes.py`, `test_splits.py` | [using/features](/Runway/using/features/) |
 | `GET /api/month_pace` | `reports.py:api_month_pace` | `lib/components/overview/ThisMonth.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `GET /api/reports/spending` | `reports.py:api_report_spending` | `lib/components/reports/Trends.svelte` | `test_routes.py` | [using/features](/Runway/using/features/) |

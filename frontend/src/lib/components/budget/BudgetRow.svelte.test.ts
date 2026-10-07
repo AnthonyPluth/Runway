@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -247,26 +247,106 @@ describe("BudgetRow", () => {
   });
 
   describe("in the Budgets card", () => {
-    it("offers to roll over what's left, and says so once it does", async () => {
+    const actions = (name = "Groceries") => screen.getByRole("button", { name: `Actions for ${name}` });
+
+    it("offers rollover in the row's ⋯ menu, with the row itself quiet until it's on", async () => {
       const { onchanged } = setup(cat(), { budgets: true });
+      expect(screen.queryByText("Rolls over")).not.toBeInTheDocument();
+      await userEvent.click(actions());
       await userEvent.click(screen.getByRole("button", { name: /Roll over/ }));
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: true } });
       expect(toast.success).toHaveBeenCalledWith("Groceries rolls over from this month on");
       expect(onchanged).toHaveBeenCalled();
     });
 
-    it("turns rollover off", async () => {
+    it("turns rollover off from the same menu", async () => {
       setup(cat({ rollover_from: "2026-01" }), { budgets: true });
+      await userEvent.click(actions());
       const btn = screen.getByRole("button", { name: /Rolls over/ });
       expect(btn).toHaveAttribute("aria-pressed", "true");
       await userEvent.click(btn);
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: false } });
     });
 
-    it("doesn't offer rollover on a subcategory, nor a card anywhere (that's in Settings › Categories)", () => {
-      setup(cat(), { sub: true, budgets: true });
+    it("says a rolling budget as a blue label that isn't a button", () => {
+      setup(cat({ rollover_from: "2026-01" }), { budgets: true });
+      const label = screen.getByText("Rolls over");
+      expect(label).toHaveClass("text-primary");
+      expect(label.closest("button")).toBeNull();
+      expect(label).toHaveAttribute("title", expect.stringContaining("carries into the next"));
+      expect(actions()).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("doesn't offer rollover on a subcategory, but its ⋯ menu still sets the account it's paid with", async () => {
+      setup(cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 100, spent: 40, left: 60 }),
+        { sub: true, budgets: true });
+      await userEvent.click(actions("Produce"));
       expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Set card/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Account Produce is paid with" })).toBeInTheDocument();
+    });
+
+    it("keeps an income category free of both settings", () => {
+      setup(cat({ name: "Paycheck", path: ["Paycheck"], top: "Paycheck", budget: 6000, spent: 3000, left: 3000 }), { income: true, budgets: true });
+      expect(screen.queryByRole("button", { name: "Actions for Paycheck" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the account it's paid with", () => {
+    const actions = (name = "Groceries") => screen.getByRole("button", { name: `Actions for ${name}` });
+    const select = (name: string) => screen.getByRole("combobox", { name: `Account ${name} is paid with` });
+
+    it("is set from the row's ⋯ menu and saved at once, and the page reloads", async () => {
+      const { onchanged } = setup(cat({ usual_account: "b1" }));
+      await userEvent.click(actions());
+      expect(select("Groceries")).toHaveDisplayValue("Checking (automatic)");
+      expect(select("Groceries")).toHaveClass("text-muted-foreground");
+      expect(select("Groceries")).toHaveAttribute("title", expect.stringContaining("the account used most"));
+      expect(within(select("Groceries")).getByRole("group", { name: "Cards" })).toHaveTextContent("Visa");
+      await userEvent.selectOptions(select("Groceries"), "c1");
+      expect(api).toHaveBeenCalledWith("/api/categories/pay-with", { method: "POST", body: { name: "Groceries", pay_with: "c1" } });
+      expect(onchanged).toHaveBeenCalled();
+    });
+
+    it("names the one chosen, and a nested one's Automatic is its parent's", async () => {
+      categories.list = [category("Groceries", { pay_with: "c1" }),
+        category("Produce", { parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries" })];
+      const { unmount } = setup(cat({ pay_with: "c1" }));
+      await userEvent.click(actions());
+      expect(select("Groceries")).toHaveDisplayValue("Visa");
+      expect(select("Groceries")).not.toHaveClass("text-muted-foreground");
+      unmount();
+      setup(cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 100, spent: 40, left: 60 }),
+        { sub: true, budgets: true });
+      await userEvent.click(actions("Produce"));
+      expect(select("Produce")).toHaveDisplayValue("Visa (automatic)");
+      expect(select("Produce")).toHaveClass("text-muted-foreground");
+      expect(select("Produce")).toHaveAttribute("title", expect.stringContaining("the card set on Groceries"));
+    });
+
+    it("follows its parent's choice as soon as the categories reload", async () => {
+      categories.list = [category("Groceries"),
+        category("Produce", { parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries" })];
+      setup(cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 100, spent: 40, left: 60 }),
+        { sub: true, budgets: true });
+      await userEvent.click(actions("Produce"));
+      expect(select("Produce")).toHaveDisplayValue("Automatic");
+      categories.list = categories.list.map((x) => (x.name === "Groceries" ? { ...x, pay_with: "b1" } : x));
+      await waitFor(() => expect(select("Produce")).toHaveDisplayValue("Checking (automatic)"));
+    });
+
+    it("says why it wasn't saved, and keeps your choice to try again", async () => {
+      vi.mocked(api).mockRejectedValue(new Error("Account not found"));
+      setup(cat());
+      await userEvent.click(actions());
+      await userEvent.selectOptions(select("Groceries"), "b1");
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Account not found"));
+      expect(select("Groceries")).toHaveValue("b1");
+    });
+
+    it("isn't offered on money in", () => {
+      setup(cat({ name: "Paycheck", path: ["Paycheck"], top: "Paycheck", budget: 6000, spent: 3000, left: 3000 }), { income: true });
+      expect(screen.queryByRole("button", { name: "Actions for Paycheck" })).not.toBeInTheDocument();
       expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     });
   });

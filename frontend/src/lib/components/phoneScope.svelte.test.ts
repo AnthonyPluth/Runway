@@ -86,10 +86,11 @@ describe("a budget's row", () => {
     usual_account: null, spent: 200, own_spent: 200, left: 300, rollover_from: null } as BudgetCategory;
   const show = () => render(BudgetRow, { c, month: "2026-03", pace: 0.5, budgets: true, payAccounts: [], onsave: vi.fn(), onchanged: vi.fn() });
 
-  it("edits in place on a phone: the amount and rolling over", () => {
+  it("edits in place on a phone: the amount and rolling over, from the row's ⋯ menu", async () => {
     viewport.phone = true;
     show();
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Groceries" }));
     expect(screen.getByRole("button", { name: /Roll over/ })).toBeInTheDocument();
     expect(screen.getByText("$300 left")).toBeInTheDocument();
   });
