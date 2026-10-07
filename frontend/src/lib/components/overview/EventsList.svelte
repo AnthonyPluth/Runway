@@ -22,8 +22,8 @@
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
   // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
-  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones):
-  // an italic name and a "Projected" label, which a screen reader gets as text too. Amounts are untouched.
+  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones, under
+  // a heading that already says they're projected): an italic name. Amounts are untouched.
   let { events, limit = 8, accounts = false, marked = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
     limit?: number; accounts?: boolean; marked?: boolean; all?: boolean; onchanged: () => void;
@@ -127,7 +127,6 @@
             <!-- A recurring item's name opens it in Recurring, to change every one. -->
             <a class={["truncate hover:underline", marked && "italic pr-0.5"]} href={`#recurring?item=${e.recurring_id}`} title="Open in Recurring">{e.name}</a>
           {:else}<span class={["truncate", marked && "italic pr-0.5"]}>{e.name}</span>{/if}
-          {#if marked}<Badge variant="outline" class="text-muted-foreground" title="Not posted yet: projected by the forecast"><span class="sr-only">Not posted yet: </span>Projected</Badge>{/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           <!-- A recurring date edited to $0 is one you skipped (Recurring's "Skip the next one"); reset puts it back. -->
