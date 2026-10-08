@@ -243,9 +243,9 @@ describe("Upcoming", () => {
     expect(screen.getAllByText(/Checking/).length).toBeGreaterThan(0);
   });
 
-  it("marks its rows as projected, so they differ from posted transactions", () => {
+  it("marks its rows as projected (an italic name), without a label the heading already gives", () => {
     render(Upcoming, { props: { onchanged: vi.fn(), events: [ev] } });
-    expect(screen.getByText("Projected")).toBeInTheDocument();
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
     expect(screen.getByText("Rent")).toHaveClass("italic");
   });
 });

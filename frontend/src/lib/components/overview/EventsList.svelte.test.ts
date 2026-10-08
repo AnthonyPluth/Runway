@@ -29,17 +29,16 @@ beforeEach(() => {
 });
 
 describe("EventsList", () => {
-  it("leaves a row plain unless `marked`: no label, no italic", () => {
+  it("leaves a row plain unless `marked`: no italic", () => {
     const { container } = show([ev()]);
-    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
     expect(container.querySelector("[data-projected]")).toBeNull();
     expect(screen.getByText("Rent")).not.toHaveClass("italic");
   });
 
-  it("marks a projected row by more than colour: a label (with a screen-reader sentence), and an italic name", () => {
+  it("marks a projected row by more than colour: an italic name, without repeating that it's projected", () => {
     const { container } = show([ev(), ev({ name: "Pay", amount: 2000, key: "k2", recurring_id: 7 })], { marked: true });
-    expect(screen.getAllByText("Projected")).toHaveLength(2);
-    expect(screen.getAllByText("Not posted yet:", { exact: false })).toHaveLength(2);
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not posted yet:", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByText("Rent")).toHaveClass("italic");
     expect(screen.getByRole("link", { name: "Pay" })).toHaveClass("italic");
     const rows = container.querySelectorAll("[data-projected]");
