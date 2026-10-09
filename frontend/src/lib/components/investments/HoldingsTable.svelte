@@ -56,9 +56,10 @@
     changed = true;
     if (h.lots.length === 1) finish();   // one account: done as soon as it's saved
   };
-  // Under 700px the secondary columns fold into the holding's cell, and the cost basis button goes with them (rendered once);
-  // the total gain folds under the value, so the table never needs scrolling sideways.
-  const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 700px)") : null;
+  // Under 1280px (phones, tablets and a narrow window next to the sidebar) the secondary columns fold into the holding's cell,
+  // and the cost basis button goes with them (rendered once). Holding, value and total gain stay as columns, so the table
+  // never needs scrolling sideways.
+  const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 1279px)") : null;
   const narrow = $state({ on: narrowQuery?.matches ?? false });
   $effect(() => {
     if (!narrowQuery) return;
@@ -68,9 +69,9 @@
     return () => narrowQuery.removeEventListener("change", sync);
   });
   const COLS: [SortKey, string, string][] = [
-    ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right max-[700px]:hidden"], ["price", "Price", "text-right max-[700px]:hidden"], ["value", "Value", "text-right"],
-    ["day_change", "Today", "text-right max-[700px]:hidden"], ["gain", "Total gain", "text-center max-[700px]:hidden"], ["allocation", "Weight", "text-right max-[700px]:hidden"],
-    ["cost_basis", "Cost basis", "text-right max-[700px]:hidden"],
+    ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"], ["value", "Value", "text-right"],
+    ["day_change", "Today", "text-right max-[1279px]:hidden"], ["gain", "Total gain", "text-center"], ["allocation", "Weight", "text-right max-[1279px]:hidden"],
+    ["cost_basis", "Cost basis", "text-right max-[1279px]:hidden"],
   ];
 </script>
 
@@ -93,23 +94,18 @@
     <thead>
       <tr class="text-xs text-muted-foreground">
         {#each COLS as [k, label, cls] (k)}
-          <th class={cn("pb-2 font-medium [&:not(:first-child)]:pl-3", cls)} aria-sort={inv.sort.key === k ? (inv.sort.dir < 0 ? "descending" : "ascending") : undefined}>
+          <th class={cn("pb-2 font-medium [&:not(:first-child)]:pl-2 min-[1280px]:[&:not(:first-child)]:pl-3", cls)} aria-sort={inv.sort.key === k ? (inv.sort.dir < 0 ? "descending" : "ascending") : undefined}>
             <button class="cursor-pointer whitespace-nowrap hover:text-foreground" onclick={() => sortBy(k)}>
               {label}{inv.sort.key === k ? (inv.sort.dir < 0 ? " ↓" : " ↑") : ""}
             </button>
-            {#if narrow.on && k === "value"}
-              <button class="ml-2 cursor-pointer whitespace-nowrap hover:text-foreground" aria-label="Sort by total gain" onclick={() => sortBy("gain")}>
-                Gain{inv.sort.key === "gain" ? (inv.sort.dir < 0 ? " ↓" : " ↑") : ""}
-              </button>
-            {/if}
           </th>
         {/each}
       </tr>
     </thead>
     <tbody>
       {#each rows as x (keyOf(x))}
-        <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-3">
-          <td class="min-w-48 max-[700px]:min-w-0">
+        <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-2 min-[1280px]:[&>td:not(:first-child)]:pl-3">
+          <td class="min-w-48 max-[1279px]:min-w-0">
             <div class="flex gap-2.5">
               {#if x.is_cash}
                 <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
@@ -131,32 +127,26 @@
               </div>
             </div>
           </td>
-          <td class="text-right tabular-nums max-[700px]:hidden">{x.is_cash ? "—" : qty(x.quantity)}</td>
-          <td class="text-right tabular-nums max-[700px]:hidden">
+          <td class="text-right tabular-nums max-[1279px]:hidden">{x.is_cash ? "—" : qty(x.quantity)}</td>
+          <td class="text-right tabular-nums max-[1279px]:hidden">
             {x.is_cash ? "—" : fmt(x.price)}
             {#if x.live}<LiveDot class="ml-1.5 size-[7px] align-[2px]" label="Live price" title={`Live price · ${liveAt(x.live_time)}`} />{/if}
           </td>
           <td class="text-right tabular-nums">
             <span class="font-semibold">{fmt(x.value)}</span>
-            {#if narrow.on}
-              <div class="text-xs">
-                {#if x.gain == null}<span class="text-muted-foreground">—</span>
-                {:else}<span class={gainCls(x.gain)}>{signed(x.gain)} ({pct(x.gain_pct)})</span>{/if}
-              </div>
-            {/if}
           </td>
-          <td class="text-right tabular-nums max-[700px]:hidden">
+          <td class="text-right tabular-nums max-[1279px]:hidden">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}
           </td>
-          <td class="text-center tabular-nums max-[700px]:hidden">
+          <td class="text-center tabular-nums">
             {#if x.gain == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
-          <td class="text-right tabular-nums max-[700px]:hidden">
+          <td class="text-right tabular-nums max-[1279px]:hidden">
             <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{share(x.allocation)}</span>
           </td>
-          <td class="text-right tabular-nums max-[700px]:hidden">
+          <td class="text-right tabular-nums max-[1279px]:hidden">
             {#if !narrow.on}{@render costBasis(x)}{/if}
           </td>
         </tr>

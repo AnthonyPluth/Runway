@@ -101,24 +101,25 @@ describe("HoldingsTable", () => {
     beforeEach(phone);
     afterEach(() => vi.unstubAllGlobals());
 
-    it("folds the total gain under the value instead of a column of its own", () => {
+    it("keeps total gain as its own centred column, not repeated under the value", () => {
       setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
       const row = screen.getAllByRole("row")[1];
-      const valueCell = within(row).getByText("$2,500.00").closest("td")!;
-      expect(within(valueCell).getByText("+$500.00 (+25.0%)")).toHaveClass("text-good");
-      expect(screen.getAllByRole("columnheader").filter((h) => h.className.includes("max-[700px]:hidden")).map((h) => h.textContent!.trim())).toContain("Total gain");
+      const gainCell = within(row).getByText("+$500.00").closest("td")!;
+      expect(gainCell).toHaveClass("text-center");
+      expect(gainCell).not.toHaveClass("max-[1279px]:hidden");   // shown at phone and tablet widths, not clipped
+      expect(within(row).getByText("$2,500.00").closest("td")).not.toHaveTextContent("+$500.00");
+      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
     });
 
-    it("still sorts by gain, from a button beside Value", async () => {
+    it("sorts by gain from the Total gain column header", async () => {
       setup([holding({ ticker: "AAA", gain: 100 }), holding({ security_id: "s2", ticker: "BBB", gain: 900 })]);
-      await userEvent.click(screen.getByRole("button", { name: "Sort by total gain" }));
+      await userEvent.click(screen.getByRole("button", { name: /Total gain/ }));
       expect(inv.sort).toEqual({ key: "gain", dir: -1 });
     });
 
-    it("shows a dash under the value when the cost basis is unknown", () => {
+    it("shows a dash in the gain column when the cost basis is unknown", () => {
       setup([holding({ value: 2500, gain: null, gain_pct: null })]);
-      const valueCell = within(screen.getAllByRole("row")[1]).getByText("$2,500.00").closest("td")!;
-      expect(within(valueCell).getByText("—")).toBeInTheDocument();
+      expect(within(screen.getAllByRole("row")[1]).getByText("—", { selector: "td.text-center span" })).toBeInTheDocument();
     });
   });
 
