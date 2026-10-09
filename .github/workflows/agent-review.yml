@@ -30,7 +30,9 @@ name: Agent review
 # `claude setup-token`), or ANTHROPIC_API_KEY, an API key, which wins when both are set. The model is always Sonnet,
 # fixed in the Review step below (no variable can change it): the repository owner decided that every review uses
 # Sonnet and never Opus, security-sensitive changes included. The most a review may spend is the
-# AGENT_REVIEW_BUDGET_USD variable (5 US dollars, as Claude Code estimates a run's cost).
+# AGENT_REVIEW_BUDGET_USD variable (3 US dollars, as Claude Code estimates a run's cost), and the most round trips to
+# the model it may take is AGENT_REVIEW_MAX_TURNS (60). Reviews have taken 10 to 50 seconds, well inside both; one that
+# hits either fails as an error (never a pass), and each run logs the turns and cost it took, to tune them by.
 #
 # Why pull_request_target: it runs main's copy of this workflow, its prompt and its scripts, so a pull request can't
 # change how it is reviewed (with pull_request it could edit this file to pass itself). The cost is that the job sees
@@ -175,7 +177,8 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE: ${{ runner.temp }}/claude-code/node_modules/.bin/claude
           MODEL: sonnet
-          BUDGET: ${{ vars.AGENT_REVIEW_BUDGET_USD || '5' }}
+          BUDGET: ${{ vars.AGENT_REVIEW_BUDGET_USD || '3' }}
+          MAX_TURNS: ${{ vars.AGENT_REVIEW_MAX_TURNS || '60' }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             echo "::error::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret to review with."; exit 0

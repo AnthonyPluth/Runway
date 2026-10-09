@@ -290,6 +290,19 @@ def render(findings: list[dict], summary: str, run_url: str, sha: str = "") -> s
     return text if len(text) <= MAX_COMMENT else text[:MAX_COMMENT] + "\n\n(cut short)"
 
 
+LIMITS = {   # claude's result subtypes when a limit agent-review-run.sh sets stops it: an error, never a pass
+    "error_max_turns": "The reviewer hit its turn limit (AGENT_REVIEW_MAX_TURNS) before answering; see the run",
+    "error_max_budget_usd": "The reviewer hit its spending limit (AGENT_REVIEW_BUDGET_USD) before answering; see the run",
+}
+
+
+def usage(output: dict) -> None:
+    """Logs what the run took, to tune the limits by."""
+    turns, cost = output.get("num_turns"), output.get("total_cost_usd")
+    if isinstance(turns, int) and isinstance(cost, (int, float)):
+        print(f"The reviewer took {turns} turn(s) and about ${cost:.2f}.")
+
+
 def report(path: str) -> dict:
     run_url = os.environ.get("RUN_URL", "")
     error = {"verdict": "error", "comment": ""}
@@ -298,7 +311,12 @@ def report(path: str) -> dict:
             output = json.load(f)
     except (OSError, ValueError):
         return {**error, "description": "The reviewer gave no readable output; see the run"}
-    if not isinstance(output, dict) or output.get("is_error"):
+    if not isinstance(output, dict):
+        return {**error, "description": "The reviewer stopped with an error; see the run"}
+    usage(output)
+    if output.get("subtype") in LIMITS:
+        return {**error, "description": LIMITS[output["subtype"]]}
+    if output.get("is_error"):
         return {**error, "description": "The reviewer stopped with an error; see the run"}
     answer = structured(output)
     findings = findings_of(answer) if answer else None

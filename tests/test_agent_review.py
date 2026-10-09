@@ -63,6 +63,22 @@ class Report(unittest.TestCase):
                        self.answer({"severity": "fine", "title": "t", "detail": "d"})):
             self.assertEqual(self.verdict(output)["verdict"], "error", output)
 
+    def test_hitting_a_limit_is_an_error_that_says_which(self):
+        for subtype, name in (("error_max_turns", "AGENT_REVIEW_MAX_TURNS"),
+                              ("error_max_budget_usd", "AGENT_REVIEW_BUDGET_USD")):
+            # Even with an answer in hand (the limit can stop it after one): an unfinished review isn't a pass.
+            output = {**self.answer(), "subtype": subtype, "is_error": True, "num_turns": 60, "total_cost_usd": 3.1}
+            with mock.patch("builtins.print") as printed:
+                v = self.verdict(output)
+            self.assertEqual(v["verdict"], "error")
+            self.assertIn(name, v["description"])
+            printed.assert_any_call("The reviewer took 60 turn(s) and about $3.10.")
+
+    def test_the_comment_records_the_commit_it_reviewed(self):
+        with mock.patch.dict(os.environ, {"REVIEWED_SHA": "c" * 40}):
+            v = self.verdict(self.answer())
+        self.assertEqual(ar.previous([v["comment"]])[:2], ("c" * 40, "pass"))
+
     def test_mentions_and_the_marker_are_defused(self):
         v = self.verdict(self.answer({"severity": "advisory", "title": "@someone <!-- agent-review -->", "detail": "d"}))
         self.assertNotIn("@someone", v["comment"])
@@ -412,8 +428,8 @@ class Run(unittest.TestCase):
         fake = d / "claude"
         fake.write_text(FAKE_CLAUDE)
         fake.chmod(0o755)
-        env = {"PATH": os.environ.get("PATH", ""), "CLAUDE": str(fake), "MODEL": "some-model", "BUDGET": "5",
-               "RECORD": str(d / "record"), **secrets}
+        env = {"PATH": os.environ.get("PATH", ""), "CLAUDE": str(fake), "MODEL": "some-model", "BUDGET": "3",
+               "MAX_TURNS": "60", "RECORD": str(d / "record"), **secrets}
         done = subprocess.run(["bash", str(ROOT / ".github/scripts/agent-review-run.sh")], cwd=d, env=env,
                               capture_output=True, text=True)
         record = (d / "record").read_text().splitlines() if (d / "record").exists() else []
@@ -429,6 +445,8 @@ class Run(unittest.TestCase):
         self.assertEqual(args[args.index("--permission-mode") + 1], "dontAsk")
         self.assertEqual(args[args.index("--setting-sources") + 1], "")
         self.assertEqual(args[args.index("--model") + 1], "some-model")
+        self.assertEqual(args[args.index("--max-budget-usd") + 1], "3")
+        self.assertEqual(args[args.index("--max-turns") + 1], "60")
         self.assertNotIn("--bare", args)   # it would ignore the subscription's token
 
     def test_the_subscription_s_token_alone_is_used(self):
