@@ -54,6 +54,7 @@
         "frontend/src/lib/components/settings/SimpleFinSetup.svelte"
       ],
       "tests": [
+        "tests/test_api_handlers.py",
         "tests/test_http_pinned.py",
         "tests/test_monitoring.py"
       ],

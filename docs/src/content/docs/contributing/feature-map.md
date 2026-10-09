@@ -16,7 +16,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `GET /api/backup` | `backups.py:api_backup` | - | `test_backup.py`, `test_http_pinned.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/backup/inspect` | `backups.py:api_backup_inspect` | `lib/components/settings/BackupSection.svelte` | `test_backup.py`, `test_http_pinned.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/restore` | `backups.py:api_restore` | `lib/components/settings/BackupSection.svelte` | `test_backup.py`, `test_hardening.py`, `test_http_pinned.py` | [start/deployment](/Runway/start/deployment/) |
-| `POST /api/sync` | `connections.py:api_sync` | `lib/app.svelte.ts`, `lib/components/settings/PlaidLink.svelte`, `lib/components/settings/SimpleFinSetup.svelte` | `test_http_pinned.py`, `test_monitoring.py` | [using/features](/Runway/using/features/) |
+| `POST /api/sync` | `connections.py:api_sync` | `lib/app.svelte.ts`, `lib/components/settings/PlaidLink.svelte`, `lib/components/settings/SimpleFinSetup.svelte` | `test_api_handlers.py`, `test_http_pinned.py`, `test_monitoring.py` | [using/features](/Runway/using/features/) |
 | `POST /api/sync/auto` | `connections.py:api_sync_auto` | `lib/app.svelte.ts` | `test_http_pinned.py`, `test_http_server.py` | [using/features](/Runway/using/features/) |
 | `POST /api/investments/sync` | `investments.py:api_investments_sync` | - | `test_http_pinned.py` | [using/features](/Runway/using/features/) |
 | `GET /api/investments/stream` | `investments.py:api_quote_stream` | `lib/components/investments/live.ts` | `test_http_pinned.py`, `test_investments.py`, `test_monitoring.py` | [using/features](/Runway/using/features/) |

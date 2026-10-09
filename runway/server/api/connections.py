@@ -243,8 +243,8 @@ def api_plaid_match(conn, _q, body):
 
 @own_session
 def api_sync(_conn, _q, _b):
-    """Sync the banks now (the Sync button)."""
-    return run_sync()
+    """Sync the banks now (the Sync button): Plaid too, even if it was asked today."""
+    return run_sync(ask_plaid=True)
 
 
 @own_session
