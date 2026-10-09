@@ -5,6 +5,11 @@ name: Agent review
 # the "Agent review" commit status on the pull request's head, which the merge gate requires (.github/scripts/
 # merge-gate.sh): a blocking finding fails it, and so does a review that couldn't run. A new push reviews again.
 #
+# A re-review reads what changed since the last one: the comment's hidden state line records the commit it read, and
+# when the new head descends from it the reviewer also gets that review's findings and the diff since, to check each
+# finding is fixed and read the new lines closely (the whole diff stays in front of it, and its findings replace the
+# earlier ones). Without a usable earlier commit (none, rebased away, or anything failing) it reviews the whole change.
+#
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
 # saying so; Dependabot's get none (the merge gate doesn't ask for one).
@@ -76,6 +81,24 @@ jobs:
           same_repo=$([ "$HEAD_REPO" = "$REPO" ] && echo true || echo false)
           { echo "agent=$agent"; echo "same_repo=$same_repo"; } | tee -a "$GITHUB_OUTPUT"
 
+      # The last review's comment, while no code of the pull request is checked out (this and the step above are the
+      # only ones with a token): the commit it read and its findings, for a re-review. If this fails, the review reads
+      # the whole change as if it were the first.
+      - name: The last review
+        id: prev
+        if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .body | @json' > "$RUNNER_TEMP/comments.jsonl"
+          read -r sha verdict < <(python3 trusted/.github/scripts/agent_review.py previous \
+                                    "$RUNNER_TEMP/comments.jsonl" "$RUNNER_TEMP/previous-review.md") || true
+          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; } | tee -a "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
         if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
         with:
@@ -102,17 +125,23 @@ jobs:
           fetch-depth: 0       # main's history too, for the diff against where it branched
           path: review/pr
 
-      # Beside it in review/, from main: the prompt, the schema of the answer and AGENTS.md; and the change itself.
+      # Beside it in review/, from main: the prompt, the schema of the answer and AGENTS.md; and the change itself, with
+      # the last review's findings and what changed since when it read an earlier commit of this one (agent_review.py
+      # plan, which only reads the checkout with git).
       - name: Gather the change
+        id: plan
         if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
         env:
           MAIN: ${{ github.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          PREV_SHA: ${{ steps.prev.outputs.sha }}
+          REPO_DIR: review/pr
+          OUT_DIR: review
+          TRUSTED: trusted/.github/agent-review
         run: |
           cp trusted/AGENTS.md trusted/.github/agent-review/prompt.md trusted/.github/agent-review/schema.json review/
-          git -C review/pr diff "$MAIN...$HEAD" > review/diff.patch
-          git -C review/pr diff --name-status "$MAIN...$HEAD" > review/files.txt
-          git -C review/pr log --format='commit %H%n%B' "$MAIN..$HEAD" > review/commits.txt
+          if [ -n "$PREV_SHA" ] && [ -s "$RUNNER_TEMP/previous-review.md" ]; then export PREV_BODY="$RUNNER_TEMP/previous-review.md"; fi
+          python3 trusted/.github/scripts/agent_review.py plan
           echo "$(wc -l < review/files.txt) file(s), $(wc -l < review/diff.patch) diff line(s)"
 
       # The reviewer, in review/ (main's script; see it for how it is isolated), with whichever secret is set.
@@ -136,6 +165,7 @@ jobs:
         env:
           AGENT: ${{ steps.who.outputs.agent }}
           SAME_REPO: ${{ steps.who.outputs.same_repo }}
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}   # in the comment, for the next push's re-review
           # Only to make sure the answer contains neither before it is posted.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
