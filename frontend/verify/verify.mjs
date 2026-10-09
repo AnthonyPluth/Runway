@@ -73,9 +73,9 @@ async function runStep(page, step, shot) {
         const at = `${Math.round(r.left)},${Math.round(r.top)}`;
         still = at === last ? still + 1 : 0;
         last = at;
-        if (still >= 8 || ++frames > 180) done(undefined); else requestAnimationFrame(tick);
+        if (still >= 8 || ++frames > 180) done(undefined); else setTimeout(tick, 16);
       };
-      requestAnimationFrame(tick);
+      setTimeout(tick, 16);
     }), undefined, { timeout });
   } else if ("expect_text" in step) {
     const el = page.locator(step.expect_text.selector).first();
