@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "reason"],
+  "properties": {
+    "decision": {"enum": ["skip", "review"], "description": "skip only when sure the full review isn't needed; review otherwise."},
+    "reason": {"type": "string", "description": "One sentence."}
+  }
+}
