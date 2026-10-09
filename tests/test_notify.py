@@ -295,6 +295,83 @@ class NotifyTests(DbCase):
                                         .where(NotifyLog.key == "card:cc:2026-09-25")).fetchone()[0],
                          "Visa payment due Friday")
 
+    # The browser extension's import waiting for a sign-in to a store
+
+    def log(self):
+        return {r["key"]: r["sent"] for r in self.c.execute(select(NotifyLog.key, NotifyLog.sent)).fetchall()}
+
+    def test_extension_sign_in_is_said_once_until_the_import_carries_on(self):
+        now = time.time()
+        with mock.patch("time.time", return_value=now):
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None), {"sent": 1, "why": None})
+            msg = decrypt(PushService.received[-1][2], self.ua, b"0123456789abcdef")
+            # Only the store's name: no amounts, merchants or accounts on a lock screen.
+            self.assertEqual(msg, {"title": "Sign in to Amazon for Runway",
+                                   "body": "The browser extension's import is waiting for you to sign in to Amazon in the tab "
+                                           "it opened. It carries on once you have.",
+                                   "url": "/#setup/connections", "tag": "extsignin:amazon"})
+            # The daily import asks again the next day: nothing new while it waits, and another store is its own.
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None), {"sent": 0, "why": "already"})
+            self.assertEqual(notify.ext_signin(self.c, "carta", "Carta", None)["sent"], 1)
+            self.assertEqual(len(PushService.received), 2)
+        with mock.patch("time.time", return_value=now + notify.EXT_SIGNIN_REMIND - 60):
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None)["why"], "already")
+        with mock.patch("time.time", return_value=now + notify.EXT_SIGNIN_REMIND + 60):   # still waiting: a reminder
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None)["sent"], 1)
+        later = now + notify.EXT_SIGNIN_REMIND + 60
+        # The import got through: a new sign-out is told about, though not within EXT_SIGNIN_EVERY of the last one.
+        notify.ext_resumed(self.c, "amazon", None)
+        self.assertEqual(set(self.log()) & {"extsignin:amazon", "extsignin:amazon:resumed"}, {"extsignin:amazon:resumed"})
+        with mock.patch("time.time", return_value=later + notify.EXT_SIGNIN_EVERY - 60):
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None)["why"], "already")
+        with mock.patch("time.time", return_value=later + notify.EXT_SIGNIN_EVERY + 60):
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None)["sent"], 1)
+        self.assertEqual(set(self.log()) & {"extsignin:amazon", "extsignin:amazon:resumed"}, {"extsignin:amazon"})
+        notify.ext_resumed(self.c, "target", None)   # nothing was waiting: nothing changes
+        self.assertNotIn("extsignin:target:resumed", self.log())
+        self.assertEqual(len(PushService.received), 4)
+        self.assertIn("Sign in to Amazon for Runway", [r["title"] for r in notify.recent(self.c, None)])
+
+    def test_an_extension_sign_in_nobody_got_isnt_remembered(self):
+        notify.ext_signin(self.c, "costco", "Costco", None)
+        notify.ext_resumed(self.c, "costco", None)
+        before = self.log()
+        PushService.status = 500
+        try:
+            with mock.patch("time.time", return_value=time.time() + notify.EXT_SIGNIN_EVERY + 60):
+                self.assertEqual(notify.ext_signin(self.c, "costco", "Costco", None), {"sent": 0, "why": "failed"})
+        finally:
+            PushService.status = 201
+        self.assertEqual(self.log(), before)   # as it was: the time limit still runs from the one that was delivered
+        self.assertIsNotNone(self.c.execute(select(PushSubscription.last_error)).fetchone()[0])
+        with mock.patch("time.time", return_value=time.time() + notify.EXT_SIGNIN_EVERY + 60):
+            self.assertEqual(notify.ext_signin(self.c, "costco", "Costco", None)["sent"], 1)   # tried again, and said
+        self.c.execute(delete(PushSubscription))
+        self.assertEqual(notify.ext_signin(self.c, "target", "Target", None), {"sent": 0, "why": "no_devices"})
+        self.assertNotIn("extsignin:target", self.log())
+
+    def test_extension_sign_in_can_be_turned_off(self):
+        notify.save_prefs(self.c, {"ext_signin": "false"})
+        self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None), {"sent": 0, "why": "off"})
+        self.assertEqual((PushService.received, self.log()), ([], {}))
+
+    def test_extension_sign_in_goes_to_the_keys_maker_while_they_may_sign_in(self):
+        oidc.remember_user(self.c, "u1", "a@example.com", "A")
+        oidc.remember_user(self.c, "u2", "b@example.com", "B")
+        self.add_device("u1", 2)
+        self.add_device("u2", 3)
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com,b@example.com"}):
+            # a key made before keys had owners: nobody's to tell (not the devices turned on before sign-in)
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", None), {"sent": 0, "why": "no_devices"})
+            self.assertEqual(notify.ext_signin(self.c, "amazon", "Amazon", "u1"), {"sent": 1, "why": None})
+            self.assertEqual([p for p, _h, _b in PushService.received], ["/p/2"])
+            self.assertIn(notify._log_key("u1", "extsignin:amazon"), self.log())
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
+            # taken off the sign-in list: their devices are dropped, and nothing goes anywhere else
+            self.assertEqual(notify.ext_signin(self.c, "target", "Target", "u1"), {"sent": 0, "why": "no_devices"})
+        self.assertEqual(len(PushService.received), 1)
+        self.assertNotIn(self.endpoint(2), [s["endpoint"] for s in notify.subscriptions(self.c)])
+
 
 if __name__ == "__main__":
     unittest.main()

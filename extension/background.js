@@ -8,7 +8,8 @@
 if (typeof importScripts === "function") {
   importScripts("page.js", "util.js", "runway.js", "stores.js", "frames.js", "amazon.js", "target.js", "costco.js", "carta.js");
 }
-/* global store, settings, setStatus, importStore, importAmazon, importTarget, importCostco, importCarta, runway -- from the other files here */
+/* global store, settings, setStatus, importStore, importAmazon, importTarget, importCostco, importCarta, runway, waitForSignIn, forgetSignIns,
+   tabLoaded -- from the other files here */
 
 const RETAILERS = { amazon: "Amazon", target: "Target", costco: "Costco", carta: "Carta" };
 const EVERYDAY = ["amazon", "target"];   // "Import all"; Costco and Carta have their own buttons (and join once they've worked)
@@ -48,8 +49,12 @@ async function run(which) {
         try {
           const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, costco: importCostco, carta: importCarta }[retailer], progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r), data: r };
+          await forgetSignIns((r) => r === retailer);   // through, however you signed in
         } catch (e) {
-          results[retailer] = { ok: false, at: new Date().toISOString(), message: e.message || String(e) };
+          // Stopped for a sign-in: wait for it in the tab, to carry on (frames.js), and say so.
+          const note = e.signInTab ? await waitForSignIn(retailer, e.signInTab, which === "daily")
+            .catch(() => "") : "";   // (the extension's storage failing: the message below still says to sign in)
+          results[retailer] = { ok: false, at: new Date().toISOString(), message: (e.message || String(e)) + note };
         }
         await store.set({ results });
       }
@@ -99,6 +104,16 @@ async function scheduleAuto() {
   if (!(await chrome.alarms.get("daily"))) chrome.alarms.create("daily", { delayInMinutes: 5, periodInMinutes: 24 * 60 });
 }
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === "daily") run("daily"); });
+
+// Signed in, in the tab a store's import stopped in: that store's import again, once whatever is running has finished.
+async function resumeImport(retailer) {
+  while (running) await running;
+  await run(retailer);
+}
+// Registered here, at the top, so a sign-in that takes a while still wakes the worker. tab.url is only there for the
+// stores' pages (the extension's host permissions), so other tabs' loads end straight away.
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (info.status === "complete") tabLoaded(tabId, tab && tab.url, resumeImport); });
+chrome.tabs.onRemoved.addListener((tabId) => { forgetSignIns((_r, s) => s.tabId === tabId).catch(() => {}); });   // nothing to wait for
 chrome.runtime.onInstalled.addListener((d) => {
   scheduleAuto();
   store.remove("hiddenOff");   // a new version: try hidden frames again for every store

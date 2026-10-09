@@ -1,5 +1,5 @@
 // The store addresses the extension may read or send a page to. Nothing else is ever opened or fetched.
-/* exported STORE_HOSTS, STORE_MATCHES, checkedArgs */
+/* exported STORE_HOSTS, STORE_MATCHES, checkedArgs, signedInAt */
 
 const STORE_HOSTS = ["amazon.com", "target.com", "carta.com", "costco.com"];
 const STORE_MATCHES = ["https://www.amazon.com/*", "https://www.target.com/*", "https://*.carta.com/*", "https://www.costco.com/*"];
@@ -20,5 +20,15 @@ function storeUrl(url) {
   }
   return u.href;
 }
+// Whether a tab's address is a store page past its sign-in: on a store's site, and not its sign-in, two-step, robot
+// check or signed-out page. The address of a page the extension may not see (a store's sign-in on another host) is
+// undefined, which isn't signed in yet.
+const SIGNIN_PAGE = /(^|\/)(ap|ax)\/|sign-?in|sign-?on|log-?in|logon|logoff|log-?out|captcha|mfa|two-?factor|verif/i;
+function signedInAt(url) {
+  let u;
+  try { u = new URL(storeUrl(url)); } catch (_) { return false; }
+  return !SIGNIN_PAGE.test(u.hostname + u.pathname);
+}
+
 // A page command that goes somewhere (fetch, go) is only ever sent to a store address.
 const checkedArgs = (cmd, args) => (cmd === "fetch" || cmd === "go" || cmd === "costcoFetch" ? [storeUrl(args[0]), ...args.slice(1)] : args);

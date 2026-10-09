@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import amazon from "../../../extension/amazon.js?raw";
 import background from "../../../extension/background.js?raw";
 import carta from "../../../extension/carta.js?raw";
@@ -334,5 +334,138 @@ describe("stopsImport", () => {
     expect(w.stopsImport({ code: "other" })).toBe(false);
     expect(w.stopsImport(null)).toBe(false);
     expect(w.stopsImport(undefined)).toBe(false);
+  });
+});
+
+// Waiting for a sign-in (frames.js), with the extension's storage, windows and Runway faked.
+interface SignInWorker {
+  signedInAt: (url: unknown) => boolean;
+  waitForSignIn: (retailer: string, tab: { id: number; windowId: number }, unattended: boolean) => Promise<string>;
+  tabLoaded: (tabId: number, url: string | undefined, resume: (retailer: string) => void) => Promise<void>;
+  forgetSignIns: (drop: (retailer: string, wait: { tabId: number; until: number }) => boolean) => Promise<void>;
+}
+
+function signInWorker() {
+  const data: Record<string, unknown> = { runwayUrl: "https://runway.example", token: "rwx_test" };
+  const windows: [number, object][] = [];
+  const noEvent = { addListener() {}, removeListener() {} };
+  const chrome = {
+    runtime: { id: "runway", onConnect: noEvent, onMessage: noEvent },
+    storage: { local: {
+      get: async (keys: string | string[]) => Object.fromEntries((typeof keys === "string" ? [keys] : keys)
+        .filter((k) => k in data).map((k) => [k, structuredClone(data[k])])),
+      set: async (o: Record<string, unknown>) => { Object.assign(data, structuredClone(o)); },
+      remove: async () => {},
+    } },
+    webRequest: { onBeforeRequest: { addListener() {} } },
+    offscreen: { createDocument: async () => {} },
+    windows: { update: async (id: number, o: object) => { windows.push([id, o]); } },
+  };
+  const body = Object.values(FILES).join("\n") + "\nreturn { signedInAt, waitForSignIn, tabLoaded, forgetSignIns };";
+  const w = new Function("chrome", body)(chrome) as SignInWorker;
+  return { w, data, windows };
+}
+
+const AMAZON_SIGNIN = "https://www.amazon.com/ap/signin?openid.return_to=x";
+const AMAZON_PAYMENTS = "https://www.amazon.com/cpe/yourpayments/transactions";
+
+describe("signedInAt", () => {
+  const { w: s } = signInWorker();
+  it.each([
+    AMAZON_PAYMENTS,
+    "https://www.amazon.com/gp/your-account/order-details?orderID=1",
+    "https://www.target.com/orders",
+    "https://www.costco.com/myaccount/#/app/orders",
+    "https://app.carta.com/investors/individual/1/portfolio/",
+  ])("is true past the sign-in: %s", (url) => {
+    expect(s.signedInAt(url)).toBe(true);
+  });
+
+  it.each([
+    ["Amazon's sign-in", AMAZON_SIGNIN],
+    ["Amazon's two-step", "https://www.amazon.com/ap/mfa?arb=1"],
+    ["Amazon's account claim", "https://www.amazon.com/ax/claim/intent"],
+    ["Amazon's robot check", "https://www.amazon.com/errors/validateCaptcha"],
+    ["Target's sign-in", "https://www.target.com/login?client_id=x"],
+    ["Costco's sign-in form", "https://www.costco.com/LogonForm"],
+    ["Costco's sign-in host (one the extension can't see)", "https://signin.costco.com/x"],
+    ["Carta's sign-in", "https://app.carta.com/accounts/login/"],
+    ["not a store", "https://evil.example/orders"],
+    ["no address (a page the extension may not see)", undefined],
+  ])("is false on %s", (_why, url) => {
+    expect(s.signedInAt(url)).toBe(false);
+  });
+});
+
+describe("waiting for a sign-in", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const reply = (body: object, status = 200) => fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status }));
+
+  it("brings an import you started to the front, and sends nothing", async () => {
+    const { w: s, data, windows } = signInWorker();
+    expect(await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, false)).toBe("");
+    expect(windows).toEqual([[2, { focused: true }]]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(data.signIns).toEqual({ amazon: { tabId: 5, until: expect.any(Number) } });
+  });
+
+  it("only asks for attention for the daily import, and has Runway send a notification", async () => {
+    const { w: s, windows } = signInWorker();
+    reply({ notified: true, why: null });
+    expect(await s.waitForSignIn("costco", { id: 5, windowId: 2 }, true)).toBe(" Runway sent a notification to your devices.");
+    expect(windows).toEqual([[2, { drawAttention: true }]]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://runway.example/api/ext/signin");
+    expect(JSON.parse(init.body)).toEqual({ retailer: "costco" });
+  });
+
+  it("doesn't say a notification was sent when it wasn't", async () => {
+    const { w: s } = signInWorker();
+    reply({ notified: false, why: "no_devices" });
+    expect(await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, true)).toBe("");
+    reply({ error: "Runway doesn't know this key." }, 401);
+    expect(await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, true)).toBe("");
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    expect(await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, true)).toBe("");
+  });
+
+  it("carries on once the tab is past the sign-in, once", async () => {
+    const { w: s, data } = signInWorker();
+    await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, false);
+    const resume = vi.fn();
+    await s.tabLoaded(5, AMAZON_SIGNIN, resume);          // still signing in
+    await s.tabLoaded(6, AMAZON_PAYMENTS, resume);        // another tab
+    await s.tabLoaded(5, undefined, resume);              // a page the extension can't see
+    expect(resume).not.toHaveBeenCalled();
+    // A sign-in's redirects land twice in a row: one import.
+    await Promise.all([s.tabLoaded(5, AMAZON_PAYMENTS, resume), s.tabLoaded(5, AMAZON_PAYMENTS, resume)]);
+    expect(resume.mock.calls).toEqual([["amazon"]]);
+    expect(data.signIns).toEqual({});
+  });
+
+  it("stops carrying on by itself when the store keeps asking", async () => {
+    const { w: s, data } = signInWorker();
+    const resume = vi.fn();
+    for (let i = 0; i < 4; i++) {
+      await s.waitForSignIn("target", { id: 7, windowId: 1 }, false);
+      await s.tabLoaded(7, "https://www.target.com/orders", resume);
+    }
+    expect(resume).toHaveBeenCalledTimes(3);
+    expect(data.signIns).toEqual({});   // the next import is yours to start
+  });
+
+  it("stops waiting when the tab is closed, or after a while", async () => {
+    const { w: s, data } = signInWorker();
+    const resume = vi.fn();
+    await s.waitForSignIn("amazon", { id: 5, windowId: 2 }, false);
+    await s.waitForSignIn("carta", { id: 8, windowId: 2 }, false);
+    await s.forgetSignIns((_r, wait) => wait.tabId === 5);
+    expect(Object.keys(data.signIns as object)).toEqual(["carta"]);
+    (data.signIns as Record<string, { until: number }>).carta.until = Date.now() - 1;
+    await s.tabLoaded(8, "https://app.carta.com/investors/", resume);
+    expect(resume).not.toHaveBeenCalled();
+    expect(data.signIns).toEqual({});
   });
 });
