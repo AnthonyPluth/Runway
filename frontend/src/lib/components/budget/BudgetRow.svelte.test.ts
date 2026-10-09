@@ -27,7 +27,7 @@ const setup = (c = cat(), extra: Record<string, unknown> = {}) => {
 };
 const bar = () => screen.getByRole("img", { name: /of budget used/ });
 
-beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
+beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); vi.mocked(toast).mockClear(); });
 
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
@@ -303,9 +303,81 @@ describe("BudgetRow", () => {
       expect(btn).not.toHaveClass("hoverable:opacity-0");
       await userEvent.click(btn);
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", month: "2026-03", amount: "" } });
-      expect(toast.success).toHaveBeenCalledWith("Groceries is back to $500 in Mar 2026");
+      expect(toast).toHaveBeenCalledWith("Groceries is back to $500 in Mar 2026", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
       expect(onsave).not.toHaveBeenCalled();
       expect(onchanged).toHaveBeenCalled();
+    });
+
+    describe("Reset to usual", () => {
+      const own = (v: number) => cat({ budget: v, usual_budget: 500, month_budget: v, left: v - 200 });
+      const reset = () => screen.getByRole("button", { name: /^Reset to usual/ });
+      const undoAction = () => {
+        const call = vi.mocked(toast).mock.calls.at(-1)!;
+        const { action } = call[1] as unknown as { action: { onClick: () => Promise<void> } };
+        return action;
+      };
+      const posts = () => vi.mocked(api).mock.calls.map((x) => (x[1] as { body: unknown }).body);
+
+      it("is a visible button beside the note, only while the month has its own amount", () => {
+        const { unmount } = render(BudgetRow, { c: own(800), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() });
+        expect(reset()).toBeVisible();
+        expect(reset().className).not.toMatch(/hoverable|opacity-0|group-hover/);
+        expect(reset().closest("[data-month-note]")).toHaveTextContent("Mar 2026 only · $500 other months");
+        unmount();
+        render(BudgetRow, { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() });
+        expect(screen.queryByRole("button", { name: /^Reset to usual/ })).not.toBeInTheDocument();
+      });
+
+      it("clears the month's amount from the keyboard and offers Undo", async () => {
+        const { onchanged } = setup(own(800), { budgets: true });
+        reset().focus();
+        await userEvent.keyboard("{Enter}");
+        expect(posts()).toEqual([{ category: "Groceries", month: "2026-03", amount: "" }]);
+        expect(toast).toHaveBeenCalledWith("Groceries is back to $500 in Mar 2026", expect.anything());
+        expect(onchanged).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([0, 0.1, 1234567.89, 99999999])("Undo puts back exactly %s", async (v) => {
+        const { onchanged } = setup(own(v), { budgets: true });
+        await userEvent.click(reset());
+        await undoAction().onClick();
+        expect(posts()).toEqual([
+          { category: "Groceries", month: "2026-03", amount: "" },
+          { category: "Groceries", month: "2026-03", amount: String(v) },
+        ]);
+        expect(Number((posts()[1] as { amount: string }).amount)).toBe(v);
+        expect(onchanged).toHaveBeenCalledTimes(2);
+      });
+
+      it("Undo restores the month it was taken from, after another is on screen", async () => {
+        const props = { c: own(0.1), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() };
+        const { rerender } = render(BudgetRow, props);
+        await userEvent.click(reset());
+        await rerender({ ...props, c: cat({ usual_budget: 500 }), month: "2026-04" });
+        await undoAction().onClick();
+        expect(posts()[1]).toEqual({ category: "Groceries", month: "2026-03", amount: "0.1" });
+      });
+
+      it("shows the error and keeps the month's amount when the request fails", async () => {
+        vi.mocked(api).mockRejectedValueOnce(new Error("Couldn’t reach the server"));
+        vi.mocked(toast).mockClear();
+        const { onchanged } = setup(own(800), { budgets: true });
+        await userEvent.click(reset());
+        expect(toast.error).toHaveBeenCalledWith("Couldn’t reach the server");
+        expect(toast).not.toHaveBeenCalled();   // no "back to the usual" message, no Undo for something that didn't happen
+        expect(screen.getByLabelText("Budget for Groceries in Mar 2026")).toHaveValue("800");
+        expect(screen.getByText(/Mar 2026 only/)).toBeInTheDocument();
+        expect(reset()).toBeEnabled();   // can be tried again
+        expect(onchanged).toHaveBeenCalledTimes(1);   // reloads, so the row shows what's saved
+      });
+
+      it("shows the error when Undo fails", async () => {
+        setup(own(800), { budgets: true });
+        await userEvent.click(reset());
+        vi.mocked(api).mockRejectedValueOnce(new Error("Set a budget for this category first"));
+        await undoAction().onClick();
+        expect(toast.error).toHaveBeenCalledWith("Set a budget for this category first");
+      });
     });
 
     it("reloads after a failed save, so the box shows what's saved", async () => {

@@ -13,6 +13,7 @@
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
   import { act } from "$lib/act";
+  import { undoable } from "$lib/undo";
 
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
   // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
@@ -64,6 +65,7 @@
   const usual = $derived(c.usual_budget ?? c.budget);
   const monthName = $derived(monthShort(month, true));
   async function saveMonth(amount: string) {
+    if (!amount && ownMonth) { await resetMonth(); return; }
     await act(async () => {
       const r = await apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: c.name, month, amount } });
       const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)} in ${monthName}`);
@@ -73,8 +75,28 @@
     choosingFor = null;
     onchanged();   // the page reloads either way, so a box whose save failed shows what's saved again
   }
+  // The month goes back to the usual amount (the "Reset to usual" button, the calendar button once the month has its own,
+  // or an empty box). The toast's Undo sets the month's own amount again, exactly as it was (0 included), for the month
+  // and category it was taken from, whatever is on screen by then. A failed reset leaves the month's amount as it is.
+  let resetting = $state(false);
+  async function resetMonth() {
+    const [name, was, at, label, back] = [c.name, c.month_budget, month, monthName, usual];
+    const post = (amount: string) => apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: name, month: at, amount } });
+    const done = await act(async () => {
+      await post("");
+      if (was != null) {
+        undoable(`${name} is back to ${fmt0(back)} in ${label}`, async () => {
+          await post(String(was));
+          onchanged();
+          return `${name}: ${money(was)} in ${label} only`;
+        });
+      }
+    }, { busy: (on) => (resetting = on) });
+    if (done) choosingFor = null;
+    onchanged();   // the page reloads either way, so a failed reset shows what's saved again
+  }
   function toggleMonth() {
-    if (ownMonth) { saveMonth(""); return; }
+    if (ownMonth) { resetMonth(); return; }
     const on = !choosing;
     choosingFor = on ? month : null;
     if (on) box?.focus();
@@ -172,6 +194,14 @@
   {/if}
   {#if budgets && c.budget != null && monthOnly}
     <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")} data-month-note>
-      {ownMonth ? `${monthName} only` : `Changing ${monthName} only`} · {money(usual)} other months</p>
+      {ownMonth ? `${monthName} only` : `Changing ${monthName} only`} · {money(usual)} other months
+      {#if ownMonth}
+        <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
+        <button type="button" onclick={resetMonth} disabled={resetting} data-month-reset
+          aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
+          class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
+          Reset to usual</button>
+      {/if}
+    </p>
   {/if}
 </div>

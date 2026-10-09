@@ -91,6 +91,18 @@ class BudgetMonthTests(DbCase):
         self.assertEqual(self.save("Fancy", month=NEXT, amount=50)["raised"], [])   # never lowered
         self.assertEqual(self.months("Restaurants"), {NEXT: 300.0})
 
+    def test_a_new_usual_amount_compares_usual_amounts_and_ignores_a_parents_lower_month(self):
+        # Without a month the usual amounts are compared: a parent's own amount for a month, lower or not, isn't looked at.
+        # It stays lower than its subcategories' usual amounts added up, as the user set it; it is raised only when a
+        # subcategory's amount for that month is set.
+        categories.add(self.c, "Fancy", parent="Restaurants")
+        self.save("Fancy", amount=100)
+        self.save("Restaurants", month=NEXT, amount=40)
+        self.assertEqual(self.save("Fancy", amount=200), {"ok": True, "raised": []})   # 200 is under Restaurants' usual 250
+        self.assertEqual(self.months("Restaurants"), {NEXT: 40.0})
+        self.assertEqual(self.save("Fancy", amount=400)["raised"], [{"category": "Restaurants", "amount": 400.0}])   # the usual one
+        self.assertEqual((self.row("Restaurants")["usual_budget"], self.months("Restaurants")), (400, {NEXT: 40.0}))
+
     def test_an_income_month_of_its_own(self):   # a bonus month
         self.save("Income", amount=5000)
         self.save("Income", month=NEXT, amount=8000)
