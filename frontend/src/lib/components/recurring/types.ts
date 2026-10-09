@@ -18,6 +18,8 @@ export interface RecurringValues {
   amount_max: number | string | null;
   /** "Ends on": the last day it can come (blank: it carries on). */
   end_date: string;
+  /** The category a transaction linked to it takes (blank: none). */
+  category: string;
 }
 
 /** GET /api/recurring: a row of the recurring table, plus what's been matched and when it's next due. */
@@ -35,6 +37,7 @@ export interface RecurringItem {
   amount_min?: number | null;
   amount_max?: number | null;
   end_date?: string | null;
+  category?: string | null;
   active: number;
   matched_count: number;
   expected_amount?: number | null;

@@ -142,12 +142,13 @@ class PaymentModeTests(LedgerCase):
         self.assertEqual(self.payments(fc)["2026-10-05"], 500.0)
 
     def test_a_credit_on_the_card_carries_into_the_next_statement(self):
-        self.tx("cc", "2026-09-22", 1000.0, "STORE REFUND", "Refunds")
+        self.tx("cc", "2026-09-22", 1500.0, "STORE REFUND", "Refunds")
         fc = forecast.build(self.conn, TODAY, 90)
         c = self.card(fc)
-        self.assertEqual((c["pay_mode"], c["new_charges"], c["credit"], c["payment"], c["carried"]), ("full", 0.0, 700.0, 600.0, 0.0))
-        s1 = -700 + self.INSURANCE
-        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-12-07": round(s1 + self.EST2, 2)})
+        self.assertEqual((c["pay_mode"], c["remaining"], c["new_charges"], c["credit"], c["payment"], c["carried"]),
+                         ("full", 0.0, 0.0, 600.0, 0.0, 0.0))
+        s1 = -600 + self.INSURANCE
+        self.assertEqual(self.payments(fc), {"2026-12-07": round(s1 + self.EST2, 2)})
         self.assertTrue(all(e["amount"] < 0 for e in fc["events"] if e["kind"] == "card"))
         self.assertFalse(self.interest_warned(fc))
         self.pay("fixed", amount="5000")
@@ -162,10 +163,9 @@ class PaymentModeTests(LedgerCase):
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
-        s1 = -700 + self.INSURANCE + 300 + 500 / 31 * 10
+        s1 = -100 + self.INSURANCE + 300 + 500 / 31 * 10
         p = self.payments(fc)
-        self.assertEqual(set(p), {"2026-10-05", "2026-11-05", "2026-12-07"})
-        self.assertEqual(p["2026-10-05"], 600.0)
+        self.assertEqual(set(p), {"2026-11-05", "2026-12-07"})
         self.assertAlmostEqual(p["2026-11-05"], s1, delta=0.01)
         self.assertAlmostEqual(p["2026-12-07"], self.INSURANCE + 500 / 31 * 21 + 500 / 30 * 10, delta=0.01)
 
@@ -272,3 +272,76 @@ class PaymentModeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         i1 = (550 + charged / 2) * 0.02
         self.assertAlmostEqual(self.payments(fc)["2026-11-05"], self.minimum(550 + i1 + charged, i1), delta=0.01)
+
+
+class RemainingDueTests(LedgerCase):
+    """A closed statement's payment is what's left of it: payments and posted credits since the close come off it, new
+    charges don't add to it, and one with nothing left isn't paid. The card's statement is $800 with $200 paid and $300
+    charged since it closed (forecast_support.card_setup)."""
+    card_setup = fs.card_setup
+    pay = fs.pay
+
+    def setUp(self):
+        super().setUp()
+        self.card_setup()
+
+    def card(self, fc):
+        return next(c for c in fc["cards"] if c["id"] == "cc")
+
+    def payments(self, fc):
+        return {e["date"]: -e["amount"] for e in fc["events"] if e["kind"] == "card"}
+
+    def test_a_refund_after_the_close_comes_off_the_payment(self):
+        self.tx("cc", "2026-09-21", 150.0, "STORE REFUND", "Refunds")
+        fc = forecast.build(self.conn, TODAY, 90)
+        c = self.card(fc)
+        self.assertEqual((c["paid_since_close"], c["credits_since_close"], c["remaining"], c["payment"], c["carried"]),
+                         (200.0, 150.0, 450.0, 450.0, 0.0))
+        self.assertEqual((c["new_charges"], c["credit"]), (300.0, 0.0))
+        self.assertEqual(self.payments(fc), {"2026-10-05": 450.0, "2026-11-05": 300.0})
+
+    def test_paid_off_by_payments_and_credits_leaves_no_payment(self):
+        self.tx("cc", "2026-09-18", 100.10, "STORE REFUND", "Refunds")
+        self.tx("cc", "2026-09-19", 499.90, "STATEMENT CREDIT", "Travel")
+        fc = forecast.build(self.conn, TODAY, 90)
+        c = self.card(fc)
+        self.assertEqual((c["remaining"], c["payment"], c["carried"], c["credit"]), (0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(c["new_charges"], 300.0)
+        self.assertEqual(self.payments(fc), {"2026-11-05": 300.0})
+        self.assertFalse(any("no payment has shown up" in w for w in fc["warnings"]))
+
+    def test_a_cent_left_is_still_paid(self):
+        self.tx("cc", "2026-09-18", 599.99, "STORE REFUND", "Refunds")
+        self.assertEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-10-05"], 0.01)
+
+    def test_new_charges_dont_add_to_it(self):
+        self.tx("cc", "2026-09-22", -1000.0, "TV", "Shopping")
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual((self.card(fc)["remaining"], self.card(fc)["payment"]), (600.0, 600.0))
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": 1300.0})
+
+    def test_a_pending_credit_waits_until_it_posts(self):
+        self.tx("cc", "2026-09-22", 150.0, "STORE REFUND", "Refunds", pending=1)
+        fc = forecast.build(self.conn, TODAY, 90)
+        c = self.card(fc)
+        self.assertEqual((c["credits_since_close"], c["remaining"], c["payment"], c["new_charges"]), (0.0, 600.0, 600.0, 150.0))
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": 150.0})
+
+    def test_a_minimum_or_fixed_payment_is_never_more_than_whats_left(self):
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        self.pay("minimum")
+        self.tx("cc", "2026-09-18", 500.0, "STORE REFUND", "Refunds")
+        c = self.card(forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["remaining"], c["payment"], c["carried"]), (100.0, 50.0, 50.0))
+        self.tx("cc", "2026-09-19", 80.0, "STORE REFUND", "Refunds")
+        c = self.card(forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["remaining"], c["payment"], c["carried"]), (20.0, 20.0, 0.0))
+        self.pay("fixed", amount="300")
+        c = self.card(forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["remaining"], c["payment"], c["carried"]), (20.0, 20.0, 0.0))
+
+    def test_a_statement_you_entered_comes_down_the_same_way(self):
+        self.conn.execute(insert(Override).values(key="stmt:cc:2026-09-10", amount=-700.0))
+        self.tx("cc", "2026-09-18", 250.0, "STORE REFUND", "Refunds")
+        c = self.card(forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["statement_balance"], c["remaining"], c["payment"]), (700.0, 250.0, 250.0))

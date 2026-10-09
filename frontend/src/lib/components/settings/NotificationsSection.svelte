@@ -73,6 +73,7 @@
     { k: "big_charge", label: "Large charge", hint: "A large charge posts", num: ["big_charge_over", "over $", "", 50] },
     { k: "review", label: "Transactions waiting for review", hint: "Transactions are waiting for a category (at most once a day)" },
     { k: "sync_failed", label: "Bank sync failing for a day", hint: "Syncing with your bank has been failing for a day" },
+    { k: "ext_signin", label: "Browser extension needs a sign-in", hint: "The browser extension's daily import is waiting for you to sign in to a store" },
     { k: "churn_fee", label: "Card annual fee coming up", hint: "A churning card's annual fee is due within 30 days (unless you're keeping it or have a plan for it)" },
     { k: "churn_bonus", label: "Sign-up bonus deadline near", hint: "A card or bank bonus deadline is within 14 days, with requirements left" },
     { k: "churn_plan", label: "Time for a planned card change", hint: "It's time to downgrade, close or change a card, as you planned" },

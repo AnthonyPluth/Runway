@@ -10,9 +10,9 @@ import zipfile
 from sqlalchemy import select
 
 from ...providers import carta_web
-from ...domain import categorize, retail
+from ...domain import categorize, notify, retail
 from ...storage import db
-from ... import monitoring, validate
+from ... import monitoring, oidc, validate
 from ...storage import settings_keys as sk
 from ...storage.models import RetailCharge
 from ..common import ApiError, Response, _current, download, own_session, row_id, text
@@ -259,11 +259,33 @@ def _categorize_later(retailer: str) -> None:
     threading.Thread(target=_categorize_retail, args=(retailer,), daemon=True).start()
 
 
+EXT_SIGNIN_STORES = {**retail.NAMES, "carta": "Carta"}   # the stores the extension may need you to sign in to
+
+
+def _key_owner(conn) -> str | None:
+    """Whose devices hear about the extension: the key's maker with sign-in (their key ends with their access, so a
+    call here is still theirs), and every device without it (notify.person)."""
+    owner = retail.token_owner(conn)
+    return owner["sub"] if owner and oidc.enabled() else None
+
+
+def ext_signin(conn, body):
+    """The extension's import out of sight stopped for a sign-in to a store, and opened that store's sign-in page:
+    tell the key's maker on their devices (once until the import carries on: notify.ext_signin). The reply says
+    whether anything was delivered, so the extension doesn't say it was when it wasn't."""
+    retailer = body.get("retailer")
+    if not isinstance(retailer, str) or retailer not in EXT_SIGNIN_STORES:
+        raise retail.RetailError("Unknown store")
+    r = notify.ext_signin(conn, retailer, EXT_SIGNIN_STORES[retailer], _key_owner(conn))
+    return {"notified": r["sent"] > 0, "why": r["why"]}
+
+
 def ext_finish(conn, body):
     """Matches and answers straight away; categorizing the new items (the AI model can take a while, longer than
     the browser lets the extension wait) carries on after the answer, once this request's writes are saved."""
     retailer = body.get("retailer")
     out = retail.finish(conn, retailer, complete=body.get("complete", True) is not False, categorize_now=False)
+    notify.ext_resumed(conn, retailer, _key_owner(conn))
     conn.commit()
     _categorize_later(retailer)
     return out
@@ -276,13 +298,19 @@ def ext_carta_data(conn, body):
         raise retail.RetailError(str(e)) from e
 
 
+def ext_carta_finish(conn, body):
+    out = carta_web.finish(conn)
+    notify.ext_resumed(conn, "carta", _key_owner(conn))
+    return out
+
+
 EXT_ROUTES = {
     "/api/ext/ping": lambda conn, body: {"ok": True},
     # Charges still without a transaction, now (you may have matched some yourself since the last import).
     "/api/ext/status": lambda conn, body: {"unmatched": {r: retail.unmatched_count(conn, r) for r in retail.RETAILERS}},
     "/api/ext/carta/start": lambda conn, body: carta_web.start(conn),
     "/api/ext/carta/data": ext_carta_data,
-    "/api/ext/carta/finish": lambda conn, body: carta_web.finish(conn),
+    "/api/ext/carta/finish": ext_carta_finish,
     "/api/ext/start": ext_start,
     "/api/ext/amazon/transactions": ext_amazon_transactions,
     "/api/ext/amazon/order": ext_amazon_order,
@@ -290,6 +318,7 @@ EXT_ROUTES = {
     "/api/ext/target/order": ext_target_order,
     "/api/ext/costco/history": ext_costco_history,
     "/api/ext/finish": ext_finish,
+    "/api/ext/signin": ext_signin,
 }
 MAX_EXT_BODY = 16 * 1024 * 1024      # one store page (Amazon's order pages are large)
 EXTENSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "extension")

@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from ..storage import db
 from . import rules
-from ..storage.models import Account, Budget, Category, RetailItem, RetailItemMemory, Transaction, TxSplit
+from ..storage.models import Account, Budget, Category, Recurring, RetailItem, RetailItemMemory, Transaction, TxSplit
 
 MAX_DEPTH = 2   # levels including the top one: Food > Restaurants
 
@@ -225,6 +225,7 @@ def rename(conn, old: str, new: str) -> None:
     _recategorize(conn, RetailItem, old, new)   # order items, and what's remembered
     _recategorize(conn, RetailItemMemory, old, new)
     rules.rename_category(conn, old, new)
+    _recategorize(conn, Recurring, old, new)
     _recategorize(conn, Budget, old, new)
 
 
@@ -249,6 +250,7 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
         n += _recategorize(conn, TxSplit, name, move_to)
         _recategorize(conn, RetailItem, name, move_to)
         _recategorize(conn, RetailItemMemory, name, move_to)
+        _recategorize(conn, Recurring, name, move_to)
         rules.rename_category(conn, name, move_to)
     else:
         t = Transaction
@@ -264,6 +266,7 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
         conn.execute(update(RetailItem).where(RetailItem.category == name).values(
             category=None, category_source=None, confidence=None))
         conn.execute(delete(RetailItemMemory).where(RetailItemMemory.category == name))
+        conn.execute(update(Recurring).where(Recurring.category == name).values(category=None))   # its items just have none
         rules.forget_category(conn, name)
     conn.execute(delete(Budget).where(Budget.category == name))
     conn.execute(delete(Category).where(Category.name == name))
