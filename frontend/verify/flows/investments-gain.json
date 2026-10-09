@@ -4,6 +4,7 @@
   "steps": [
     { "goto": "#networth/investments" },
     { "wait_for": "#inv-holdings tbody tr" },
+    { "scroll_to": "#inv-holdings" },
     { "screenshot": "holdings" }
   ]
 }

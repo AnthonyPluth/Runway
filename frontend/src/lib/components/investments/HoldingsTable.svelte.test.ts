@@ -71,6 +71,11 @@ describe("HoldingsTable", () => {
     expect(within(screen.getAllByRole("row")[1]).getByText("+$500.00").closest("td")).toHaveClass("text-center");
   });
 
+  it("doesn't repeat the day change under the holding at desktop width, where it has its own column", () => {
+    setup([holding({ day_change: -30, day_change_pct: -0.012 })]);
+    expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
+  });
+
   it("shows a dash instead of a gain when the cost basis is unknown, and offers to add it", () => {
     setup([holding({ gain: null, gain_pct: null, day_change: null, day_change_pct: null, cost_known: false })]);
     const row = screen.getAllByRole("row")[1];
@@ -130,6 +135,24 @@ describe("HoldingsTable", () => {
       expect(gainCell).not.toHaveClass("max-[1279px]:hidden");   // shown at phone and tablet widths, not clipped
       expect(within(row).getByText("$2,500.00").closest("td")).not.toHaveTextContent("+$500.00");
       expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
+    });
+
+    it("shows each holding's day change in dollars and percent on a line under its quantity, coloured", () => {
+      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
+      const [down, up] = screen.getAllByRole("row").slice(1).map((r) => r.querySelector("[data-day-change]") as HTMLElement);
+      expect(down).toHaveTextContent("Today −$30.00 (−1.20%)");
+      expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
+      expect(within(down).getByText("(−1.20%)")).toHaveClass("text-loss");
+      expect(up).toHaveTextContent("Today +$12.50 (+0.40%)");
+      expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
+      expect(within(up).getByText("(+0.40%)")).toHaveClass("text-good");
+      expect(down.previousElementSibling).toHaveTextContent("10 × $250.00");   // its own line, not crammed into the quantity line
+      expect(down.previousElementSibling).not.toHaveTextContent("Today");
+    });
+
+    it("leaves the day-change line off when the day's change isn't known", () => {
+      setup([holding({ day_change: null, day_change_pct: null })]);
+      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
     });
 
     it("sorts by gain from the Total gain column header", async () => {

@@ -15,6 +15,11 @@ describe("flowProblems", () => {
     expect(bad[2]).toMatch(/step 3 must have exactly one of/);
   });
 
+  it("accepts a scroll_to step, which takes a selector", () => {
+    expect(flowProblems({ ...ok, steps: [{ scroll_to: "#inv-holdings" }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ scroll_to: 3 }] })).toEqual(["step 1: scroll_to takes a string"]);
+  });
+
   it("rejects a viewport it doesn't know", () => expect(flowProblems({ ...ok, viewports: ["watch"] })).toEqual(["unknown viewport watch"]));
 
   it("rejects a page the app doesn't have, so a typo can't pass for a clean run", () => {

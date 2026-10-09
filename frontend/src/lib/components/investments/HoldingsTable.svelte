@@ -120,8 +120,14 @@
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
                 {#if narrow.on}
                 <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                  {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{x.day_change != null ? ` · today ${signed(x.day_change)}` : ""} · {share(x.allocation)}
+                  {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{" "}· {share(x.allocation)}
                 </div>
+                {#if x.day_change != null}
+                  <!-- The day's change, on its own line under the quantity so the row stays short; hidden from 1280px, where it has its column -->
+                  <div class="mt-0.5 text-xs tabular-nums" data-day-change>
+                    <span class="text-muted-foreground">Today</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change))}>{signed(x.day_change)}</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change_pct))}>({pct(x.day_change_pct, 2)})</span>
+                  </div>
+                {/if}
                 <div>{@render costBasis(x)}</div>
                 {/if}
               </div>
