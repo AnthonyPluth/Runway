@@ -676,7 +676,7 @@
       },
       "BudgetSuggestions": {
         "type": "object",
-        "description": "GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history\nlooked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`).",
+        "description": "GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history\nlooked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the\nmonth asked for when it's still to come, else next month; never past the forecast's reach).",
         "properties": {
           "months": {
             "type": "integer"

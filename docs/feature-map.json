@@ -689,6 +689,7 @@
         "frontend/src/lib/components/budget/BudgetSuggest.svelte"
       ],
       "tests": [
+        "tests/test_api_contract.py",
         "tests/test_budget_suggest.py"
       ],
       "docs": [

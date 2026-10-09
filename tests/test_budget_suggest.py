@@ -127,6 +127,12 @@ class Endpoint(DbCase):
         with self.assertRaises(ApiError):
             api.api_budget_suggestions(self.c, {"month": ["soon"]}, {})
 
+    def test_a_month_beyond_the_forecast_counts_the_last_month_it_reaches(self):
+        demo.seed(self.c, TODAY)
+        out = api.api_budget_suggestions(self.c, {"month": ["2028-06"]}, {})
+        self.assertEqual(out["recurring_month"], "2027-09")   # TODAY + EXPECTED_DAYS (366) falls in September 2027
+        self.assertTrue(any(s["recurring"] >= 2140.0 for s in out["suggestions"]))   # the sample mortgage, then
+
     def test_an_empty_database(self):
         out = api.api_budget_suggestions(self.c, {}, {})
         self.assertEqual((out["months"], out["first"], out["last"], out["suggestions"]), (0, None, None, []))

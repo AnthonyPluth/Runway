@@ -110,7 +110,8 @@ export interface BudgetSuggestion {
 
 /**
  * GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history
- * looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`).
+ * looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the
+ * month asked for when it's still to come, else next month; never past the forecast's reach).
  */
 export interface BudgetSuggestions {
   months: number;
