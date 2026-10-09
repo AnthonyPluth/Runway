@@ -137,7 +137,7 @@
       <FieldNote {uid} name="product" errors={form.errors} />
     </div>
     {#if canSuggest}
-      <AiButton busy={ai.suggesting} busyLabel="Asking…" label="Fill in the rest with AI" disabled={!v.product.trim()} onclick={ai.suggest}
+      <AiButton busy={ai.suggesting} busyLabel="Filling in…" label="Fill in the rest" disabled={!v.product.trim()} onclick={ai.suggest}
         title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent." />
       <span class="self-center text-xs text-muted-foreground" data-testid="ai-consent">Sends only the bank and card name.</span>
     {/if}

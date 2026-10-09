@@ -182,7 +182,7 @@
   {/if}
   {#if review && app.state?.has_api_key}
     {#if txs.list && txs.count > 0}
-      <AiButton busy={aiStatus === "asking"} busyLabel="Asking the AI…" label={aiStatus === "asked" ? "Ask again" : "Suggest categories"}
+      <AiButton busy={aiStatus === "asking"} busyLabel="Suggesting…" label={aiStatus === "asked" ? "Ask again" : "Suggest categories"}
         onclick={() => ai?.run()} />
     {/if}
   {:else if review && app.state?.connected}

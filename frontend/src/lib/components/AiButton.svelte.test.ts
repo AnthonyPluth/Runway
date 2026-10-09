@@ -23,8 +23,8 @@ describe("AiButton", () => {
 
   it("swaps to the busy label and can't be clicked while busy", async () => {
     const onclick = vi.fn();
-    render(AiButton, { label: "Suggest categories", busyLabel: "Asking the AI…", busy: true, onclick });
-    const button = screen.getByRole("button", { name: "Asking the AI…" });
+    render(AiButton, { label: "Suggest categories", busyLabel: "Suggesting…", busy: true, onclick });
+    const button = screen.getByRole("button", { name: "Suggesting…" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
     await userEvent.click(button);
@@ -32,8 +32,8 @@ describe("AiButton", () => {
   });
 
   it("is disabled on request and passes the tooltip through", () => {
-    render(AiButton, { label: "Fill in the rest with AI", disabled: true, title: "Asks an AI model", onclick: vi.fn() });
-    const button = screen.getByRole("button", { name: "Fill in the rest with AI" });
+    render(AiButton, { label: "Fill in the rest", disabled: true, title: "Asks an AI model", onclick: vi.fn() });
+    const button = screen.getByRole("button", { name: "Fill in the rest" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "Asks an AI model");
     expect(button).not.toHaveAttribute("aria-busy");

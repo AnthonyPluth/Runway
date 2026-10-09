@@ -4,7 +4,7 @@
   "steps": [
     { "goto": "#churning/cards" },
     { "click": "button:has-text('Add a card')" },
-    { "wait_for": "button[aria-label='Fill in the rest with AI']" },
+    { "wait_for": "button[aria-label='Fill in the rest']" },
     { "screenshot": "form" }
   ]
 }

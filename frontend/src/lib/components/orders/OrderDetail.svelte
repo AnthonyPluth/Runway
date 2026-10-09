@@ -104,7 +104,7 @@
     {#if o.items.length}
       {#if o.items.some((x) => !x.category)}
         <div class="flex items-center gap-2">
-          <AiButton busy={asking} busyLabel="Asking the AI…" label="Suggest categories with AI" onclick={suggest}
+          <AiButton busy={asking} busyLabel="Suggesting…" label="Suggest categories" onclick={suggest}
             title="For the items with no category; it can propose a new one" />
         </div>
       {/if}
