@@ -554,9 +554,13 @@ class HandlerTests(DbCase):
             with self.assertRaises(ApiError):   # the Sync button asks Plaid every time
                 sync.run_sync(ask_plaid=True)
             self.assertEqual(pb.call_count, 2)
-        log =self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
-        self.assertEqual(tuple(log), (0, "Couldn't reach SimpleFIN: timed out"))   # still a failed sync, so it's retried
-        self.assertIsNone(db.get_setting(self.c, "last_sync_ok"))
+            pb.return_value = {"items": 1, "new": [], "errors": ["Chase: Plaid: the login needs renewing"]}
+            with self.assertRaises(ApiError) as cm:   # what Plaid said goes with the failure, so it isn't lost
+                sync.run_sync(ask_plaid=True)
+            self.assertIn("Chase: Plaid: the login needs renewing", str(cm.exception))
+        log = self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
+        self.assertEqual(tuple(log), (0, "Couldn't reach SimpleFIN: timed out; Chase: Plaid: the login needs renewing"))
+        self.assertIsNone(db.get_setting(self.c, "last_sync_ok"))   # still a failed sync, so SimpleFIN is retried
         self.assertTrue(db.get_setting(self.c, "last_plaid_bank_sync"))
 
     def test_the_sync_button_asks_plaid(self):

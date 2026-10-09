@@ -103,6 +103,8 @@ def run_sync(ask_plaid: bool = False) -> dict:
                 networth.summary(conn)   # record today's net worth
                 if simplefin_failed is not None:
                     conn.commit()   # what Plaid brought in is kept; the failure is recorded with SimpleFIN's error
+                    if result["errors"]:   # and Plaid's messages with it: only a sync that worked saves the warnings
+                        raise simplefin.SimpleFinError("; ".join([str(simplefin_failed), *result["errors"]])) from simplefin_failed
                     raise simplefin_failed
                 conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
