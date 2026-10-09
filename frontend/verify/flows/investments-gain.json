@@ -1,0 +1,9 @@
+{
+  "name": "investments-gain",
+  "page": "networth",
+  "steps": [
+    { "goto": "#networth/investments" },
+    { "wait_for": "#inv-holdings tbody tr" },
+    { "screenshot": "holdings" }
+  ]
+}
