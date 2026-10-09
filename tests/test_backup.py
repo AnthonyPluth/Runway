@@ -112,7 +112,9 @@ class BackupTests(unittest.TestCase):
         dst = db.connect(self.b)
         backup.restore(dst, data)
         dst.commit()
-        self.assertEqual(self.rows_of(dst), self.rows_of(src))
+        then, now = self.rows_of(src), self.rows_of(dst)
+        self.assertEqual({t: rows for t, rows in now.items() if t in then}, then)
+        self.assertEqual({t: rows for t, rows in now.items() if t not in then}, {"budget_months": []})   # tables added since: empty
         if db.using_postgres():   # the database it was brought up to date in is gone, never committed
             self.assertEqual(dst.sa.exec_driver_sql("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'runway_restore_%%'").scalar(), 0)
         src.close(); dst.close()
