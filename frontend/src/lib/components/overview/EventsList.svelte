@@ -172,14 +172,16 @@
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
-        {#if d.last.has(e)}
-          <span class={["text-[13px] whitespace-nowrap text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}
-            data-phone-balance>{accounts && e.account ? `${e.account} · ` : ""}proj. bal {fmt(e.balance_after ?? 0)}</span>
-        {/if}
       </div>
       {#if open && e.estimate}
         <!-- under the name (past the icon), its amounts lined up under the row's -->
         <EstimateBreakdown estimate={e.estimate} id={`${uid}-${rid}`} class="-mt-2 basis-full pl-11" />
+      {/if}
+      {#if d.last.has(e)}
+        <!-- On a phone, the day's balance is a line of its own under the last row, right-aligned: beside the amount (as it was)
+             a long "account · proj. bal" squeezed the name down to a letter and the "Projected" label wrapped over it. -->
+        <span class={["basis-full text-right text-[13px] text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}
+          data-phone-balance>{accounts && e.account ? `${e.account} · ` : ""}proj. bal {fmt(e.balance_after ?? 0)}</span>
       {/if}
     </div>
   {/each}

@@ -292,6 +292,14 @@ describe("EventsList", () => {
       expect(phone()).toEqual(["proj. bal $900.00"]);
     });
 
+    it("is a line of its own under the row, not in the amount's column, so a long account name can't squeeze the name", () => {
+      show([ev({ account: "Everyday Checking", account_id: "chk" })], { accounts: true, marked: true });
+      const bal = document.querySelector("[data-phone-balance]")!;
+      expect(bal).toHaveClass("basis-full");
+      expect(bal.parentElement).toHaveClass("cell");
+      expect(bal.parentElement).toContainElement(screen.getByText("Rent"));
+    });
+
     it("marks a negative balance", () => {
       show([ev({ balance_after: -20 })]);
       expect(document.querySelector("[data-phone-balance]")).toHaveClass("text-destructive");
