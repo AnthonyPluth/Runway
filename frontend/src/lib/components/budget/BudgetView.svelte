@@ -54,7 +54,7 @@
     if (newCat) saveBudget(newCat, e.currentTarget.value); else toast.error("Choose a category first");
   }
 
-  // The card or account a category's spending goes on (set from a row's ⋯ menu): its own, else the nearest parent's
+  // The card or account a category's spending goes on (Settings → Categories): its own, else the nearest parent's
   // with one, else the one used most for it.
   function accountOf(c: BudgetCategory, bm: BudgetMonth): string | null {
     const chosen = (name: string) => bm.categories.find((x) => x.name === name)?.pay_with;

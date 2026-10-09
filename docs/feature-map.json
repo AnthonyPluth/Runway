@@ -826,7 +826,7 @@
       "path": "/api/categories/pay-with",
       "handler": "runway/server/api/categories.py:api_category_pay_with",
       "web": [
-        "frontend/src/lib/components/budget/BudgetRow.svelte"
+        "frontend/src/lib/components/settings/CategoryRow.svelte"
       ],
       "tests": [
         "tests/test_categories_recurring_pinned.py"

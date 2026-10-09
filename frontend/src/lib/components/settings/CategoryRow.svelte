@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { refreshState, reload } from "$lib/app.svelte";
+  import { autosave } from "$lib/autosave";
   import { CAT_MAX_DEPTH, catLabel, categories, categoryGroups, loadCategories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -17,6 +18,7 @@
   import Trash from "@lucide/svelte/icons/trash";
   import { addCategory } from "./categories";
   import LookPicker from "./LookPicker.svelte";
+  import type { PayAccount } from "$lib/components/budget/types";
   import { dangerGhost, inputCls, selectCls } from "./ui";
   import { act, errMsg } from "$lib/act";
 
@@ -24,7 +26,9 @@
   // + Sub / Move / Remove: icons that show on hover (always, on a touch screen), behind "…" on a phone. + Sub and Move
   // open a small form under the row. Remove asks first when anything uses the category, saying what happens to it;
   // when nothing does, it's removed straight away with an Undo.
-  let { c }: { c: Category } = $props();
+  // A spending category also has the card or account its spending goes on (the budget forecast spends its budget
+  // there): a quiet select after its name, showing the one chosen, or the one that "(automatic)" means.
+  let { c, payAccounts = [] }: { c: Category; payAccounts?: PayAccount[] } = $props();
   const name = $derived(c.name);
   const builtIn = $derived(!!c.protected);
   let mode = $state<"" | "menu" | "sub" | "move">("");
@@ -88,10 +92,42 @@
     return out;
   });
 
+  // Paid with. Automatic is the nearest parent's choice, else the account used most for it.
+  const spending = $derived(!c.is_transfer && !c.is_income);
+  const acctName = (id: string | null | undefined) => (id ? payAccounts.find((x) => x.id === id)?.name : undefined);
+  const inherited = $derived(c.path.slice(0, -1).reverse().map((p) => categories.list.find((x) => x.name === p)).find((x) => x?.pay_with));
+  // The automatic option reads like an explicit one, account first ("Visa (automatic)"), so it fits a phone; why it's
+  // that account goes in the select's tooltip.
+  const automatic = $derived.by(() => {
+    const via = acctName(inherited?.pay_with);
+    if (via) return { label: `${via} (automatic)`, why: `Automatic: the card set on ${inherited!.name}` };
+    const usual = acctName(c.usual_account);
+    return usual ? { label: `${usual} (automatic)`, why: "Automatic: the account used most for it" } : { label: "Automatic", why: "Automatic: the account used most for it, once it has spending" };
+  });
+  const payTitle = $derived(c.pay_with ? "Which card or account this spending goes on; the forecast uses it" : `${automatic.why}; the forecast uses it`);
+  async function savePayWith(f: HTMLSelectElement) {
+    await api("/api/categories/pay-with", { method: "POST", body: { name, pay_with: f.value } });
+    await loadCategories();   // its subcategories' "Automatic" follows it
+  }
+
   function start(m: typeof mode) { mode = m; moveTo = c.parent || ""; subName = ""; }
   const focus = (el: HTMLElement) => { el.focus(); };
   const iconBtn = "size-8 text-muted-foreground hover:text-foreground";
 </script>
+
+{#snippet payWith(cls: string)}
+  <select class={cn(selectCls, "h-8 w-72 max-w-full truncate text-sm md:text-xs hover:border-input dark:bg-transparent phone:h-11 phone:w-full", !c.pay_with && "text-muted-foreground", cls)}
+    value={c.pay_with ?? ""} aria-label={`Account ${name} is paid with`} title={payTitle}
+    use:autosave={(f) => savePayWith(f as HTMLSelectElement)}>
+    <option value="">{automatic.label}</option>
+    <optgroup label="Cards">
+      {#each payAccounts.filter((x) => x.kind === "credit") as x (x.id)}<option value={x.id}>{x.name}</option>{/each}
+    </optgroup>
+    <optgroup label="Bank accounts">
+      {#each payAccounts.filter((x) => x.kind !== "credit") as x (x.id)}<option value={x.id}>{x.name}</option>{/each}
+    </optgroup>
+  </select>
+{/snippet}
 
 <div class="cell group flex-wrap gap-y-1.5 py-1.5" style:padding-left={`${16 + (c.depth || 0) * 22}px`}>
   <LookPicker {c} />
@@ -103,6 +139,7 @@
       <input style:width={c.depth ? `calc(16rem - ${c.depth * 22}px)` : undefined} class={cn(inputCls, "h-8 w-64 max-w-full border-transparent shadow-none dark:bg-transparent hover:border-input focus-visible:border-ring", c.parent && "text-muted-foreground")}
         value={name} aria-label="Category name" onchange={rename} />
     {/if}
+    {#if spending && payAccounts.length}{@render payWith("phone:hidden")}{/if}
   </span>
   <span class="w-10 shrink-0 text-right text-sm text-muted-foreground tabular-nums" title={c.transactions ? plural(c.transactions, "transaction") : undefined}>
     {#if c.transactions}<span class="sr-only">{plural(c.transactions, "transaction")}</span><span aria-hidden="true">{c.transactions}</span>{/if}
@@ -126,6 +163,8 @@
   {#if mode}
     <div class="flex basis-full flex-wrap items-center gap-2 pb-1 pl-11">
       {#if mode === "menu"}
+        <!-- On a phone the paid-with account is here, under "…", so each row stays one line. -->
+        {#if spending && payAccounts.length}<label class="flex w-full flex-col gap-1 text-xs text-muted-foreground desktop:hidden">Paid with{@render payWith("")}</label>{/if}
         {#if canSub}<Button variant="outline" size="sm" onclick={() => start("sub")}>+ Subcategory</Button>{/if}
         {#if !builtIn}
           <Button variant="outline" size="sm" onclick={() => start("move")}>Move</Button>
