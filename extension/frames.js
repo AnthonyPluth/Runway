@@ -1,7 +1,8 @@
 // Where a store is read: a hidden frame (Chrome's offscreen document, Firefox's background page) or, failing that, a
-// background tab. HiddenPage and TabPage answer the same calls, so the importers don't care which they got.
-/* global withTimeout, storeUrl, PAGE_COMMANDS, checkedArgs, sleep, STORE_HOSTS, STORE_MATCHES, store -- from the other files here (see background.js) */
-/* exported stopsImport, importStore */
+// background tab. HiddenPage and TabPage answer the same calls, so the importers don't care which they got. And
+// waiting for you to sign in to a store, in a tab, so its import can carry on.
+/* global withTimeout, storeUrl, PAGE_COMMANDS, checkedArgs, sleep, STORE_HOSTS, STORE_MATCHES, store, runway, signedInAt -- from the other files here (see background.js) */
+/* exported stopsImport, importStore, waitForSignIn, forgetSignIns, tabLoaded */
 
 // ------------------------------------------------------------------------------------------------ pages
 //
@@ -63,8 +64,10 @@ class TabPage {
   async signIn(site, robot = false) {
     this.keep = true;
     await chrome.tabs.update(this.tab.id, { active: true });
-    return new Error(robot ? `Answer ${site}'s robot check in the tab that just opened, then import again.`
-      : `Sign in to ${site} in the tab that just opened, then import again.`);
+    // The import that stopped here waits for you in this tab, and carries on by itself once you're through (signIns).
+    return Object.assign(new Error(robot ? `Answer ${site}'s robot check in the tab that just opened; the import carries on once you have.`
+      : `Sign in to ${site} in the tab that just opened; the import carries on once you have.`),
+    { signInTab: { id: this.tab.id, windowId: this.tab.windowId } });
   }
   async close() { if (!this.keep) await closeTab(this.tab.id); }
 }
@@ -237,4 +240,69 @@ async function importStore(retailer, importer, progress) {
     await store.set({ hiddenOff: { ...hiddenOff, [retailer]: Date.now() } });
   }
   return r;
+}
+
+// ------------------------------------------------------------------------------------------------ waiting for a sign-in
+//
+// A store that wants you to sign in stops its import with its sign-in page in a tab (TabPage.signIn), and that tab
+// comes to the front. When you started the import yourself its window is brought up too; the daily import may run
+// while you're busy with something else, so there the window only asks for attention, and Runway sends a notification
+// to your devices (Settings → Notifications). Once the tab gets past the sign-in, that store's import starts again by
+// itself. The wait ends when the tab is closed, after SIGNIN_WAIT_MS, or if the store keeps asking (SIGNIN_RESUMES).
+
+const SIGNIN_WAIT_MS = 12 * 3600 * 1000;
+const SIGNIN_RESUMES = 3;                  // imports started again by themselves for one store in an hour, at most
+const SIGNIN_RESUME_WINDOW_MS = 3600 * 1000;
+
+// A store's import stopped for a sign-in in `tab` ({id, windowId}). `unattended`: the daily import. Returns what to add
+// to the store's result: that a notification was sent, only when Runway says one was delivered.
+async function waitForSignIn(retailer, tab, unattended) {
+  try {
+    await chrome.windows.update(tab.windowId, unattended ? { drawAttention: true } : { focused: true });
+  } catch (_) { /* its window was closed meanwhile, and the tab with it */ }
+  const { signIns = {} } = await store.get("signIns");
+  await store.set({ signIns: { ...signIns, [retailer]: { tabId: tab.id, until: Date.now() + SIGNIN_WAIT_MS } } });
+  if (!unattended) return "";
+  try {
+    const r = await runway("/api/ext/signin", { retailer });
+    return r.notified ? " Runway sent a notification to your devices." : "";
+  } catch (e) {
+    console.warn(`Runway: no notification for the ${retailer} sign-in (${e.message})`);
+    return "";
+  }
+}
+
+// Stops waiting for the sign-ins `drop(retailer, wait)` picks.
+async function forgetSignIns(drop) {
+  const { signIns = {} } = await store.get("signIns");
+  const keep = Object.fromEntries(Object.entries(signIns).filter(([r, s]) => !drop(r, s)));
+  if (Object.keys(keep).length !== Object.keys(signIns).length) await store.set({ signIns: keep });
+}
+
+// A tab finished loading `url`: if an import is waiting on it and it's past the store's sign-in now, start that
+// store's import again with `resume(retailer)` (not waited for: it can take minutes).
+async function signInProgress(tabId, url, resume) {
+  const { signIns = {}, resumed = {} } = await store.get(["signIns", "resumed"]);
+  const retailer = Object.keys(signIns).find((r) => signIns[r].tabId === tabId);
+  if (!retailer) return;
+  const now = Date.now();
+  if (signIns[retailer].until < now) return forgetSignIns((r) => r === retailer);
+  if (!signedInAt(url)) return;   // still signing in (or on a page the extension can't see, like a store's sign-in host)
+  delete signIns[retailer];
+  const recent = (resumed[retailer] || []).filter((t) => t > now - SIGNIN_RESUME_WINDOW_MS);
+  if (recent.length >= SIGNIN_RESUMES) {   // it keeps asking: the next import is yours to start
+    await store.set({ signIns });
+    return;
+  }
+  await store.set({ signIns, resumed: { ...resumed, [retailer]: [...recent, now] } });
+  resume(retailer);
+}
+
+// One tab load at a time, so a sign-in's redirects can't start the same import twice.
+let signInChain = Promise.resolve();
+function tabLoaded(tabId, url, resume) {
+  if (!url) return signInChain;   // a page the extension may not see: not a store page past its sign-in either
+  signInChain = signInChain.then(() => signInProgress(tabId, url, resume))
+    .catch((e) => console.warn(`Runway: waiting for a sign-in: ${e.message}`));
+  return signInChain;
 }
