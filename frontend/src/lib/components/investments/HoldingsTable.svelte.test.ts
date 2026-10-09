@@ -132,6 +132,29 @@ describe("HoldingsTable", () => {
       expect(heads.indexOf("value")).toBeLessThan(heads.indexOf("gain"));
       expect(within(screen.getAllByRole("row")[1]).getByText("$2,500.00").closest("td")!.cellIndex).toBe(heads.indexOf("value"));
     });
+
+    it("shows each holding's day change in dollars and percent on a line under its quantity, coloured", () => {
+      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
+      const [down, up] = screen.getAllByRole("row").slice(1).map((r) => r.querySelector("[data-day-change]") as HTMLElement);
+      expect(down).toHaveTextContent("Today −$30.00 (−1.20%)");
+      expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
+      expect(within(down).getByText("(−1.20%)")).toHaveClass("text-loss");
+      expect(up).toHaveTextContent("Today +$12.50 (+0.40%)");
+      expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
+      expect(within(up).getByText("(+0.40%)")).toHaveClass("text-good");
+      expect(down.previousElementSibling).toHaveTextContent("10 × $250.00");   // its own line, not crammed into the quantity line
+      expect(down.previousElementSibling).not.toHaveTextContent("Today");
+    });
+
+    it("shows the dollar change alone when the percent isn't known", () => {
+      setup([holding({ day_change: 12.5, day_change_pct: null })]);
+      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toHaveTextContent(/^Today\s*\+\$12\.50$/);
+    });
+
+    it("leaves the day-change line off when the day's change isn't known", () => {
+      setup([holding({ day_change: null, day_change_pct: null })]);
+      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
+    });
   });
 
   describe("on a phone", () => {
@@ -149,45 +172,57 @@ describe("HoldingsTable", () => {
       expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
     });
 
-    it("puts Value after Total gain, beyond the edge of a table that scrolls sideways, header and cells alike", () => {
-      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
+    it("shows Holding then Today in view, with Total gain and Value after them, as header and cells alike", () => {
+      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25, day_change: -30, day_change_pct: -0.012 })]);
       const heads = screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
-      expect(heads.indexOf("value")).toBe(heads.indexOf("gain") + 1);
+      const visible = heads.filter((h) => !["quantity", "price", "allocation", "cost_basis"].includes(h!));
+      expect(visible).toEqual(["name", "day_change", "gain", "value"]);
       const row = screen.getAllByRole("row")[1];
-      expect(within(row).getAllByText("$2,500.00")).toHaveLength(1);
-      expect(within(row).getByText("$2,500.00").closest("td")!.cellIndex).toBe(heads.indexOf("value"));
-      expect(screen.getByRole("table")).toHaveClass("phone:min-w-[25rem]");
+      for (const [text, col] of [["−$30.00", "day_change"], ["$2,500.00", "value"], ["+$500.00", "gain"]] as const) {
+        expect(within(row).getAllByText(text)).toHaveLength(1);
+        expect(within(row).getByText(text).closest("td")!.cellIndex).toBe(heads.indexOf(col));
+      }
+      expect(screen.getByRole("table")).toHaveClass("phone:min-w-[26rem]");   // wider than the screen, so it scrolls sideways
       expect(screen.getByRole("button", { name: /Value/ })).toBeInTheDocument();   // still sortable
+    });
+
+    it("shows Today's dollars over its percent, coloured, as a column that isn't hidden on a phone", () => {
+      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
+      const [down, up] = screen.getAllByRole("row").slice(1);
+      const cell = (r: HTMLElement, text: string) => within(r).getByText(text).closest("td")!;
+      expect(cell(down, "−$30.00")).toHaveTextContent("−$30.00−1.20%");
+      expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
+      expect(within(down).getByText("−1.20%")).toHaveClass("text-loss");
+      expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
+      expect(within(up).getByText("+0.40%")).toHaveClass("text-good");
+      expect(cell(down, "−$30.00")).not.toHaveClass("max-[1279px]:hidden");
+      expect(cell(down, "−$30.00").className).toMatch(/desktop:max-\[1279px\]:hidden/);   // hidden at tablet width only
+      expect(screen.getByRole("columnheader", { name: /Today/ }).className).not.toMatch(/(^| )max-\[1279px\]:hidden/);
+    });
+
+    it("no longer repeats the day change under the holding, keeping its shares line compact", () => {
+      setup([holding({ day_change: -30, day_change_pct: -0.012 })]);
+      const row = screen.getAllByRole("row")[1];
+      expect(row.querySelector("[data-day-change]")).toBeNull();
+      expect(row.querySelector("td")).toHaveTextContent("10 × $250.00");
+      expect(row.querySelector("td")).not.toHaveTextContent("Today");
+    });
+
+    it("shows the dollar change alone when the percent isn't known", () => {
+      setup([holding({ day_change: 12.5, day_change_pct: null })]);
+      const cell = within(screen.getAllByRole("row")[1]).getByText("+$12.50").closest("td")!;
+      expect(cell).toHaveTextContent(/^\+\$12\.50$/);
+    });
+
+    it("shows a dash in Today when the day's change isn't known", () => {
+      setup([holding({ day_change: null, day_change_pct: null })]);
+      expect(within(screen.getAllByRole("row")[1]).getAllByText("—").length).toBeGreaterThanOrEqual(1);
     });
 
     it("keeps the holding in view while the table scrolls", () => {
       setup();
       expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
       expect(screen.getAllByRole("row")[1].querySelector("td")).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
-    });
-
-    it("shows each holding's day change in dollars and percent on a line under its quantity, coloured", () => {
-      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
-      const [down, up] = screen.getAllByRole("row").slice(1).map((r) => r.querySelector("[data-day-change]") as HTMLElement);
-      expect(down).toHaveTextContent("Today −$30.00 (−1.20%)");
-      expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
-      expect(within(down).getByText("(−1.20%)")).toHaveClass("text-loss");
-      expect(up).toHaveTextContent("Today +$12.50 (+0.40%)");
-      expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
-      expect(within(up).getByText("(+0.40%)")).toHaveClass("text-good");
-      expect(down.previousElementSibling).toHaveTextContent("10 × $250.00");   // its own line, not crammed into the quantity line
-      expect(down.previousElementSibling).not.toHaveTextContent("Today");
-    });
-
-    it("shows the dollar change alone when the percent isn't known", () => {
-      setup([holding({ day_change: 12.5, day_change_pct: null })]);
-      const line = screen.getAllByRole("row")[1].querySelector("[data-day-change]") as HTMLElement;
-      expect(line).toHaveTextContent(/^Today\s*\+\$12\.50$/);
-    });
-
-    it("leaves the day-change line off when the day's change isn't known", () => {
-      setup([holding({ day_change: null, day_change_pct: null })]);
-      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
     });
 
     it("sorts by gain from the Total gain column header", async () => {
