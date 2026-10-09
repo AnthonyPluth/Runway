@@ -96,6 +96,27 @@ describe("HoldingsTable", () => {
     expect(screen.getAllByRole("row")[1].querySelector("b")).toHaveTextContent("");
   });
 
+  describe("on a wide screen (1280px and up)", () => {
+    const queries: string[] = [];
+    beforeEach(() => {
+      queries.length = 0;
+      vi.stubGlobal("matchMedia", (q: string) => { queries.push(q); return { matches: false, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }; });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("shows every column, with cost basis in its own cell and total gain centred", () => {
+      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
+      expect(queries).toContain("(max-width: 1279px)");
+      expect(screen.getAllByRole("columnheader")).toHaveLength(8);
+      const row = screen.getAllByRole("row")[1];
+      const costCell = within(row).getByTitle("Edit cost basis").closest("td") as HTMLTableCellElement;
+      expect(costCell.cellIndex).toBe(7);   // its own last column, not folded into the holding cell
+      const gainCell = within(row).getByText("+$500.00").closest("td")!;
+      expect(gainCell).toHaveClass("text-center");
+      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
+    });
+  });
+
   describe("on a phone", () => {
     const phone = () => vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     beforeEach(phone);
