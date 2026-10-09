@@ -29,3 +29,19 @@ poetry install --no-root --no-interaction
 
 # The web app's packages (npm install, not ci: the container's cache keeps them between sessions).
 (cd frontend && npm install --no-audit --no-fund)
+
+# A node_modules restored from the container's cache can be cut short or stale, and `npm install` takes it as done: ESLint
+# then fails to start ('Could not find "svelte" in plugin "svelte"') and svelte-check can't find esrap's types, so lint
+# and type errors only show up in CI. Check the two packages those errors name, and reinstall from the lock file if
+# either is incomplete.
+node_modules_ok() {
+  (cd frontend &&
+    test -f node_modules/esrap/types/public.d.ts &&
+    node --input-type=module -e 'const p = await import("eslint-plugin-svelte"); if (!(p.default ?? p).processors?.svelte) process.exit(1)' &&
+    npx --no-install eslint --version >/dev/null) 2>/dev/null
+}
+if ! node_modules_ok; then
+  echo "frontend/node_modules is incomplete; reinstalling from the lock file" >&2
+  (cd frontend && rm -rf node_modules && npm ci --no-audit --no-fund)
+  node_modules_ok || echo "frontend/node_modules is still incomplete: ESLint or svelte-check will fail (see .claude/hooks/session-start.sh)" >&2
+fi
