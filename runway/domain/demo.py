@@ -16,6 +16,8 @@ ACCOUNTS = [
     ("demo-savings", "High-Yield Savings", "Sample Bank", "savings", 18250.00),
     ("demo-card", "Rewards Visa", "Sample Card Co", "credit", -1342.18),
     ("demo-mortgage", "Home Mortgage", "Sample Lending", "loan", -284900.00),
+    # A second card with no account paying it yet, so Overview has a warning that can be put away.
+    ("demo-travel", "Travel Mastercard", "Sample Card Co", "credit", -236.40),
 ]
 
 # name, account, amount (negative = out), frequency, day of month (or weekday offset), payee match, category
@@ -53,7 +55,7 @@ def seed(conn, today: date | None = None) -> int:
     for acct_id, name, org, kind, balance in ACCOUNTS:
         conn.execute(insert(Account).values(id=acct_id, name=name, org=org, kind=kind, balance=balance,
                                             balance_date=today.isoformat(), provider="simplefin",
-                                            pay_from="demo-checking" if kind == "credit" else None,
+                                            pay_from="demo-checking" if acct_id == "demo-card" else None,
                                             in_forecast=1 if kind in ("checking", "savings") else 0))
 
     txs: list[tuple] = []
@@ -97,6 +99,8 @@ def seed(conn, today: date | None = None) -> int:
     prev = (close.replace(day=1) - timedelta(days=1)).replace(day=28)
     owed = -sum(t[3] for t in txs if t[1] == "demo-card" and prev.isoformat() < t[2] <= close.isoformat() and t[6] != "Credit Card Payment")
     conn.execute(insert(ManualStatement).values(account_id="demo-card", statement_date=close.isoformat(), balance=round(owed, 2),
+                                                due_date=(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()))
+    conn.execute(insert(ManualStatement).values(account_id="demo-travel", statement_date=close.isoformat(), balance=236.40,
                                                 due_date=(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()))
     conn.execute(insert(Asset).values(name="Sample House", kind="home", value=415000, as_of=today.isoformat(), yearly_change=3,
                                       loan_account_id="demo-mortgage"))
