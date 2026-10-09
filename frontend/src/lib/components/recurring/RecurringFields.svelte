@@ -7,6 +7,8 @@
 
 <script lang="ts">
   import { commas } from "$lib/commas";
+  import CategorySelect from "$lib/components/CategorySelect.svelte";
+  import { loadCategories } from "$lib/categories.svelte";
   import { autosave, markSaved } from "$lib/autosave";
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
@@ -74,6 +76,18 @@
     try { await save(modeSelect); markSaved(modeSelect); }
     catch (err) { v.amount_mode = was; toast.error(errMsg(err)); }
   }
+  // The category its linked transactions get (and so their icon): it saves when you pick one. The hidden input is the
+  // field the save is about, as the mode select is for "Average of last 3".
+  let catField = $state<HTMLInputElement | null>(null);
+  loadCategories().catch(() => { /* the picker shows what it has; a failed load only leaves the list short */ });
+  async function pickCategory(next: string) {
+    const was = v.category;
+    v.category = next;
+    if (!save || !catField) return;
+    await tick();
+    try { await save(catField); markSaved(catField); }
+    catch (err) { v.category = was; toast.error(errMsg(err)); }
+  }
   // Clearing the end date saves like picking one (the field's own change, so autosave knows its new value).
   let endInput = $state<HTMLInputElement | null>(null);
   async function clearEnd() {
@@ -87,16 +101,18 @@
     anchor_date: "Any date it falls on works.", account_id: "The account the money moves through.",
     amount_mode: "Use the recent payments when the amount changes, like a utility bill.",
     amount_max: "Leave blank to match any amount with the text.",
+    category: "A transaction you link to this item takes this category, and so its icon. One matched automatically takes it only when it has none.",
     end_date: "The last day it can come. Blank: it carries on.",
   };
   // While More options is closed, one line says what's in it.
   const moreSummary = $derived.by(() => {
     const acct = options.find((a) => a.id === v.account_id);
     const mode = MODE_OPTIONS.find(([val]) => val === v.amount_mode)?.[1] ?? "";
+    const cat = v.category ? `category ${v.category}` : "";
     const lines = v.match.split("\n").map((x) => x.trim()).filter(Boolean);
     const match = lines.length ? `matches ${lines[0]}${lines.length > 1 ? ` +${lines.length - 1}` : ""}` : "matches the name";
     const ends = v.end_date && !once ? `ends ${fmtDate(v.end_date)}` : "";
-    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match, ends].filter(Boolean).join(" · ");
+    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match, cat, ends].filter(Boolean).join(" · ");
   });
   let moreOpen = $state(untrack(() => !!save));   // the Add form keeps these tucked away; an existing item shows them all
   $effect(() => { if (errors.account_id || errors.amount_max || errors.end_date) moreOpen = true; });
@@ -189,6 +205,11 @@
           {#each MODE_OPTIONS as [val, text] (val)}<option value={val}>{text}</option>{/each}
         </select>
       </label>
+    </div>
+    <div class="flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground" title={hints.category}>
+      <span>Category</span>
+      <input type="hidden" name="category" value={v.category} bind:this={catField} />
+      <CategorySelect value={v.category} blank="None" label="Category" class="w-full" onchange={pickCategory} />
     </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Merchant text

@@ -183,6 +183,27 @@ class BudgetSaved(TypedDict):
     raised: NotRequired[list[RaisedBudget]]
 
 
+class BudgetSuggestion(TypedDict):
+    """A suggested monthly budget for a category (domain/budget_suggest.py): the larger of its typical month and the
+    recurring payments coming in the budget's month, rounded up. `budget` is the category's budget now, if it has one."""
+    category: str
+    suggested: float
+    typical: float
+    recurring: float
+    budget: float | None
+
+
+class BudgetSuggestions(TypedDict):
+    """GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history
+    looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the
+    month asked for when it's still to come, else next month; never past the forecast's reach)."""
+    months: int
+    first: str | None
+    last: str | None
+    recurring_month: str
+    suggestions: list[BudgetSuggestion]
+
+
 # Transactions
 
 class TransactionColumns(TypedDict):

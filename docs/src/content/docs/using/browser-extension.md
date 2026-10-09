@@ -59,6 +59,25 @@ If a store won't load in a hidden frame, or looks signed out there, that import 
 and that store keeps to tabs for a week (or until the extension is updated). A tab comes to
 the front only when you need to sign in.
 
+## When a store wants you to sign in
+
+If a store has signed you out (or wants a robot check answered), the import stops for that store and opens its
+sign-in page in a tab, brought to the front. Sign in there and the import carries on by itself: you don't need to
+click **Import** again. The extension waits up to 12 hours, until you close that tab, or until it has started the same
+store again three times in an hour without getting through (then the next import is yours to start).
+
+- An import you started yourself brings that browser window to the front too.
+- The daily import may run while you're busy with something else, so it doesn't take the focus: the window only asks
+  for your attention (in the taskbar or Dock), and Runway sends a notification to your devices, if you've turned
+  notifications on (Settings → Notifications → **Browser extension needs a sign-in**). It names only the store. It's
+  sent once per store while the sign-in waits (again after three days if it's still waiting), and once the store's
+  import gets through, the next sign-out is told about again, but not within 12 hours of the last one. With sign-in to
+  Runway, it goes to the devices of the person who made the extension's key, and stops when they can no longer sign in
+  (as the key does). The popup says a notification was sent only when one was delivered.
+
+This needs no permissions beyond the ones the extension already has: it only sees the addresses of the stores' own
+pages, to tell when the tab is past the sign-in.
+
 It's written to load in Firefox 128 and later as well (`about:debugging` → **This Firefox** → **Load Temporary
 Add-on…**, pick `manifest.json`; Firefox forgets temporary add-ons when it restarts), but it has only been tried in
 Chromium so far.

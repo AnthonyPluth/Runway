@@ -49,6 +49,15 @@ def token_expires(conn) -> str | None:
     return (made + timedelta(days=TOKEN_DAYS)).isoformat(timespec="seconds") if made else None
 
 
+def token_owner(conn) -> dict | None:
+    """Who made the key ({sub, email}), or None: made without sign-in, or before owners were kept."""
+    try:
+        owner = json.loads(db.get_setting(conn, sk.RETAIL_TOKEN_OWNER) or "null")
+    except ValueError:
+        return None
+    return owner if isinstance(owner, dict) and owner.get("sub") else None
+
+
 def token_problem(conn, now: datetime | None = None) -> str | None:
     """Why the key no longer works, or None: "expired", or "owner_gone" (the person who made it can no longer sign in).
     A key made before owners were kept has none, and ends only by expiring."""
@@ -56,11 +65,8 @@ def token_problem(conn, now: datetime | None = None) -> str | None:
     made = _when(db.get_setting(conn, sk.RETAIL_TOKEN_CREATED))
     if made and now - made >= timedelta(days=TOKEN_DAYS):
         return "expired"
-    try:
-        owner = json.loads(db.get_setting(conn, sk.RETAIL_TOKEN_OWNER) or "null")
-    except ValueError:
-        owner = None
-    if isinstance(owner, dict) and oidc.access_lapsed(conn, owner.get("sub"), owner.get("email")):
+    owner = token_owner(conn)
+    if owner and oidc.access_lapsed(conn, owner.get("sub"), owner.get("email")):
         return "owner_gone"
     return None
 

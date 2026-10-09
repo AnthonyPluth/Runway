@@ -14,7 +14,8 @@ from sqlalchemy import select
 from runway.storage import db
 from runway import oidc
 from runway.domain import retail
-from runway.storage.models import RetailOrder
+from runway.domain import notify
+from runway.storage.models import NotifyLog, RetailOrder
 from tests.shared import ServerCase
 from tests.retail_support import ORDER, Base
 
@@ -186,6 +187,32 @@ class ExtensionApiTests(ServerCase):
             self.assertIn(f"runway-orders/{script}", names)
         code, st = self.req("GET", "/api/retail")
         self.assertEqual((code, st["token"], st["stores"]["target"]["orders"]), (200, False, 0))
+
+    def test_a_sign_in_the_import_waits_for(self):
+        _, r = self.req("POST", "/api/retail/token", headers={"X-Runway": "1"})
+        ext = {"Authorization": f"Bearer {r['token']}"}
+        self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "walmart"}, ext)[0], 400)
+        self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": ["amazon"]}, ext)[0], 400)
+        self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "carta"}, {})[0], 401)   # the key, as every call
+        # No device has notifications on: the reply says nothing was delivered, and nothing is remembered as said.
+        self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "carta"}, ext), (200, {"notified": False, "why": "no_devices"}))
+        with db.session() as conn:
+            self.assertIsNone(conn.execute(select(NotifyLog.key).where(NotifyLog.key.like("extsignin:%"))).fetchone())
+        # Said once: that store's import getting through (its finish) leaves it said, not waiting.
+        with mock.patch.object(notify, "send_all", return_value={"sent": 1, "failed": []}) as sent:
+            self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "target"}, ext), (200, {"notified": True, "why": None}))
+            self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "target"}, ext), (200, {"notified": False, "why": "already"}))
+            self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "carta"}, ext)[1]["notified"], True)
+            self.assertEqual(sent.call_count, 2)
+        with mock.patch.object(retail, "categorize_and_apply"):
+            self.assertEqual(self.req("POST", "/api/ext/finish", {"retailer": "target"}, ext)[0], 200)
+        with mock.patch("runway.server.api.retail.carta_web.finish", return_value={"companies": 0, "grants": 0, "pages": 0}):
+            self.assertEqual(self.req("POST", "/api/ext/carta/finish", {}, ext)[0], 200)
+        with db.session() as conn:
+            self.assertEqual({k for (k,) in conn.execute(select(NotifyLog.key).where(NotifyLog.key.like("extsignin:%")))},
+                             {"extsignin:target:resumed", "extsignin:carta:resumed"})
+        self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})
+        self.assertEqual(self.req("POST", "/api/ext/signin", {"retailer": "amazon"}, ext)[0], 401)
 
     def test_store_pages_that_stop_an_import(self):
         _, r = self.req("POST", "/api/retail/token", headers={"X-Runway": "1"})

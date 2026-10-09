@@ -96,7 +96,8 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
     same way the money moves (money-in items only match money in, money-out items money out), and within the item's
     amount range when it has one (so a "Prime" item matching "amazon" can leave the other orders alone). A one-time
     item only matches around its date (posted_near).
-    Transactions marked 'never match' (recurring_id = 0) and ones already linked are left alone."""
+    Transactions marked 'never match' (recurring_id = 0) and ones already linked are left alone. When the item has a
+    category, the ones linked now that have none of their own take it (source "recurring"); one that has its own keeps it."""
     q = select(Recurring).where(Recurring.active == 1)
     if recurring_ids:
         q = q.where(Recurring.id.in_(list(recurring_ids)))
@@ -109,6 +110,7 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
             continue
         common = [t.recurring_id.is_(None), t.account_id == item["account_id"], t.amount > 0 if item["amount"] > 0 else t.amount < 0,
                   amount_fits(item), posted_near(item)]
+        before = set(conn.execute(select(t.id).where(t.recurring_id == item["id"])).scalars()) if item["category"] else set()
         linked += conn.execute(update(t).where(*common, has_text(texts)).values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
         # A text that's a brand's name ("amazon") also finds that brand's transactions you've given the bank's name
         # ("Amzn Mktp Us"), by the brand their bank text gives.
@@ -122,14 +124,25 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
             if ids:
                 linked += conn.execute(update(t).where(t.id.in_(ids), t.recurring_id.is_(None))
                                        .values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
+        if item["category"]:
+            now = set(conn.execute(select(t.id).where(t.recurring_id == item["id"])).scalars()) - before
+            for chunk in _chunks(sorted(now)):
+                conn.execute(update(t).where(t.id.in_(chunk), func.coalesce(t.category, "") == "", func.coalesce(t.is_split, 0) == 0)
+                             .values(category=item["category"], category_source="recurring", confidence=1, needs_review=0))
     return linked
+
+
+def _chunks(ids: list[str], size: int = 500):
+    for i in range(0, len(ids), size):
+        yield ids[i:i + size]
 
 
 def link(conn, tx_id: str, recurring_id: int | None) -> str | None:
     """Link a transaction to a recurring item (None = mark as not recurring). The item learns the merchant text from
     the transaction if it doesn't have one, so future payments match on their own. When it has some and none is on this
     transaction, and it's on the item's account, returns the transaction's text to offer as another (add_text); None
-    otherwise."""
+    otherwise. When the item has a category, the transaction takes it, whatever it had (unless it's split: its parts
+    carry the categories); an item without one leaves the transaction's alone. Unlinking leaves the category as it is."""
     tx = _transaction(conn, tx_id)
     if not tx:
         raise ValueError("Transaction not found")
@@ -140,6 +153,9 @@ def link(conn, tx_id: str, recurring_id: int | None) -> str | None:
     if not item:
         raise ValueError("Recurring item not found")
     conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=recurring_id, recurring_linked_by="you"))
+    if item["category"] and not tx["is_split"]:
+        conn.execute(update(Transaction).where(Transaction.id == tx_id).values(
+            category=item["category"], category_source="manual", confidence=1, needs_review=0))   # your choice, so it sticks
     text = " ".join((tx["payee"] or tx["description"] or "").lower().split())
     if not item["match"]:
         if text:
