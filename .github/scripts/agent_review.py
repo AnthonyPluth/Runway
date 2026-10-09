@@ -8,8 +8,9 @@ request's). Standard library only.
                                   line, oldest first), writes the review comment's text to OUT.md and prints the commit
                                   it reviewed and its verdict ("<sha> <pass|blocking>"), or nothing when there is none.
   agent_review.py plan            Gathers the change into $OUT_DIR from the pull request's checkout in $REPO_DIR (git
-                                  only reads it), and writes incremental (true when the reviewer gets the last review's
-                                  findings and the diff since it) to $GITHUB_OUTPUT. See plan().
+                                  only reads it), and writes mode (review, or carry to copy the last passing verdict),
+                                  description and incremental (true when the reviewer gets the last review's findings
+                                  and the diff since it) to $GITHUB_OUTPUT. See plan().
   agent_review.py report OUT.json Turns the reviewer's output (claude --output-format json, with --json-schema) into a
                                   verdict: writes verdict (pass, blocking or error), description and comment (the PR
                                   comment, base64) to $GITHUB_OUTPUT. A blocking finding, or output it can't read, fails
@@ -87,8 +88,32 @@ def is_ancestor(repo: str, old: str, new: str) -> bool:
     return subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", old, new], capture_output=True).returncode == 0
 
 
+def own_change(repo: str, main: str, rev: str) -> str:
+    """A commit's own change: its diff against where it meets main, so only the files it touches, with each file's
+    blob ids (--full-index), so a file main changed too never compares equal."""
+    return git(repo, "diff", "--no-ext-diff", "--no-textconv", "--full-index", "--binary", f"{main}...{rev}")
+
+
+def only_main_merged(repo: str, main: str, prev: str, head: str) -> bool:
+    """Whether everything pushed since `prev` was merges of main that leave the pull request's own change exactly as it
+    was: every commit after `prev` that isn't main's is a merge, it touches the same files, and its diff against main
+    (blob ids included) is byte for byte the one that was reviewed. Anything it can't prove is False."""
+    if not is_ancestor(repo, prev, head):
+        return False
+    added = git(repo, "rev-list", "--parents", f"{prev}..{head}", f"^{main}").splitlines()
+    if not added or any(len(line.split()) < 3 for line in added):   # none, or a commit that isn't a merge
+        return False
+    if sorted(own_files(repo, main, prev)) != sorted(own_files(repo, main, head)):
+        return False
+    return own_change(repo, main, prev) == own_change(repo, main, head)
+
+
 def plan(env: dict[str, str]) -> dict[str, str]:
-    """Writes the change into OUT_DIR for the reviewer:
+    """Decides what the review does (mode) and writes the change into OUT_DIR for the reviewer.
+
+    mode is carry when the last review passed (PREV_VERDICT pass and its "Agent review" status, PREV_STATE, success)
+    and only_main_merged(): its verdict is copied to the new head instead of reviewing again. Otherwise it is review,
+    with OUT_DIR holding:
 
       diff.patch   the pull request's change against main (git diff main...head)
       files.txt    the files it changes (--name-status)
@@ -106,8 +131,15 @@ def plan(env: dict[str, str]) -> dict[str, str]:
     (out / "diff.patch").write_text(diff(repo, f"{main}...{head}"))
     (out / "files.txt").write_text(git(repo, "diff", "--name-status", f"{main}...{head}"))
     (out / "commits.txt").write_text(git(repo, "log", "--format=commit %H%n%B", f"{main}..{head}"))
-    result = {"incremental": "false"}
+    result = {"mode": "review", "description": "", "incremental": "false"}
     prev = env.get("PREV_SHA", "")
+    try:
+        if env.get("PREV_VERDICT") == "pass" and env.get("PREV_STATE") == "success" \
+                and only_main_merged(repo, main, prev, head):
+            return {**result, "mode": "carry",
+                    "description": f"Carried forward from the review of {prev[:7]}: only main merged in since"}
+    except Exception as e:   # can't prove it: review
+        print(f"::warning::Reviewing again: couldn't compare with the last review ({type(e).__name__}).")
     try:
         body = Path(env["PREV_BODY"]).read_text() if env.get("PREV_BODY") else ""
         if body and is_ancestor(repo, prev, head):

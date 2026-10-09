@@ -9,6 +9,10 @@ name: Agent review
 # when the new head descends from it the reviewer also gets that review's findings and the diff since, to check each
 # finding is fixed and read the new lines closely (the whole diff stays in front of it, and its findings replace the
 # earlier ones). Without a usable earlier commit (none, rebased away, or anything failing) it reviews the whole change.
+# A push that only merges main in is not reviewed again when the last review passed: if every commit since it is a
+# merge and the pull request's own change (its diff against where it meets main, blob ids included) is byte for byte
+# the one that was reviewed, that "Agent review" verdict is copied to the new head, saying so. A blocking or failed
+# review is never carried forward, and anything that can't be proved identical is reviewed.
 #
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
@@ -52,7 +56,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read           # check out main's instructions and the pull request's code
-      pull-requests: read      # its commits
+      pull-requests: read      # its commits and the last review's comment
+      statuses: read           # whether that review passed
     outputs:
       verdict: ${{ steps.result.outputs.verdict }}
       description: ${{ steps.result.outputs.description }}
@@ -97,24 +102,14 @@ jobs:
             --jq '.[] | select(.user.login == "github-actions[bot]") | .body | @json' > "$RUNNER_TEMP/comments.jsonl"
           read -r sha verdict < <(python3 trusted/.github/scripts/agent_review.py previous \
                                     "$RUNNER_TEMP/comments.jsonl" "$RUNNER_TEMP/previous-review.md") || true
-          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; } | tee -a "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
-        if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
-        with:
-          node-version-file: trusted/.nvmrc
-          package-manager-cache: false
-
-      # At the version main's .github/agent-review/package-lock.json locks, installed outside any checkout (so no .npmrc
-      # of the pull request's applies).
-      - name: Install Claude Code
-        if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
-        run: |
-          mkdir -p "$RUNNER_TEMP/claude-code"
-          cp trusted/.github/agent-review/package.json trusted/.github/agent-review/package-lock.json "$RUNNER_TEMP/claude-code/"
-          cd "$RUNNER_TEMP/claude-code"
-          npm ci --no-audit --no-fund
-          node_modules/.bin/claude --version
+          # The newest "Agent review" status on the commit it read, if this workflow set it (newest first).
+          state=""
+          if [[ "${sha:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            state=$(gh api --paginate "repos/$REPO/commits/$sha/statuses?per_page=100" \
+                      --jq '.[] | select(.context == "Agent review") | [.state, .creator.login] | @tsv' \
+                    | awk -F'\t' 'NR == 1 && $2 == "github-actions[bot]" { print $1 }')
+          fi
+          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; echo "state=$state"; } | tee -a "$GITHUB_OUTPUT"
 
       # The pull request's code, to read only: nothing in it is run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -135,6 +130,8 @@ jobs:
           MAIN: ${{ github.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           PREV_SHA: ${{ steps.prev.outputs.sha }}
+          PREV_VERDICT: ${{ steps.prev.outputs.verdict }}
+          PREV_STATE: ${{ steps.prev.outputs.state }}
           REPO_DIR: review/pr
           OUT_DIR: review
           TRUSTED: trusted/.github/agent-review
@@ -144,9 +141,26 @@ jobs:
           python3 trusted/.github/scripts/agent_review.py plan
           echo "$(wc -l < review/files.txt) file(s), $(wc -l < review/diff.patch) diff line(s)"
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        if: steps.plan.outputs.mode == 'review'
+        with:
+          node-version-file: trusted/.nvmrc
+          package-manager-cache: false
+
+      # At the version main's .github/agent-review/package-lock.json locks, installed in $RUNNER_TEMP, outside both
+      # checkouts and none of their parents (so no .npmrc of the pull request's applies). Only when a review runs.
+      - name: Install Claude Code
+        if: steps.plan.outputs.mode == 'review'
+        run: |
+          mkdir -p "$RUNNER_TEMP/claude-code"
+          cp trusted/.github/agent-review/package.json trusted/.github/agent-review/package-lock.json "$RUNNER_TEMP/claude-code/"
+          cd "$RUNNER_TEMP/claude-code"
+          npm ci --no-audit --no-fund
+          node_modules/.bin/claude --version
+
       # The reviewer, in review/ (main's script; see it for how it is isolated), with whichever secret is set.
       - name: Review
-        if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
+        if: steps.plan.outputs.mode == 'review'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -165,6 +179,8 @@ jobs:
         env:
           AGENT: ${{ steps.who.outputs.agent }}
           SAME_REPO: ${{ steps.who.outputs.same_repo }}
+          MODE: ${{ steps.plan.outputs.mode }}
+          PLANNED: ${{ steps.plan.outputs.description }}
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}   # in the comment, for the next push's re-review
           # Only to make sure the answer contains neither before it is posted.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -175,6 +191,9 @@ jobs:
             { echo "verdict=pass"; echo "description=Not an agent's pull request"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ "$SAME_REPO" != true ]; then
             { echo "verdict=error"; echo "description=Agents' pull requests are reviewed only from this repository's branches"; echo "comment="; } >> "$GITHUB_OUTPUT"
+          elif [ "$MODE" = carry ]; then
+            # The last review's comment stays as it is: it, and its state line, describe the commit it read.
+            { echo "verdict=pass"; echo "description=$PLANNED"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             { echo "verdict=error"; echo "description=No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret to review with"; echo "comment="; } >> "$GITHUB_OUTPUT"
           else

@@ -203,6 +203,92 @@ class Plan(unittest.TestCase):
         self.assertIn("+a = 3", since)
         self.assertNotIn("other.py", since)
 
+    def merge_main(self, main_path="runway/other.py", main_text="b = 1\n"):
+        """The pull request reviewed at prev; main moves on; main is merged in. Returns (prev, head)."""
+        self.write("runway/app.py", "a = 2\n")
+        prev = self.commit("change")
+        self.git("checkout", "-q", "main")
+        self.write(main_path, main_text)
+        self.commit("main moves on")
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-edit", "main")
+        return prev, self.git("rev-parse", "HEAD")
+
+    PASSED = {"PREV_VERDICT": "pass", "PREV_STATE": "success"}
+
+    def test_merging_main_in_carries_a_passing_review_forward(self):
+        prev, head = self.merge_main()
+        values = self.plan(head, PREV_SHA=prev, **self.PASSED)
+        self.assertEqual(values["mode"], "carry")
+        self.assertIn(prev[:7], values["description"])
+        self.assertLessEqual(len(values["description"]), 140)
+
+    def test_a_blocking_or_unconfirmed_review_is_never_carried_forward(self):
+        prev, head = self.merge_main()
+        for extra in ({"PREV_VERDICT": "blocking", "PREV_STATE": "failure"},
+                      {"PREV_VERDICT": "blocking", "PREV_STATE": "success"},   # the comment says blocking
+                      {"PREV_VERDICT": "pass", "PREV_STATE": "failure"},       # the status says otherwise
+                      {"PREV_VERDICT": "pass", "PREV_STATE": "error"},
+                      {"PREV_VERDICT": "pass", "PREV_STATE": ""},              # no status from this workflow
+                      {}):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.plan(head, PREV_SHA=prev, **extra)["mode"], "review")
+
+    def test_anything_besides_merging_main_is_reviewed(self):
+        prev, _ = self.merge_main()
+        self.write("runway/app.py", "a = 3\n")
+        head = self.commit("and a change")
+        self.assertEqual(self.plan(head, PREV_SHA=prev, **self.PASSED)["mode"], "review")
+
+    def test_a_merge_that_changes_the_pull_request_s_own_change_is_reviewed(self):
+        self.write("runway/app.py", "a = 2\n")
+        prev = self.commit("change")
+        self.git("checkout", "-q", "main")
+        self.write("runway/other.py", "b = 1\n")
+        self.commit("main moves on")
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-commit", "main")
+        self.write("runway/app.py", "a = 2  # changed in the merge\n")    # an "evil" merge
+        self.git("add", "-A")
+        self.git("commit", "-q", "--no-edit")
+        head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.plan(head, PREV_SHA=prev, **self.PASSED)["mode"], "review")
+
+    def test_a_file_main_changed_too_is_reviewed(self):
+        lines = [f"line {i}\n" for i in range(12)]
+        self.write("runway/long.py", "".join(lines))
+        self.base = self.commit("a longer file")
+        self.write("runway/long.py", "".join([*lines[:11], "line 11, by the pull request\n"]))
+        prev = self.commit("change")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "pr~1")
+        self.write("runway/long.py", "".join(["line 0, by main\n", *lines[1:]]))
+        self.commit("main edits the same file, far away")
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-edit", "main")   # merges cleanly; the hunks alone would match
+        head = self.git("rev-parse", "HEAD")
+        main = self.git("rev-parse", "main")
+        strip = lambda patch: [ln for ln in patch.splitlines() if not ln.startswith("index ")]
+        self.assertEqual(strip(ar.own_change(str(self.repo), main, prev)), strip(ar.own_change(str(self.repo), main, head)))
+        self.assertEqual(self.plan(head, PREV_SHA=prev, **self.PASSED)["mode"], "review")
+
+    def test_merging_another_branch_is_reviewed(self):
+        self.write("runway/app.py", "a = 2\n")
+        prev = self.commit("change")
+        self.git("checkout", "-q", "-b", "other", self.base)
+        self.write("runway/sneaky.py", "c = 1\n")
+        self.commit("not main")
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-edit", "other")
+        head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.plan(head, PREV_SHA=prev, **self.PASSED)["mode"], "review")
+
+    def test_when_it_can_t_compare_it_reviews(self):
+        prev, head = self.merge_main()
+        self.assertEqual(self.plan(head, PREV_SHA="f" * 40, **self.PASSED)["mode"], "review")
+        with mock.patch.object(ar, "own_change", side_effect=subprocess.CalledProcessError(128, "git")):
+            self.assertEqual(self.plan(head, PREV_SHA=prev, **self.PASSED)["mode"], "review")
+
     def test_without_a_usable_earlier_commit_it_reviews_everything(self):
         self.write("runway/app.py", "a = 2\n")
         prev = self.commit("change")
