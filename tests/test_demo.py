@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 
 from runway.storage import db
 from runway.domain import demo, forecast
-from runway.storage.models import Account, Recurring
+from runway.domain import retail
+from runway.storage.models import Account, Recurring, RetailItem, Transaction
 from tests.shared import DbCase
 
 
@@ -24,6 +25,19 @@ class DemoTests(DbCase):
         self.assertEqual((card["paid_since_close"], card["remaining"]), (0.0, card["statement_balance"]))
         with self.assertRaises(SystemExit):
             demo.seed(self.c)
+
+    def test_the_ai_buttons_data_is_opt_in(self):
+        def waiting():
+            return self.c.execute(select(func.count()).select_from(Transaction).where(Transaction.needs_review == 1)).scalar()
+        demo.seed(self.c, today=date(2026, 9, 28))
+        self.assertIsNone(db.get_setting(self.c, "openrouter_api_key"))
+        self.assertEqual(waiting(), 0)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItem)).scalar(), 0)
+        demo.seed_ai_buttons(self.c, today=date(2026, 9, 28))
+        self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-or-demo-not-a-real-key")
+        self.assertEqual(waiting(), 3)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItem).where(RetailItem.category.is_(None))).scalar(), 2)
+        self.assertEqual(retail.token_owner(self.c), {"sub": "demo", "email": "demo@example.invalid"})
 
     def test_the_card_has_a_part_payment_since_its_statement(self):
         demo.seed(self.c, today=date(2026, 10, 9))

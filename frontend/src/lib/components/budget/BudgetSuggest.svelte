@@ -2,10 +2,10 @@
   import { act, errMsg } from "$lib/act";
   import type { BudgetSuggestion, BudgetSuggestions } from "$lib/api-types";
   import { apiCall } from "$lib/contract";
+  import AiButton from "$lib/components/AiButton.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Sheet from "$lib/components/ui/sheet";
   import { fmt0, monthShort, plural } from "$lib/format";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
   import { toast } from "svelte-sonner";
 
   // Suggested budgets (GET /api/budget/suggestions; the method is in runway/domain/budget_suggest.py): nothing is saved
@@ -68,9 +68,7 @@
 </script>
 
 <!-- On a phone just the icon, so it fits beside the month picker. -->
-<Button variant="outline" size="sm" class="size-10 sm:h-8 sm:w-auto" aria-label="Suggest budgets" onclick={() => (open = true)}>
-  <Sparkles class="size-4" aria-hidden="true" /><span class="hidden sm:inline">Suggest budgets</span>
-</Button>
+<AiButton label="Suggest budgets" onclick={() => (open = true)} />
 <Sheet.Root bind:open>
   <Sheet.Content>
     <Sheet.Header>

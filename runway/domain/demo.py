@@ -8,7 +8,9 @@ from sqlalchemy import func, insert, select, update
 from ..storage import db
 from ..storage import settings_keys as sk
 from .forecast import NO_STATEMENT_DUE_DAYS
-from ..storage.models import Account, Asset, Budget, Category, ManualStatement, Recurring, SyncLog, Transaction
+from .retail import token as retail_token
+from ..storage.models import (Account, Asset, Budget, Category, ManualStatement, Recurring, RetailCharge, RetailItem, RetailOrder,
+                              SyncLog, Transaction)
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -116,3 +118,24 @@ def seed(conn, today: date | None = None) -> int:
     db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, "https://demo:demo@sample-bank.invalid/simplefin")
     conn.execute(insert(SyncLog).values(ok=1, message="Sample data"))
     return len(txs)
+
+
+def seed_ai_buttons(conn, today: date | None = None) -> None:
+    """Opt-in, on top of `seed` (`run.py demo --ai-buttons`, which `make verify` passes): what the AI buttons need to show in
+    a screenshot, so a plain demo never looks AI-enabled. Something waiting in To review, an order whose items have no
+    category, an OpenRouter key and the browser extension's key. The key is made up and nothing here sends anything: the
+    flows only look at the buttons, never click them."""
+    today = today or date.today()
+    for i, (payee, amount) in enumerate([("Corner Market", -23.40), ("Lakeside Cafe", -8.75), ("Hardware Depot", -61.20)]):
+        conn.execute(insert(Transaction).values(id=f"demo-card|demo-review-{i}", account_id="demo-card", amount=amount,
+                                                posted=(today - timedelta(days=i + 1)).isoformat(), description=payee.upper(),
+                                                payee=payee, needs_review=1))
+    order, placed = "amazon:111-0000000-0000001", (today - timedelta(days=3)).isoformat()
+    conn.execute(insert(RetailOrder).values(id=order, retailer="amazon", order_number="111-0000000-0000001", channel="online",
+                                            placed=placed, total=53.97, details=1, payment="Visa 1234"))
+    conn.execute(insert(RetailItem), [
+        {"order_id": order, "position": 0, "title": "Bamboo cutting board", "quantity": 1, "amount": 24.99},
+        {"order_id": order, "position": 1, "title": "Desk lamp with USB port", "quantity": 1, "amount": 28.98}])
+    conn.execute(insert(RetailCharge).values(id=f"{order}|1", order_id=order, date=placed, amount=-53.97, payment="Visa 1234"))
+    retail_token.new_token(conn, {"sub": "demo", "email": "demo@example.invalid"})   # with an owner, as a real key has
+    db.set_setting(conn, sk.OPENROUTER_API_KEY, "sk-or-demo-not-a-real-key")

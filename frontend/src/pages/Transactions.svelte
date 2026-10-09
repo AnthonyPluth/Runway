@@ -5,6 +5,7 @@
   import { catLabel, catPath, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
+  import AiButton from "$lib/components/AiButton.svelte";
   import AiSuggest from "$lib/components/transactions/AiSuggest.svelte";
   import ReviewGroups from "$lib/components/transactions/ReviewGroups.svelte";
   import TxTable from "$lib/components/transactions/TxTable.svelte";
@@ -181,9 +182,8 @@
   {/if}
   {#if review && app.state?.has_api_key}
     {#if txs.list && txs.count > 0}
-      <Button disabled={aiStatus === "asking"} onclick={() => ai?.run()}>
-        {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories"}
-      </Button>
+      <AiButton busy={aiStatus === "asking"} busyLabel="Suggesting…" label={aiStatus === "asked" ? "Ask again" : "Suggest categories"}
+        onclick={() => ai?.run()} />
     {/if}
   {:else if review && app.state?.connected}
     <p class="text-sm text-muted-foreground">AI suggestions: <a href="#setup/connections" class="font-medium text-primary">Settings › Connections</a></p>
