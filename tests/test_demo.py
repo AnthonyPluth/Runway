@@ -41,6 +41,8 @@ class DemoTests(DbCase):
 
     def test_the_brokerage_has_a_gain_a_loss_and_a_flat_day(self):
         demo.seed(self.c, today=date(2026, 10, 9))
+        self.assertEqual(portfolio.holdings(self.c), [])   # opt-in, so tests built on the plain sample see no investments
+        demo.seed_investments(self.c, date(2026, 10, 9))
         by = {h["ticker"]: h for h in portfolio.holdings(self.c)}
         self.assertEqual(set(by), {"VTI", "VXUS", "SMPL"})
         self.assertGreater(by["VTI"]["day_change"], 0)

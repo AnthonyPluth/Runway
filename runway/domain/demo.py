@@ -121,7 +121,6 @@ def seed(conn, today: date | None = None) -> int:
             for acct, amount, payee in (("demo-checking", -part, "Rewards Visa Payment"), ("demo-card", part, "Payment Thank You"))])
     conn.execute(insert(Asset).values(name="Sample House", kind="home", value=415000, as_of=today.isoformat(), yearly_change=3,
                                       loan_account_id="demo-mortgage"))
-    seed_investments(conn, today)
     # The app shows its "connect your bank" screen until a bank is set up. This address never resolves (.invalid), so
     # a Sync in a preview just fails; nothing is ever fetched.
     db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, "https://demo:demo@sample-bank.invalid/simplefin")

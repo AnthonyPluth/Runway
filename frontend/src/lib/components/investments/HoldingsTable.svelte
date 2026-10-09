@@ -125,7 +125,7 @@
                 {#if x.day_change != null}
                   <!-- The day's change, on its own line under the quantity so the row stays short; hidden from 1280px, where it has its column -->
                   <div class="mt-0.5 text-xs tabular-nums" data-day-change>
-                    <span class="text-muted-foreground">Today</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change))}>{signed(x.day_change)}</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change_pct))}>({pct(x.day_change_pct, 2)})</span>
+                    <span class="text-muted-foreground">Today</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change))}>{signed(x.day_change)}</span>{#if x.day_change_pct != null} <span class={cn("whitespace-nowrap", gainCls(x.day_change_pct))}>({pct(x.day_change_pct, 2)})</span>{/if}
                   </div>
                 {/if}
                 <div>{@render costBasis(x)}</div>

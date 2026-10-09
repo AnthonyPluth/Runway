@@ -150,6 +150,12 @@ describe("HoldingsTable", () => {
       expect(down.previousElementSibling).not.toHaveTextContent("Today");
     });
 
+    it("shows the dollar change alone when the percent isn't known", () => {
+      setup([holding({ day_change: 12.5, day_change_pct: null })]);
+      const line = screen.getAllByRole("row")[1].querySelector("[data-day-change]") as HTMLElement;
+      expect(line).toHaveTextContent(/^Today\s*\+\$12\.50$/);
+    });
+
     it("leaves the day-change line off when the day's change isn't known", () => {
       setup([holding({ day_change: null, day_change_pct: null })]);
       expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
