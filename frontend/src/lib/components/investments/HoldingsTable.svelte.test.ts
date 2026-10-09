@@ -65,6 +65,12 @@ describe("HoldingsTable", () => {
     expect(within(row).getByText("−1.20%")).toHaveClass("text-loss");
   });
 
+  it("centres the total gain header over its values", () => {
+    setup([holding({ gain: 500, gain_pct: 0.25 })]);
+    expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
+    expect(within(screen.getAllByRole("row")[1]).getByText("+$500.00").closest("td")).toHaveClass("text-center");
+  });
+
   it("shows a dash instead of a gain when the cost basis is unknown, and offers to add it", () => {
     setup([holding({ gain: null, gain_pct: null, day_change: null, day_change_pct: null, cost_known: false })]);
     const row = screen.getAllByRole("row")[1];
