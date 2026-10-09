@@ -12,7 +12,7 @@ from sqlalchemy import insert, select, update
 
 from runway.domain import demo, splits
 from runway.storage.models import Account, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder, Transaction
-from runway.server.api import accounts, budget, transactions
+from runway.server.api import accounts, budget, budget_suggest, transactions
 from tests.shared import TODAY, DbCase, freeze_today
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -117,6 +117,12 @@ class Replies(DbCase):
         self.check("POST /api/budget", budget.api_budget_set(self.c, {}, {"category": "Groceries", "rollover": True}))
         for month in (f"{TODAY:%Y-%m}", "2026-01", "2027-03"):   # this month, one that's over, one to come
             self.check("GET /api/budget", budget.api_budget(self.c, {"month": [month]}, {}))
+        # Suggestions, with and without a budget now; for next month, and for a month to come
+        for month in (f"{TODAY:%Y-%m}", "2027-03"):
+            reply = budget_suggest.api_budget_suggestions(self.c, {"month": [month]}, {})
+            self.assertTrue(any(s["budget"] is None for s in reply["suggestions"]))
+            self.assertTrue(any(s["budget"] is not None for s in reply["suggestions"]))
+            self.check("GET /api/budget/suggestions", reply)
 
     def test_transactions(self):
         made = transactions.api_tx_create(self.c, {}, {"account": "demo-checking", "posted": TODAY.isoformat(),
