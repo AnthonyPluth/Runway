@@ -98,24 +98,7 @@
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]")} />
       </span>
     </span>
-    {#if canRoll}
-      <Button variant="ghost" size="icon" class={cn("size-8 shrink-0 text-muted-foreground hover:text-foreground focus-visible:opacity-100",
-        menu ? "opacity-100" : "hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}
-        aria-label={`Actions for ${c.name}`} aria-expanded={menu} onclick={() => (menu = !menu)}><Ellipsis /></Button>
-    {/if}
   </div>
-  {#if menu && canRoll}
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 pt-1 pb-1 sm:pl-[38px]">
-      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
-        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
-          : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-          c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
-        <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
-      </button>
-      <Button variant="link" size="sm" class="h-auto justify-start p-0" onclick={() => (menu = false)}>Done</Button>
-    </div>
-  {/if}
   {#if c.budget != null && !sub}
     <div class="flex items-center gap-3 sm:pl-[38px]">
       <div class="relative h-2 min-w-28 flex-1 rounded-full bg-muted" role="img"
@@ -146,6 +129,23 @@
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
         {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
+      {#if canRoll}
+        <Button variant="ghost" size="icon" class={cn("-my-2 -mr-1.5 -ml-1.5 size-8 shrink-0 text-muted-foreground hover:text-foreground focus-visible:opacity-100",
+          menu ? "opacity-100" : "hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}
+          aria-label={`Actions for ${c.name}`} aria-expanded={menu} onclick={() => (menu = !menu)}><Ellipsis /></Button>
+      {/if}
+    </div>
+  {/if}
+  {#if menu && canRoll}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 pt-1 pb-1 sm:pl-[38px]">
+      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
+        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
+          : "Carry what's left at the end of each month into the next"}
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+          c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
+        <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
+      </button>
+      <Button variant="link" size="sm" class="h-auto justify-start p-0" onclick={() => (menu = false)}>Done</Button>
     </div>
   {/if}
   {#if c.budget != null && carried > 0.005}
