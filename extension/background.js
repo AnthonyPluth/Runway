@@ -49,7 +49,8 @@ async function run(which) {
         try {
           const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, costco: importCostco, carta: importCarta }[retailer], progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r), data: r };
-          await forgetSignIns((r) => r === retailer);   // through, however you signed in
+          // Through, however you signed in: nothing to wait for (a storage failure here mustn't undo the result).
+          await forgetSignIns((waiting) => waiting === retailer).catch(() => {});
         } catch (e) {
           // Stopped for a sign-in: wait for it in the tab, to carry on (frames.js), and say so.
           const note = e.signInTab ? await waitForSignIn(retailer, e.signInTab, which === "daily")
