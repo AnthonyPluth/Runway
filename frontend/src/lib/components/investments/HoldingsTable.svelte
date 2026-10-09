@@ -68,12 +68,33 @@
     sync();
     return () => narrowQuery.removeEventListener("change", sync);
   });
-  const COLS: [SortKey, string, string][] = [
-    ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"], ["value", "Value", "text-right"],
-    ["day_change", "Today", "text-right max-[1279px]:hidden"], ["gain", "Total gain", "text-center"], ["allocation", "Weight", "text-right max-[1279px]:hidden"],
-    ["cost_basis", "Cost basis", "text-right max-[1279px]:hidden"],
-  ];
+  // On a phone the Value column moves after Total gain and the table is wider than the screen, so Value sits beyond the right
+  // edge and is reached by scrolling the table sideways (the holding stays put: it's sticky). The same media query as the
+  // `phone:` variant in app.css.
+  const phoneQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 767px), (max-height: 500px) and (pointer: coarse)") : null;
+  const phone = $state({ on: phoneQuery?.matches ?? false });
+  $effect(() => {
+    if (!phoneQuery) return;
+    const sync = () => { phone.on = phoneQuery.matches; };
+    phoneQuery.addEventListener("change", sync);
+    sync();
+    return () => phoneQuery.removeEventListener("change", sync);
+  });
+  const VALUE: [SortKey, string, string] = ["value", "Value", "text-right phone:w-28 phone:text-left"];
+  const COLS = $derived<[SortKey, string, string][]>([
+    ["name", "Holding", "text-left phone:sticky phone:left-0 phone:z-[1] phone:w-44 phone:bg-card"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"],
+    ...(phone.on ? [] : [VALUE]),
+    ["day_change", "Today", "text-right max-[1279px]:hidden"], ["gain", "Total gain", "text-center phone:w-28"],
+    ...(phone.on ? [VALUE] : []),
+    ["allocation", "Weight", "text-right max-[1279px]:hidden"], ["cost_basis", "Cost basis", "text-right max-[1279px]:hidden"],
+  ]);
 </script>
+
+{#snippet valueCell(x: Holding)}
+          <td class="text-right tabular-nums phone:w-28 phone:text-left" data-col="value">
+            <span class="font-semibold">{fmt(x.value)}</span>
+          </td>
+{/snippet}
 
 {#snippet costBasis(x: Holding)}
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
@@ -90,11 +111,11 @@
 {/snippet}
 
 <div class="overflow-x-auto" id="inv-holdings">
-  <table class="w-full text-sm">
+  <table class="w-full text-sm phone:min-w-[25rem]">
     <thead>
       <tr class="text-xs text-muted-foreground">
         {#each COLS as [k, label, cls] (k)}
-          <th class={cn("pb-2 font-medium [&:not(:first-child)]:pl-2 min-[1280px]:[&:not(:first-child)]:pl-3", cls)} aria-sort={inv.sort.key === k ? (inv.sort.dir < 0 ? "descending" : "ascending") : undefined}>
+          <th data-col={k} class={cn("pb-2 font-medium [&:not(:first-child)]:pl-2 min-[1280px]:[&:not(:first-child)]:pl-3", cls)} aria-sort={inv.sort.key === k ? (inv.sort.dir < 0 ? "descending" : "ascending") : undefined}>
             <button class="cursor-pointer whitespace-nowrap hover:text-foreground" onclick={() => sortBy(k)}>
               {label}{inv.sort.key === k ? (inv.sort.dir < 0 ? " ↓" : " ↑") : ""}
             </button>
@@ -105,7 +126,7 @@
     <tbody>
       {#each rows as x (keyOf(x))}
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-2 min-[1280px]:[&>td:not(:first-child)]:pl-3">
-          <td class="min-w-48 max-[1279px]:min-w-0">
+          <td class="min-w-48 max-[1279px]:min-w-0 phone:sticky phone:left-0 phone:z-[1] phone:w-44 phone:bg-card">
             <div class="flex gap-2.5">
               {#if x.is_cash}
                 <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
@@ -138,17 +159,16 @@
             {x.is_cash ? "—" : fmt(x.price)}
             {#if x.live}<LiveDot class="ml-1.5 size-[7px] align-[2px]" label="Live price" title={`Live price · ${liveAt(x.live_time)}`} />{/if}
           </td>
-          <td class="text-right tabular-nums">
-            <span class="font-semibold">{fmt(x.value)}</span>
-          </td>
+          {#if !phone.on}{@render valueCell(x)}{/if}
           <td class="text-right tabular-nums max-[1279px]:hidden">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}
           </td>
-          <td class="text-center tabular-nums">
+          <td class="text-center tabular-nums phone:w-28">
             {#if x.gain == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
+          {#if phone.on}{@render valueCell(x)}{/if}
           <td class="text-right tabular-nums max-[1279px]:hidden">
             <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{share(x.allocation)}</span>
           </td>

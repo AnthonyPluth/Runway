@@ -122,6 +122,18 @@ describe("HoldingsTable", () => {
     });
   });
 
+  describe("on a tablet (768px to 1279px)", () => {
+    beforeEach(() => vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 1279px)", media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("keeps Value beside the holding, before Total gain", () => {
+      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
+      const heads = screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
+      expect(heads.indexOf("value")).toBeLessThan(heads.indexOf("gain"));
+      expect(within(screen.getAllByRole("row")[1]).getByText("$2,500.00").closest("td")!.cellIndex).toBe(heads.indexOf("value"));
+    });
+  });
+
   describe("on a phone", () => {
     const phone = () => vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     beforeEach(phone);
@@ -135,6 +147,23 @@ describe("HoldingsTable", () => {
       expect(gainCell).not.toHaveClass("max-[1279px]:hidden");   // shown at phone and tablet widths, not clipped
       expect(within(row).getByText("$2,500.00").closest("td")).not.toHaveTextContent("+$500.00");
       expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
+    });
+
+    it("puts Value after Total gain, beyond the edge of a table that scrolls sideways, header and cells alike", () => {
+      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
+      const heads = screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
+      expect(heads.indexOf("value")).toBe(heads.indexOf("gain") + 1);
+      const row = screen.getAllByRole("row")[1];
+      expect(within(row).getAllByText("$2,500.00")).toHaveLength(1);
+      expect(within(row).getByText("$2,500.00").closest("td")!.cellIndex).toBe(heads.indexOf("value"));
+      expect(screen.getByRole("table")).toHaveClass("phone:min-w-[25rem]");
+      expect(screen.getByRole("button", { name: /Value/ })).toBeInTheDocument();   // still sortable
+    });
+
+    it("keeps the holding in view while the table scrolls", () => {
+      setup();
+      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
+      expect(screen.getAllByRole("row")[1].querySelector("td")).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
     });
 
     it("shows each holding's day change in dollars and percent on a line under its quantity, coloured", () => {

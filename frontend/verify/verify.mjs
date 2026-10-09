@@ -63,8 +63,8 @@ async function runStep(page, step, shot) {
   } else if ("wait_for" in step) {
     await page.locator(step.wait_for).first().waitFor({ timeout });
   } else if ("scroll_to" in step) {
-    // Puts the element at the top of the viewport, so the viewport-only `-top` screenshot shows it.
-    await page.locator(step.scroll_to).first().evaluate((el) => el.scrollIntoView({ block: "start" }), undefined, { timeout });
+    // Puts the element at the top of the viewport (and, inside a sideways-scrolling table, scrolls it into view), so the viewport-only `-top` screenshot shows it.
+    await page.locator(step.scroll_to).first().evaluate((el) => el.scrollIntoView({ block: "start", inline: "nearest" }), undefined, { timeout });
   } else if ("expect_text" in step) {
     const el = page.locator(step.expect_text.selector).first();
     await el.waitFor({ timeout });
