@@ -9,7 +9,7 @@ from sqlalchemy import and_, delete, func, insert, not_, or_, select, update
 from ... import dates, validate
 from ...storage import db
 from ...domain import forecast, merchants, recurring
-from ...storage.models import Account, Override, Recurring, Transaction
+from ...storage.models import Account, Category, Override, Recurring, Transaction
 from ...money import CENT
 from ..common import ApiError, row_id, text
 from .transactions import tx_logos
@@ -24,7 +24,7 @@ _range = validate.Validator(ApiError, drop="", not_number="The amount range must
 _amount = validate.Validator(ApiError, drop="", missing="Enter an amount", not_number="Enter an amount", too_large="The amount is too large")
 # The columns _recurring_values() gives, in its order.
 COLUMNS = ("name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date", "active", "amount_mode", "dates",
-           "amount_min", "amount_max")
+           "amount_min", "amount_max", "category")
 
 
 def api_recurring_missed(conn, _q, _b):
@@ -135,7 +135,10 @@ def _recurring_values(conn, body):
             raise ApiError("List the dates like 04-15, 10-15 (or Apr 15, Oct 15)" if freq == "dates"
                            else "List the days of the month like 1, 15") from None
         dates = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
-    return (name, acct, amount, freq, anchor, match, end, validate.flag(body.get("active", 1)), mode, dates, lo, hi)
+    category = text(body.get("category"), "category").strip() or None
+    if category and not conn.execute(select(Category.name).where(Category.name == category)).fetchone():
+        raise ApiError(f"Unknown category: {category}")
+    return (name, acct, amount, freq, anchor, match, end, validate.flag(body.get("active", 1)), mode, dates, lo, hi, category)
 
 
 def api_recurring_add(conn, _q, body):
@@ -164,6 +167,8 @@ def api_recurring_update(conn, _q, body, rid):
     if not old:
         raise ApiError(NOT_FOUND, 404)
     vals = dict(zip(COLUMNS, _recurring_values(conn, body), strict=True))
+    if "category" not in body:
+        vals["category"] = old["category"]   # a client that doesn't know about categories leaves it as it was
     typed = (vals["amount_min"], vals["amount_max"])   # the range as you left it, before any move with the amount
     if abs(vals["amount"] - old["amount"]) >= CENT:
         vals["amount_since"] = date.today().isoformat()   # the "use $X" hint looks at payments from here on
