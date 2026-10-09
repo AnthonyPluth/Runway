@@ -262,6 +262,13 @@ class Budget(Base):
     rollover_from: Mapped[str | None]
 
 
+class MonthBudget(Base):
+    __table__ = schema.budget_months
+    category: Mapped[str]
+    month: Mapped[str]
+    amount: Mapped[float]
+
+
 class Override(Base):
     __table__ = schema.overrides
     key: Mapped[str]

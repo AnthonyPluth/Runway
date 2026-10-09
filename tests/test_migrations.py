@@ -12,7 +12,7 @@ from sqlalchemy import func, insert, select
 from runway.storage import db, schema
 from runway.storage.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore,
                                    ChurnTask, ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement,
-                                   Recurring, Rule, Setting, Transaction)
+                                   MonthBudget, Recurring, Rule, Setting, Transaction)
 from tests.shared import database_path, scratch_dir
 
 
@@ -496,6 +496,36 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual(c.exec_driver_sql(instr).scalar(), 0)
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
+
+    def test_0042_adds_budget_months_and_keeps_every_budget_as_it_was(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0041")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("budget_months", sa.inspect(c).get_table_names())
+            c.exec_driver_sql("INSERT INTO budgets(category, amount, rollover_from) VALUES ('Groceries', 450.5, '2026-03'), "
+                              "('Travel', 100, NULL)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            from runway.domain import budgets
+            rows = budgets.load(conn)
+            self.assertEqual({k: (r["amount"], r["rollover_from"], r["months"]) for k, r in rows.items()},
+                             {"Groceries": (450.5, "2026-03", {}), "Travel": (100.0, None, {})})
+            self.assertEqual([budgets.amount_in(rows["Groceries"], m) for m in ("2025-01", "2026-12")], [450.5, 450.5])
+            conn.execute(insert(MonthBudget).values(category="Travel", month="2026-12", amount=900))
+            self.assertEqual(budgets.amount_in(budgets.load(conn)["Travel"], "2026-12"), 900.0)
+            with self.assertRaises(sa.exc.IntegrityError):   # a month's amount belongs to a budget that's there
+                with conn.sa.begin_nested():
+                    conn.execute(insert(MonthBudget).values(category="Nowhere", month="2026-12", amount=1))
+            conn.execute(sa.delete(schema.budgets).where(schema.budgets.c.category == "Travel"))   # and goes with it
+            self.assertEqual(conn.execute(select(func.count()).select_from(MonthBudget)).scalar(), 0)
+        with db.engine(self.path).begin() as c:   # and back down
+            command.downgrade(db.alembic_config(c), "0041")
+            self.assertNotIn("budget_months", sa.inspect(c).get_table_names())
+            self.assertEqual(c.exec_driver_sql("SELECT count(*) FROM budgets").scalar(), 1)
 
     def test_0039_moves_categories_nested_too_deep_up(self):
         # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.

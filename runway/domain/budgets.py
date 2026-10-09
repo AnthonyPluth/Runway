@@ -1,5 +1,9 @@
-"""Budgets: what each category spent in a month, and what a budget that rolls over carries into the next one. Shared by
-the Budget page and the forecast, which spends the budgets."""
+"""Budgets: each budget's amount in a month, what each category spent in a month, and what a budget that rolls over
+carries into the next one. Shared by the Budget page and the forecast, which spends the budgets.
+
+A budget has its usual amount (budgets.amount) and, for any month, can have an amount of its own instead
+(budget_months): for that month only, nothing carried forward to the months after it. Every other month, past or still
+to come, has the usual amount, and changing it changes every month without an amount of its own."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -10,7 +14,22 @@ from sqlalchemy import func, literal_column, select
 from ..storage import db
 from . import splits
 from ..dates import month_key, month_start
-from ..storage.models import Account
+from ..storage.models import Account, Budget, MonthBudget
+
+
+def load(conn) -> dict[str, dict]:
+    """Every budget by category: its row (`amount`, the usual amount; `rollover_from`) with `months`, the months that
+    have an amount of their own ({"YYYY-MM": amount})."""
+    out = {r["category"]: {**r, "months": {}} for r in db.rows(conn.execute(select(Budget)))}
+    for cat, month, amount in conn.execute(select(MonthBudget.category, MonthBudget.month, MonthBudget.amount)).fetchall():
+        if cat in out:
+            out[cat]["months"][month] = amount
+    return out
+
+
+def amount_in(row: dict, month: str) -> float:
+    """A budget's amount in a month ("YYYY-MM"): the month's own, else the usual amount. `row` is one of load()'s."""
+    return row.get("months", {}).get(month, row["amount"])
 
 
 def _totals_query(start: date, end: date, by_month: bool = False):
@@ -42,7 +61,8 @@ def family_spent(cats: list[dict], totals: dict) -> dict[str, float]:
 
 def budget_carry(conn, cats: list[dict], budget_rows: dict, month: date) -> dict[str, float]:
     """For each budget that rolls over: what's carried into `month`, the unspent part of every month since it started
-    rolling over (overspending isn't carried; a month that goes over just uses up what was carried)."""
+    rolling over, at each month's amount (amount_in; overspending isn't carried; a month that goes over just uses up what
+    was carried). `budget_rows` are load()'s."""
     starts = {}
     names = {c["name"] for c in cats}   # spending budgets only: income doesn't roll over
     for name, r in budget_rows.items():
@@ -69,5 +89,5 @@ def budget_carry(conn, cats: list[dict], budget_rows: dict, month: date) -> dict
         spent = family_spent(cats, totals.get(month_key(m), {}))
         for name, start in starts.items():
             if start <= m:
-                carry[name] = max(0.0, round(budget_rows[name]["amount"] + carry[name] - spent.get(name, 0.0), 2))
+                carry[name] = max(0.0, round(amount_in(budget_rows[name], month_key(m)) + carry[name] - spent.get(name, 0.0), 2))
     return carry

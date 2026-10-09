@@ -10,8 +10,8 @@ from ..storage import db
 from ..storage import settings_keys as sk
 from .forecast import NO_STATEMENT_DUE_DAYS
 from .retail import token as retail_token
-from ..storage.models import (Account, Asset, Budget, Category, Holding, InvAccount, ManualStatement, Price, PriceMeta, Recurring,
-                              RetailCharge, RetailItem, RetailOrder, Security, SyncLog, Transaction)
+from ..storage.models import (Account, Asset, Budget, Category, Holding, InvAccount, ManualStatement, MonthBudget, Price, PriceMeta,
+                              Recurring, RetailCharge, RetailItem, RetailOrder, Security, SyncLog, Transaction)
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -47,6 +47,7 @@ EVERYDAY = [
 ]
 
 BUDGETS = [("Groceries", 600), ("Restaurants", 250), ("Coffee & Snacks", 60), ("Shopping", 300)]
+MONTH_BUDGETS = [("Shopping", 450)]   # this month's own amount (gifts, say); other months keep the usual one
 
 # ticker, name, type, shares, price paid per share, yesterday's close, today's close: one up, one down, one barely moved
 HOLDINGS = [
@@ -104,6 +105,7 @@ def seed(conn, today: date | None = None) -> int:
     cols = ("id", "account_id", "posted", "amount", "description", "payee", "category")
     conn.execute(insert(Transaction), [{**dict(zip(cols, t, strict=True)), "category_source": "rule"} for t in txs])
     conn.execute(insert(Budget), [{"category": c, "amount": a} for c, a in BUDGETS])
+    conn.execute(insert(MonthBudget), [{"category": c, "month": f"{today:%Y-%m}", "amount": a} for c, a in MONTH_BUDGETS])
     conn.execute(update(Category).where(Category.name.in_([c for c, _ in BUDGETS])).values(pay_with="demo-card"))
     # The card's latest statement, entered by hand (a card without Plaid): it closes on the 28th, due NO_STATEMENT_DUE_DAYS
     # later (as the forecast takes a statement with no due date to be).

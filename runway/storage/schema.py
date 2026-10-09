@@ -265,6 +265,15 @@ budgets = Table(
     Column('rollover_from', Text, doc='YYYY-MM: from this month on, what\'s left over carries into the next month; NULL = off'),
 )
 
+budget_months = Table(
+    'budget_months', metadata,
+    Column('category', Text, refers('budget_months', 'category', 'budgets.category', 'CASCADE'), nullable=False),
+    Column('month', Text, nullable=False, doc='YYYY-MM'),
+    Column('amount', Float, nullable=False, doc='that month\'s budget instead of the usual amount (budgets.amount), 0 or more'),
+    PrimaryKeyConstraint('category', 'month'),
+    info={'doc': 'a budget\'s own amount for one month; every other month has the usual amount'},
+)
+
 overrides = Table(
     'overrides', metadata,
     Column('key', Text, primary_key=True, doc='rec:<id>:<date>, card:<account id>:<date> or stmt:<account id>:<close date>'),
