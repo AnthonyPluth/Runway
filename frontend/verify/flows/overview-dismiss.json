@@ -3,6 +3,7 @@
   "page": "overview",
   "steps": [
     { "wait_for": "[aria-label^='Dismiss ']" },
+    { "press": { "selector": "[aria-label^='Dismiss ']", "key": "Shift" } },
     { "screenshot": "alert" },
     { "click": "[aria-label^='Dismiss ']" },
     { "wait_for": "button:text-is('Show dismissed')" },
