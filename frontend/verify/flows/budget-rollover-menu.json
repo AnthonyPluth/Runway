@@ -1,0 +1,12 @@
+{
+  "name": "budget-rollover-menu",
+  "page": "budget",
+  "steps": [
+    { "press": { "selector": "input[aria-label='Budget for Coffee & Snacks']", "key": "Tab" } },
+    { "wait_for": "button[aria-label='Actions for Coffee & Snacks']:focus-visible" },
+    { "screenshot": "button" },
+    { "click": "button[aria-label='Actions for Coffee & Snacks']" },
+    { "wait_for": "button[aria-pressed]:has-text('Roll over')" },
+    { "screenshot": "menu-open" }
+  ]
+}
