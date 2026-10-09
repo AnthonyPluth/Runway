@@ -29,17 +29,16 @@ beforeEach(() => {
 });
 
 describe("EventsList", () => {
-  it("leaves a row plain unless `marked`: no label, no italic", () => {
+  it("leaves a row plain unless `marked`: no italic", () => {
     const { container } = show([ev()]);
-    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
     expect(container.querySelector("[data-projected]")).toBeNull();
     expect(screen.getByText("Rent")).not.toHaveClass("italic");
   });
 
-  it("marks a projected row by more than colour: a label (with a screen-reader sentence), and an italic name", () => {
+  it("marks a projected row by more than colour: an italic name, without repeating that it's projected", () => {
     const { container } = show([ev(), ev({ name: "Pay", amount: 2000, key: "k2", recurring_id: 7 })], { marked: true });
-    expect(screen.getAllByText("Projected")).toHaveLength(2);
-    expect(screen.getAllByText("Not posted yet:", { exact: false })).toHaveLength(2);
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not posted yet:", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByText("Rent")).toHaveClass("italic");
     expect(screen.getByRole("link", { name: "Pay" })).toHaveClass("italic");
     const rows = container.querySelectorAll("[data-projected]");
@@ -267,43 +266,10 @@ describe("EventsList", () => {
     expect(day.textContent).toContain("Rent");
   });
 
-  describe("phone balance (under the last amount of the day; CSS hides it from sm up)", () => {
-    const phone = () => [...document.querySelectorAll("[data-phone-balance]")].map((b) => b.textContent);
-
-    it("shows one per account per day, on that account's last item", () => {
-      show([
-        ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),
-        ev({ key: "b", name: "Card", account_id: "chk", balance_after: 2000 }),
-        ev({ key: "c", name: "Rent", account_id: "sav", account: "Savings", balance_after: 700 }),
-        ev({ key: "d", name: "Paycheck", date: "2026-03-16", amount: 3000, account_id: "chk", balance_after: 5000 }),
-      ]);
-      expect(phone()).toEqual(["proj. bal $2,000.00", "proj. bal $700.00", "proj. bal $5,000.00"]);
-      expect(screen.getByText("Card").closest(".cell")!.querySelector("[data-phone-balance]")).toHaveTextContent("proj. bal $2,000.00");
-      expect(screen.getByText("Taxes").closest(".cell")!.querySelector("[data-phone-balance]")).toBeNull();
-    });
-
-    it("names the account when several accounts' items are shown together", () => {
-      show([ev({ account: "Checking", account_id: "chk" })], { accounts: true });
-      expect(phone()).toEqual(["Checking · proj. bal $900.00"]);
-    });
-
-    it("skips an annual fee and an item with no balance", () => {
-      show([ev({ key: "a", name: "Rent", balance_after: 900 }), ev({ key: "f", name: "Fee", kind: "fee", balance_after: 100 }), ev({ key: "n", name: "Gym", balance_after: undefined })]);
-      expect(phone()).toEqual(["proj. bal $900.00"]);
-    });
-
-    it("is a line of its own under the row, not in the amount's column, so a long account name can't squeeze the name", () => {
-      show([ev({ account: "Everyday Checking", account_id: "chk" })], { accounts: true, marked: true });
-      const bal = document.querySelector("[data-phone-balance]")!;
-      expect(bal).toHaveClass("basis-full");
-      expect(bal.parentElement).toHaveClass("cell");
-      expect(bal.parentElement).toContainElement(screen.getByText("Rent"));
-    });
-
-    it("marks a negative balance", () => {
-      show([ev({ balance_after: -20 })]);
-      expect(document.querySelector("[data-phone-balance]")).toHaveClass("text-destructive");
-    });
+  it("leaves the day's projected balance out of the rows on a phone, so they match a transaction's height", () => {
+    show([ev({ key: "a", name: "Rent", balance_after: 900 })]);
+    expect(document.querySelector("[data-phone-balance]")).toBeNull();
+    expect(screen.getByText("projected balance $900.00").parentElement).toHaveClass("max-sm:hidden");
   });
 
   describe("limit", () => {

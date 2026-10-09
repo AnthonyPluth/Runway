@@ -22,8 +22,8 @@
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
   // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
-  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones):
-  // an italic name and a "Projected" label, which a screen reader gets as text too. Amounts are untouched.
+  // `marked`: set each row apart from a posted transaction (Transactions lists them above real ones, under
+  // a heading that already says they're projected): an italic name. Amounts are untouched.
   let { events, limit = 8, accounts = false, marked = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
     limit?: number; accounts?: boolean; marked?: boolean; all?: boolean; onchanged: () => void;
@@ -44,16 +44,15 @@
   // (an annual fee or a recurring charge on a card is a card charge: it never moves one).
   const days = $derived.by(() => {
     type Ev = (typeof events)[number];
-    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[]; last: Set<Ev> }[] = [];
+    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
     shown.forEach((e, i) => {
-      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [], last: new Set() });
+      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [] });
       out.at(-1)!.rows.push({ e, i });
     });
     for (const d of out) {
       const last = new Map<string, Ev>();
       for (const { e } of d.rows) if (e.kind !== "fee" && e.balance_after != null) last.set(e.account_id ?? "", e);
       d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
-      d.last = new Set(last.values());
     }
     return out;
   });
@@ -117,8 +116,8 @@
          link, so that one keeps the asterisk alone). -->
     {@const clickable = !!(e.estimate && !e.overridden && !e.recurring_id)}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
-    <!-- On a phone the row is the same height as a Recent transaction's (the .cell default) and the day's projected balance
-         sits under the last amount; from sm up the rows are tighter and the balance is the day's line below. -->
+    <!-- On a phone the row is the same height as a Recent transaction's (the .cell default), so the day's projected balance
+         isn't shown there; from sm up the rows are tighter and the balance is the day's line below. -->
     <div class={["cell flex-wrap sm:min-h-12 sm:py-2", open && "items-start"]} data-projected={marked || undefined}>
       <!-- Logos as they are, with nothing behind them, as in Transactions; with several accounts' items together, the
            item's account is its bank on the logo's corner, as there, not a line of its own. -->
@@ -142,7 +141,6 @@
             <!-- A recurring item's name opens it in Recurring, to change every one. -->
             <a class={["truncate hover:underline", marked && "italic pr-0.5"]} href={`#recurring?item=${e.recurring_id}`} title="Open in Recurring">{e.name}</a>
           {:else}<span class={["truncate", marked && "italic pr-0.5"]}>{e.name}</span>{/if}
-          {#if marked}<Badge variant="outline" class="text-muted-foreground" title="Not posted yet: projected by the forecast"><span class="sr-only">Not posted yet: </span>Projected</Badge>{/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           <!-- A recurring date edited to $0 is one you skipped (Recurring's "Skip the next one"); reset puts it back. -->
@@ -176,12 +174,6 @@
       {#if open && e.estimate}
         <!-- under the name (past the icon), its amounts lined up under the row's -->
         <EstimateBreakdown estimate={e.estimate} id={`${uid}-${rid}`} class="-mt-2 basis-full pl-11" />
-      {/if}
-      {#if d.last.has(e)}
-        <!-- On a phone, the day's balance is a line of its own under the last row, right-aligned: beside the amount (as it was)
-             a long "account · proj. bal" squeezed the name down to a letter and the "Projected" label wrapped over it. -->
-        <span class={["basis-full text-right text-[13px] text-muted-foreground sm:hidden", (e.balance_after ?? 0) < 0 && "font-medium text-destructive"]}
-          data-phone-balance>{accounts && e.account ? `${e.account} · ` : ""}proj. bal {fmt(e.balance_after ?? 0)}</span>
       {/if}
     </div>
   {/each}
