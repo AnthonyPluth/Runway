@@ -631,6 +631,22 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
 
     @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
+    def test_0041_gives_recurring_items_a_category_they_start_without(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0040")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("category", {col["name"] for col in sa.inspect(c).get_columns("recurring")})
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('chk', 'Checking', 'checking')")
+            c.exec_driver_sql("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) "
+                              "VALUES (1, 'Water', 'chk', -40, 'monthly', '2026-09-05')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(tuple(conn.execute(select(Recurring.name, Recurring.category)).fetchone()), ("Water", None))
+        self.assertEqual(drift(self.path), [])
+
     def test_migrating_doesnt_cascade_on_sqlite(self):
         # Batch mode drops the old copy of a table it changes; with foreign keys on, that would take every row referring
         # to it along. db.migrate keeps them off while it migrates.
