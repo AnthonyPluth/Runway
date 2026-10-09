@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-173 routes; 27 have no test yet.
+174 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -54,7 +54,8 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/push/prefs` | `notifications.py:api_push_prefs` | `lib/components/settings/NotificationsSection.svelte` | `test_notify.py` | [using/features](/Runway/using/features/) |
 | `POST /api/push/test` | `notifications.py:api_push_test` | `lib/components/settings/NotificationsSection.svelte` | `test_mcp.py`, `test_notify.py`, `test_routes.py` | [using/features](/Runway/using/features/) |
 | `GET /api/budget` | `budget.py:api_budget` | `lib/components/budget/BudgetView.svelte`, `lib/components/overview/ThisMonth.svelte` | `test_api_contract.py`, `test_api_handlers.py`, `test_categorize.py`, `test_http_server.py`, `test_routes.py`, `test_splits.py` | [using/features](/Runway/using/features/) |
-| `POST /api/budget` | `budget.py:api_budget_set` | `lib/components/budget/BudgetRow.svelte`, `lib/components/budget/BudgetView.svelte` | `test_api_contract.py`, `test_api_handlers.py`, `test_api_validation.py`, `test_categorize.py`, `test_http_server.py`, `test_routes.py` | [using/features](/Runway/using/features/) |
+| `POST /api/budget` | `budget.py:api_budget_set` | `lib/components/budget/BudgetRow.svelte`, `lib/components/budget/BudgetSuggest.svelte`, `lib/components/budget/BudgetView.svelte` | `test_api_contract.py`, `test_api_handlers.py`, `test_api_validation.py`, `test_categorize.py`, `test_http_server.py`, `test_routes.py` | [using/features](/Runway/using/features/) |
+| `GET /api/budget/suggestions` | `budget_suggest.py:api_budget_suggestions` | `lib/components/budget/BudgetSuggest.svelte` | `test_api_contract.py`, `test_budget_suggest.py` | [using/features](/Runway/using/features/) |
 | `POST /api/ai/suggest` | `transactions.py:api_ai_suggest` | `lib/components/transactions/AiSuggest.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `POST /api/ai/apply` | `transactions.py:api_ai_apply` | `lib/components/transactions/AiSuggest.svelte` | `test_api_handlers.py`, `test_api_validation.py`, `test_bulk.py`, `test_mcp.py`, `test_networth.py`, `test_rules.py` | [using/features](/Runway/using/features/) |
 | `GET /api/ai/log` | `transactions.py:api_ai_log` | `lib/components/transactions/AiLog.svelte`, `lib/components/transactions/AiLogTable.svelte` | `test_api_handlers.py` | [using/features](/Runway/using/features/) |

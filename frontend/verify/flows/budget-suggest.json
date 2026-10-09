@@ -1,0 +1,9 @@
+{
+  "name": "budget-suggest",
+  "page": "budget",
+  "steps": [
+    { "click": "button:has-text('Suggest budgets')" },
+    { "wait_for": "[role=dialog] [aria-label='Suggestions']" },
+    { "screenshot": "open" }
+  ]
+}

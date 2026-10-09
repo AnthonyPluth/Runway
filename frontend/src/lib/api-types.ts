@@ -96,6 +96,31 @@ export interface BudgetSet {
   pay_with?: string | null;
 }
 
+/**
+ * A suggested monthly budget for a category (domain/budget_suggest.py): the larger of its typical month and the
+ * recurring payments coming in the budget's month, rounded up. `budget` is the category's budget now, if it has one.
+ */
+export interface BudgetSuggestion {
+  category: string;
+  suggested: number;
+  typical: number;
+  recurring: number;
+  budget: number | null;
+}
+
+/**
+ * GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history
+ * looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the
+ * month asked for when it's still to come, else next month; never past the forecast's reach).
+ */
+export interface BudgetSuggestions {
+  months: number;
+  first: string | null;
+  last: string | null;
+  recurring_month: string;
+  suggestions: BudgetSuggestion[];
+}
+
 /** The latest card statement you entered, whether a newer one should have been by now, and when the next closes. */
 export interface EnteredStatement {
   source: "manual";
@@ -257,4 +282,5 @@ export interface Endpoints {
   "DELETE /api/transactions/{id}": { body: never; reply: Ok };
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
+  "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
 }

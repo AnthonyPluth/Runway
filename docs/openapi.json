@@ -191,6 +191,27 @@
           }
         }
       }
+    },
+    "/api/budget/suggestions": {
+      "get": {
+        "operationId": "api_budget_suggestions",
+        "x-handler": "runway/server/api/budget_suggest.py:api_budget_suggestions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetSuggestions"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -618,6 +639,76 @@
         },
         "required": [
           "category"
+        ],
+        "additionalProperties": false
+      },
+      "BudgetSuggestion": {
+        "type": "object",
+        "description": "A suggested monthly budget for a category (domain/budget_suggest.py): the larger of its typical month and the\nrecurring payments coming in the budget's month, rounded up. `budget` is the category's budget now, if it has one.",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "suggested": {
+            "type": "number"
+          },
+          "typical": {
+            "type": "number"
+          },
+          "recurring": {
+            "type": "number"
+          },
+          "budget": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "suggested",
+          "typical",
+          "recurring",
+          "budget"
+        ],
+        "additionalProperties": false
+      },
+      "BudgetSuggestions": {
+        "type": "object",
+        "description": "GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history\nlooked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the\nmonth asked for when it's still to come, else next month; never past the forecast's reach).",
+        "properties": {
+          "months": {
+            "type": "integer"
+          },
+          "first": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recurring_month": {
+            "type": "string"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BudgetSuggestion"
+            }
+          }
+        },
+        "required": [
+          "months",
+          "first",
+          "last",
+          "recurring_month",
+          "suggestions"
         ],
         "additionalProperties": false
       },
