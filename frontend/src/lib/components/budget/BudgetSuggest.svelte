@@ -67,8 +67,9 @@
   }
 </script>
 
-<Button variant="outline" size="sm" class="h-10 sm:h-8" onclick={() => (open = true)}>
-  <Sparkles class="size-4" aria-hidden="true" />Suggest budgets
+<!-- On a phone just the icon, so it fits beside the month picker. -->
+<Button variant="outline" size="sm" class="size-10 sm:h-8 sm:w-auto" aria-label="Suggest budgets" onclick={() => (open = true)}>
+  <Sparkles class="size-4" aria-hidden="true" /><span class="hidden sm:inline">Suggest budgets</span>
 </Button>
 <Sheet.Root bind:open>
   <Sheet.Content>
