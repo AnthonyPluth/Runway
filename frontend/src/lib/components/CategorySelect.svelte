@@ -12,7 +12,7 @@
   import { pickSections, type PickOption } from "./categoryPicker";
 
   // Pick a category: a button showing it, which opens a list you can type into to narrow it down ("gro" for Groceries),
-  // grouped as Spending / Money in / Not spending, with the last few you picked at the top. Arrows move, Enter picks,
+  // grouped as Spending / Money in / Not spending. Arrows move, Enter picks,
   // Escape closes, Tab moves on. On a phone the list comes up as a sheet from the bottom. The list is only built while
   // it's open, so a page of rows each with a picker stays light. Call loadCategories() before showing it.
   // `blank` adds a first "Choose…" option (value ""); `extra` puts options of your own before the groups.
