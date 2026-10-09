@@ -1665,7 +1665,8 @@
         "frontend/src/lib/components/overview/ForecastSettings.svelte",
         "frontend/src/lib/components/overview/SetupChecklist.svelte",
         "frontend/src/lib/components/settings/AccountRow.svelte",
-        "frontend/src/lib/components/settings/AiCard.svelte"
+        "frontend/src/lib/components/settings/AiCard.svelte",
+        "frontend/src/pages/Overview.svelte"
       ],
       "tests": [
         "tests/test_api_handlers.py",

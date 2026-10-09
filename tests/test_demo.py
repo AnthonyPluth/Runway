@@ -15,10 +15,12 @@ class DemoTests(DbCase):
     def test_seeds_an_empty_database_once(self):
         n = demo.seed(self.c, today=date(2026, 9, 28))
         self.assertGreater(n, 100)
-        self.assertEqual(self.c.execute(select(func.count()).select_from(Account)).fetchone()[0], 4)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(Account)).fetchone()[0], 5)
         self.assertEqual(self.c.execute(select(func.count()).select_from(Recurring)).fetchone()[0], len(demo.BILLS))
         self.assertTrue(db.get_setting(self.c, "simplefin_access_url").endswith(".invalid/simplefin"))
-        card = forecast.build(self.c, date(2026, 9, 28), 30)["cards"][0]
+        fc = forecast.build(self.c, date(2026, 9, 28), 30)
+        self.assertEqual(fc["warnings"], ["Travel Mastercard: choose which account pays it in Settings."])   # one Overview can put away
+        card = next(c for c in fc["cards"] if c["id"] == "demo-card")
         self.assertEqual((card["statement_source"], card["last_close"], card["due_date"], card["statement_stale"]),
                          ("manual", "2026-09-28", "2026-10-23", False))
         self.assertGreater(card["statement_balance"], 0)
@@ -53,7 +55,7 @@ class DemoTests(DbCase):
 
     def test_the_card_has_a_part_payment_since_its_statement(self):
         demo.seed(self.c, today=date(2026, 10, 9))
-        card = forecast.build(self.c, date(2026, 10, 9), 30)["cards"][0]
+        card = next(c for c in forecast.build(self.c, date(2026, 10, 9), 30)["cards"] if c["id"] == "demo-card")
         self.assertEqual((card["last_close"], card["paid_since_close"]), ("2026-09-28", demo.PART_PAYMENT))
         self.assertAlmostEqual(card["remaining"], card["statement_balance"] - demo.PART_PAYMENT, places=2)
         self.assertGreater(card["remaining"], 0)

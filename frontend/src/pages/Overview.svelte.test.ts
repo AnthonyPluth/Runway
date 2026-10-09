@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ import { app } from "$lib/app.svelte";
 import { viewport } from "$lib/phone.svelte";
 import { forecastSheet } from "$lib/components/overview/forecastSheet.svelte";
 import type { Overview as OverviewData } from "$lib/types";
+import { toast } from "svelte-sonner";
 import Overview from "./Overview.svelte";
 
 const TODAY = "2026-09-30";
@@ -36,8 +37,18 @@ const forecast = (days: number, balance: number): OverviewData => ({
 
 Object.assign(SVGElement.prototype, { getBBox: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
 
+const W1 = "Enter Visa’s latest statement so its payment is in the forecast.";
+const W2 = "Amex: choose which account pays it in Settings.";
+const alerts = (dismissed: string[] = []): Partial<OverviewData> => ({
+  warnings: [W1, W2],
+  warning_links: [{ text: W1, href: "#setup/accounts?account=visa" }, { text: W2, href: "#setup/accounts" }],
+  dismissed_warnings: dismissed,
+});
+
 beforeEach(() => {
   vi.mocked(api).mockReset();
+  vi.mocked(toast).mockClear();
+  vi.mocked(toast.error).mockClear();
   app.state = { connected: true, primary_account: "chk", horizon_days: 90, setup: { bank: true, primary: true, recurring: true, budgets: true, dismissed: false } };
 });
 afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
@@ -152,6 +163,103 @@ describe("Overview", () => {
 
     answer(forecast(30, 2000));
     expect(await screen.findByText(/stays above \$2,000 for 30\sdays/)).toBeInTheDocument();
+  });
+
+  it("puts an alert away, with an Undo that brings it back", async () => {
+    serve(() => fc(alerts()));
+    render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument());
+    expect(api).toHaveBeenLastCalledWith("/api/settings", { method: "POST", body: { overview_warnings_dismissed: [W1] } });
+    expect(screen.getByRole("link", { name: W2 })).toBeInTheDocument();
+    expect(toast).toHaveBeenLastCalledWith("Alert dismissed", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
+
+    const opts = vi.mocked(toast).mock.calls.at(-1)![1] as unknown as { action: { onClick: () => Promise<void> } };
+    await opts.action.onClick();
+    await waitFor(() => expect(screen.getByRole("link", { name: W1 })).toBeInTheDocument());
+    expect(api).toHaveBeenLastCalledWith("/api/settings", { method: "POST", body: { overview_warnings_dismissed: [] } });
+    expect(toast).toHaveBeenLastCalledWith("Undone", undefined);
+  });
+
+  it("shows an alert put away earlier, and puts it away again", async () => {
+    serve(() => fc(alerts([W1])));
+    render(Overview);
+    expect(await screen.findByRole("link", { name: W2 })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show dismissed" }));
+    expect(await screen.findByRole("button", { name: `Show again ${W1}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide dismissed" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide dismissed" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: W2 })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show dismissed" }));
+    await userEvent.click(await screen.findByRole("button", { name: `Show again ${W1}` }));
+    await waitFor(() => expect(screen.getByRole("button", { name: `Dismiss ${W1}` })).toBeInTheDocument());
+    expect(api).toHaveBeenLastCalledWith("/api/settings", { method: "POST", body: { overview_warnings_dismissed: [] } });
+    expect(screen.queryByRole("button", { name: "Hide dismissed" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a way back when every alert is put away", async () => {
+    serve(() => fc({ warnings: [W1], warning_links: [{ text: W1, href: "#setup/accounts?account=visa" }] }));
+    render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Show dismissed" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Needs attention" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show dismissed" }));
+    expect(await screen.findByRole("button", { name: `Show again ${W1}` })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show dismissed" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide dismissed" })).toBeInTheDocument();
+  });
+
+  it("brings an alert back when its message has changed", async () => {
+    serve(() => fc(alerts([W1])));
+    render(Overview);
+    expect(await screen.findByRole("link", { name: W2 })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument();
+
+    const changed = "Enter Visa’s latest statement before the payment is due.";
+    serve(() => fc({ ...alerts([W1]), warnings: [changed, W2],
+      warning_links: [{ text: changed, href: "#setup/accounts?account=visa" }, { text: W2, href: "#setup/accounts" }] }));
+    // a different length from the one the earlier test left (the horizon outlives a render), so it reloads
+    await userEvent.click(screen.getByRole("radio", { name: "2M" }));
+    expect(await screen.findByRole("link", { name: changed })).toBeInTheDocument();
+  });
+
+  it("leaves an alert up when putting it away couldn't be saved", async () => {
+    vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+      if (opts?.method) throw new Error("Network is down");
+      if (path.startsWith("/api/overview")) return fc(alerts()) as never;
+      return new Promise(() => {}) as never;
+    });
+    render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Network is down"));
+    expect(screen.getByRole("link", { name: W1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Dismiss ${W1}` })).toBeInTheDocument();
+    expect(toast).not.toHaveBeenCalledWith("Alert dismissed", expect.anything());
+  });
+
+  it("keeps only the most recent 50 put away, so the server never refuses one", async () => {
+    const old = Array.from({ length: 50 }, (_, i) => `An alert from before, number ${i}`);
+    serve(() => fc(alerts(old)));
+    render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("/api/settings", { method: "POST", body: { overview_warnings_dismissed: [...old.slice(1), W1] } }));
+  });
+
+  it("puts away a forecast warning, not the no-account alert", async () => {
+    serve(() => fc({ ...alerts(), accounts: [], total: [], events: [] }));
+    render(Overview);
+    expect(await screen.findByRole("link", { name: /No account to forecast yet/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Dismiss / })).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /No account to forecast yet/ })).toBeInTheDocument();
   });
 });
 
