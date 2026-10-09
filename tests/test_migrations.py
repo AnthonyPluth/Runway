@@ -430,6 +430,10 @@ class MigrationTests(unittest.TestCase):
                               "walmart": ("example.com", 0)})
             self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
                              ["chk|amazon|monthly", "chk|amzn digital|monthly", "chk|costco gas|weekly"])
+        with db.engine(self.path).begin() as c:
+            # Matching below is today's code, which reads today's recurring columns (0041's, on this 0034 database).
+            c.exec_driver_sql("ALTER TABLE recurring ADD COLUMN category TEXT")
+        with db.session(self.path) as conn:
             # The next Kindle payment, synced with the brand's name, still finds its recurring item, and an Amazon order doesn't.
             conn.execute(insert(Transaction), [
                 {"id": "chk|10", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": digital, "payee": "Amazon"},
@@ -630,7 +634,6 @@ class MigrationTests(unittest.TestCase):
         with db.session(self.path) as conn:
             self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
 
-    @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
     def test_0041_gives_recurring_items_a_category_they_start_without(self):
         from alembic import command
         db.init(self.path)
@@ -647,6 +650,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(tuple(conn.execute(select(Recurring.name, Recurring.category)).fetchone()), ("Water", None))
         self.assertEqual(drift(self.path), [])
 
+    @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
     def test_migrating_doesnt_cascade_on_sqlite(self):
         # Batch mode drops the old copy of a table it changes; with foreign keys on, that would take every row referring
         # to it along. db.migrate keeps them off while it migrates.
