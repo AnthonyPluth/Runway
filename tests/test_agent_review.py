@@ -203,6 +203,42 @@ class Plan(unittest.TestCase):
         self.assertIn("+a = 3", since)
         self.assertNotIn("other.py", since)
 
+    def test_generated_files_lockfiles_and_images_are_left_out_of_the_diff_but_listed(self):
+        self.write("runway/app.py", "a = 2\n")
+        left = ["docs/openapi.json", "frontend/src/lib/api-types.ts", "docs/feature-map.json",
+                "docs/src/content/docs/contributing/feature-map.md", "tests/fixtures/forecast_golden.json",
+                "poetry.lock", "frontend/package-lock.json", "docs/src/assets/screenshots/budget.png"]
+        kept = [".github/agent-review/package-lock.json", "frontend/src/lib/api.ts", "docs/src/content/docs/x.md",
+                "docs/public/favicon.svg"]
+        for path in left + kept:
+            self.write(path, f"generated {path}\n")
+        head = self.commit("change")
+        self.plan(head)
+        patch = (self.out / "diff.patch").read_text()
+        files = (self.out / "files.txt").read_text()
+        self.assertEqual((self.out / "omitted.txt").read_text().splitlines(), sorted(left))
+        for path in left:
+            self.assertNotIn(path, patch)
+            self.assertIn(path, files)
+        for path in [*kept, "runway/app.py"]:
+            self.assertIn(f"+generated {path}" if path != "runway/app.py" else "+a = 2", patch)
+
+    def test_nothing_left_out_is_an_empty_list(self):
+        self.write("runway/app.py", "a = 2\n")
+        self.plan(self.commit("change"))
+        self.assertEqual((self.out / "omitted.txt").read_text(), "")
+
+    def test_the_diff_since_the_last_review_leaves_them_out_too(self):
+        self.write("runway/app.py", "a = 2\n")
+        prev = self.commit("change")
+        self.write("runway/app.py", "a = 3\n")
+        self.write("docs/openapi.json", "{}\n")
+        head = self.commit("fix")
+        self.plan(head, PREV_SHA=prev, PREV_BODY=self.previous_body())
+        since = (self.out / "since-last-review.patch").read_text()
+        self.assertIn("+a = 3", since)
+        self.assertNotIn("openapi", since)
+
     def merge_main(self, main_path="runway/other.py", main_text="b = 1\n"):
         """The pull request reviewed at prev; main moves on; main is merged in. Returns (prev, head)."""
         self.write("runway/app.py", "a = 2\n")

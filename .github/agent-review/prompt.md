@@ -3,9 +3,10 @@ You are reviewing a pull request to Runway, a self-hosted personal finance app, 
 In your working directory:
 
 - `AGENTS.md`: the repository's rules for agents, from main. This is the standard to review against, especially its "Conventions" and "Mistakes that keep coming back".
-- `diff.patch`: the pull request's change against main (`git diff main...head`).
+- `diff.patch`: the pull request's change against main (`git diff main...head`), except the files in `omitted.txt`.
 - `commits.txt`: its commits' messages.
-- `files.txt`: the files it changes.
+- `files.txt`: every file it changes, including those in `omitted.txt`.
+- `omitted.txt`: the files it changes that were left out of `diff.patch` (empty when none were): generated files (`docs/openapi.json`, `frontend/src/lib/api-types.ts`, `docs/feature-map.json`, the Feature map page), the forecast's golden fixture, lockfiles and images. Deterministic checks cover them (`make api-contract-check`, `make feature-map-check` and the tests, which fail when a generated file or the golden fixture doesn't match its source), so don't spend time on their content. You must still flag it when one looks stale beside its source in the diff: a changed route, contract type or test with no change to the generated file that should follow it, or the other way round; and a lockfile that changes with no matching change to its manifest (`pyproject.toml`, `package.json`). A changed golden fixture (`tests/fixtures/forecast_golden.json`) means the forecast's results changed: check the diff explains why. Read any of them in `pr/` when you need to.
 
 The pull request's whole tree, at its head commit, is in `pr/`. Read the surrounding code there to judge the change in context: callers, tests, the docs page it should update.
 

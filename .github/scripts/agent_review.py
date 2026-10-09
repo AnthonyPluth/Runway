@@ -42,6 +42,15 @@ SEVERITIES = ("blocking", "advisory")
 MAX_COMMENT = 60000
 SECRETS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")   # what the reviewer authenticates with (agent-review-run.sh)
 
+# Left out of diff.patch, to spare the reviewer reading them, but still in files.txt (and in omitted.txt): files that
+# are generated, or fixtures, which deterministic checks cover (make api-contract-check, make feature-map-check, the
+# forecast's golden test), lockfiles and images. The reviewer can still Read them in pr/, and is asked to say when one
+# looks stale beside its source. This is the only list of them; prompt.md describes it.
+GENERATED = ("docs/openapi.json", "frontend/src/lib/api-types.ts", "docs/feature-map.json",
+             "docs/src/content/docs/contributing/feature-map.md", "tests/fixtures/forecast_golden.json")
+LOCKFILES = ("poetry.lock", "uv.lock", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico")
+
 
 def is_agent(messages: list[str], body: str) -> bool:
     if any(sign in body for sign in BODY_SIGNS):
@@ -70,9 +79,18 @@ def git(repo: str, *args: str) -> str:
     return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True, text=True).stdout
 
 
-def diff(repo: str, *revs: str, paths: list[str] | None = None) -> str:
-    spec = ["--", *(f":(literal){p}" for p in paths)] if paths is not None else []
-    return git(repo, "diff", "--no-ext-diff", "--no-textconv", *revs, *spec)
+def left_out(path: str) -> bool:
+    """Whether a file is left out of the diffs the reviewer reads (GENERATED). Never one under .github/: the workflows,
+    and the lockfile of the Claude Code this review runs, are always read in full."""
+    if path.startswith(".github/"):
+        return False
+    return path in GENERATED or path.rsplit("/", 1)[-1] in LOCKFILES or path.lower().endswith(IMAGES)
+
+
+def diff(repo: str, *revs: str, paths: list[str] | None = None, exclude: list[str] | None = None) -> str:
+    spec = [f":(literal){p}" for p in paths] if paths is not None else ["."]
+    spec += [f":(exclude,literal){p}" for p in exclude or []]
+    return git(repo, "diff", "--no-ext-diff", "--no-textconv", *revs, "--", *spec)
 
 
 def own_files(repo: str, main: str, rev: str) -> list[str]:
@@ -115,20 +133,23 @@ def plan(env: dict[str, str]) -> dict[str, str]:
     and only_main_merged(): its verdict is copied to the new head instead of reviewing again. Otherwise it is review,
     with OUT_DIR holding:
 
-      diff.patch   the pull request's change against main (git diff main...head)
-      files.txt    the files it changes (--name-status)
+      diff.patch   the pull request's change against main (git diff main...head), without the files left_out()
+      files.txt    every file it changes (--name-status)
+      omitted.txt  the files it changes that diff.patch leaves out (empty when none)
       commits.txt  its commits' messages
 
     and, when the last review read a commit this head descends from (PREV_SHA, from `previous`), a re-review:
 
       previous-review.md      the last review's comment (PREV_BODY)
       since-last-review.patch what changed since, in the files the pull request touches (main's own changes, merged
-                              in, left out)
+                              in, and the files left_out(), left out)
 
     with TRUSTED/incremental.md (main's copy) added to OUT_DIR/prompt.md. Anything that goes wrong with the re-review
     gives a full review instead."""
     repo, out, main, head = env["REPO_DIR"], Path(env["OUT_DIR"]), env["MAIN"], env["HEAD"]
-    (out / "diff.patch").write_text(diff(repo, f"{main}...{head}"))
+    omitted = [p for p in own_files(repo, main, head) if left_out(p)]
+    (out / "diff.patch").write_text(diff(repo, f"{main}...{head}", exclude=omitted))
+    (out / "omitted.txt").write_text("".join(p + "\n" for p in omitted))
     (out / "files.txt").write_text(git(repo, "diff", "--name-status", f"{main}...{head}"))
     (out / "commits.txt").write_text(git(repo, "log", "--format=commit %H%n%B", f"{main}..{head}"))
     result = {"mode": "review", "description": "", "incremental": "false"}
@@ -143,7 +164,8 @@ def plan(env: dict[str, str]) -> dict[str, str]:
     try:
         body = Path(env["PREV_BODY"]).read_text() if env.get("PREV_BODY") else ""
         if body and is_ancestor(repo, prev, head):
-            files = sorted(set(own_files(repo, main, head)) | set(own_files(repo, main, prev)))
+            files = sorted(p for p in set(own_files(repo, main, head)) | set(own_files(repo, main, prev))
+                           if not left_out(p))
             since = diff(repo, prev, head, paths=files) if files else ""
             (out / "since-last-review.patch").write_text(since)
             (out / "previous-review.md").write_text(body)

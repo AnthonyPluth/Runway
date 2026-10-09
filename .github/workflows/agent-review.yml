@@ -14,6 +14,9 @@ name: Agent review
 # the one that was reviewed, that "Agent review" verdict is copied to the new head, saying so. A blocking or failed
 # review is never carried forward, and anything that can't be proved identical is reviewed.
 #
+# The diff the reviewer reads leaves out generated files and fixtures that deterministic checks cover, lockfiles and
+# images (GENERATED in agent_review.py, the one list); files.txt still lists them, and the prompt says why.
+#
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
 # saying so; Dependabot's get none (the merge gate doesn't ask for one).
