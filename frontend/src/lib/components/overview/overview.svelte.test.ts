@@ -211,7 +211,7 @@ describe("CardsTable", () => {
     expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
-  it("shows a card’s balance, its statement, due date and minimum", () => {
+  it("shows a card’s balance, what's due on its statement, the due date and minimum", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.getByText(/balance \$800\.00/)).toBeInTheDocument();
@@ -226,13 +226,22 @@ describe("CardsTable", () => {
     expect(screen.getByText("due Mar 26")).toHaveClass("text-warning");
   });
 
-  it("says Paid once nothing remains, and what's left after a part payment", () => {
+  it("shows only what's still due after a part payment or credit, with the statement in its tooltip", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 0 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 250, paid_since_close: 300, credits_since_close: 50 })] });
+    const due = screen.getByRole("button", { name: "$250.00" });
+    expect(due).toHaveAttribute("title", "Amount due · statement closed Mar\u00a01: $600.00 · paid $300.00 and credited $50.00 since · click to correct it");
+    expect(screen.queryByText(/\$600\.00/)).toBeNull();
+    expect(screen.queryByText(/left/)).toBeNull();
+    expect(screen.getByText("due Mar 26")).toBeInTheDocument();
+  });
+
+  it("says Paid once nothing remains", () => {
+    at("2026-03-10");
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 0, paid_since_close: 600 })] });
     expect(screen.getByText("Paid ✓")).toBeInTheDocument();
-    unmount();
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 250 })] });
-    expect(screen.getByText(/\$250\.00 left/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "$0.00" })).toHaveAttribute("title", "Amount due · statement closed Mar\u00a01: $600.00 · paid $600.00 since · click to correct it");
+    expect(screen.queryByText(/due Mar/)).toBeNull();
   });
 
   it("says how much of the statement a card that isn't paid in full pays, and what carries over", () => {
@@ -260,16 +269,48 @@ describe("CardsTable", () => {
     expect(screen.getByText(/balance \$/)).toBeInTheDocument();
   });
 
-  it("lets you correct the statement balance, and undo that", async () => {
+  it("lets you correct the amount due, kept as the statement it implies, and undo that", async () => {
     at("2026-03-10");
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_set: true, statement_reported: 590 })] });
-    expect(screen.getByText("set")).toHaveAttribute("title", "Entered by you · the bank reported $590.00");
-    await userEvent.click(screen.getByRole("button", { name: "$600.00" }));
-    const box = screen.getByRole("spinbutton", { name: "Statement balance" });
+    const onchanged = vi.fn();
+    render(CardsTable, { onchanged, cards: [card({ statement_set: true, statement_balance: 610, statement_reported: 590, remaining: 260,
+                                                   paid_since_close: 300.1, credits_since_close: 49.9 })] });
+    expect(screen.getByText("set")).toHaveAttribute("title", "Entered by you · the bank’s statement leaves $240.00 due");
+    expect(screen.getByRole("button", { name: "reset" })).toHaveAttribute("title", "Go back to the amount due on the bank's statement ($240.00)");
+    await userEvent.click(screen.getByRole("button", { name: "$260.00" }));
+    const box = screen.getByRole("spinbutton", { name: "Amount due" });
     await userEvent.clear(box);
-    await userEvent.type(box, "610{Enter}");
-    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 610 } });
+    await userEvent.type(box, "0.1{Enter}");
+    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 350.1 } });
+    expect(onchanged).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
     expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "stmt-c1" } });
+    expect(onchanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an amount due of nothing, and saves nothing for the amount already shown", async () => {
+    at("2026-03-10");
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 250, paid_since_close: 350 })] });
+    await userEvent.click(screen.getByRole("button", { name: "$250.00" }));
+    await userEvent.keyboard("{Enter}");
+    expect(api).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "$250.00" }));
+    const box = screen.getByRole("spinbutton", { name: "Amount due" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "0{Enter}");
+    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 350 } });
+  });
+
+  it("says when an amount due couldn't be saved, and leaves the amount as it was", async () => {
+    at("2026-03-10");
+    vi.mocked(api).mockRejectedValueOnce(new Error("Couldn't save"));
+    const onchanged = vi.fn();
+    render(CardsTable, { onchanged, cards: [card({ remaining: 250, paid_since_close: 350 })] });
+    await userEvent.click(screen.getByRole("button", { name: "$250.00" }));
+    const box = screen.getByRole("spinbutton", { name: "Amount due" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "100{Enter}");
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save");
+    expect(onchanged).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "$250.00" })).toBeInTheDocument();
   });
 });

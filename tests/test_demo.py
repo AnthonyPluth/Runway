@@ -21,8 +21,16 @@ class DemoTests(DbCase):
         self.assertEqual((card["statement_source"], card["last_close"], card["due_date"], card["statement_stale"]),
                          ("manual", "2026-09-28", "2026-10-23", False))
         self.assertGreater(card["statement_balance"], 0)
+        self.assertEqual((card["paid_since_close"], card["remaining"]), (0.0, card["statement_balance"]))
         with self.assertRaises(SystemExit):
             demo.seed(self.c)
+
+    def test_the_card_has_a_part_payment_since_its_statement(self):
+        demo.seed(self.c, today=date(2026, 10, 9))
+        card = forecast.build(self.c, date(2026, 10, 9), 30)["cards"][0]
+        self.assertEqual((card["last_close"], card["paid_since_close"]), ("2026-09-28", demo.PART_PAYMENT))
+        self.assertAlmostEqual(card["remaining"], card["statement_balance"] - demo.PART_PAYMENT, places=2)
+        self.assertGreater(card["remaining"], 0)
 
 
 if __name__ == "__main__":

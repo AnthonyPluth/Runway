@@ -164,7 +164,11 @@ export interface CardSummary {
   statement_set?: boolean;
   statement_reported?: number;
   last_close: string;
+  /** What's still due on the statement: the statement less the payments and posted credits since it closed. */
   remaining: number;
+  /** Payments (and posted credits) since the statement closed: what the statement comes down by to leave `remaining`. */
+  paid_since_close?: number;
+  credits_since_close?: number;
   minimum_payment?: number | null;
   /** How the forecast pays the statement (Settings → Accounts): what it pays on the due date out of what's left
    *  (remaining), and what that leaves to carry into the next statement (below zero when a payment you edited is more
