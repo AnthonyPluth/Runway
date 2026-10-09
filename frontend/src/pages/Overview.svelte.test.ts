@@ -225,7 +225,8 @@ describe("Overview", () => {
     const changed = "Enter Visa’s latest statement before the payment is due.";
     serve(() => fc({ ...alerts([W1]), warnings: [changed, W2],
       warning_links: [{ text: changed, href: "#setup/accounts?account=visa" }, { text: W2, href: "#setup/accounts" }] }));
-    await userEvent.click(screen.getByRole("radio", { name: "1M" }));
+    // a different length from the one the earlier test left (the horizon outlives a render), so it reloads
+    await userEvent.click(screen.getByRole("radio", { name: "2M" }));
     expect(await screen.findByRole("link", { name: changed })).toBeInTheDocument();
   });
 
@@ -241,6 +242,14 @@ describe("Overview", () => {
     expect(screen.getByRole("link", { name: W1 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Dismiss ${W1}` })).toBeInTheDocument();
     expect(toast).not.toHaveBeenCalledWith("Alert dismissed", expect.anything());
+  });
+
+  it("keeps only the most recent 50 put away, so the server never refuses one", async () => {
+    const old = Array.from({ length: 50 }, (_, i) => `An alert from before, number ${i}`);
+    serve(() => fc(alerts(old)));
+    render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: `Dismiss ${W1}` }));
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("/api/settings", { method: "POST", body: { overview_warnings_dismissed: [...old.slice(1), W1] } }));
   });
 
   it("puts away a forecast warning, not the no-account alert", async () => {

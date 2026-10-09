@@ -6,6 +6,7 @@
   // warning worded differently (or one you ask to see again) comes back. Saved with the other settings.
   let dismissed = $state<string[]>([]);
   let showDismissed = $state(false);
+  const DISMISSED_MAX = 50;   // the most the server keeps
   // The forecast last on screen, drawn at once when the page is drawn afresh (after a change) until the new one arrives.
   let last: { fc: Overview; days: number } | null = null;
 </script>
@@ -58,7 +59,7 @@
   // An alert is put away by its message, so one worded differently later (the same link, a new problem) shows again.
   const remember = (list: string[]) => api("/api/settings", { method: "POST", body: { overview_warnings_dismissed: list } });
   async function dismiss(message: string) {
-    const next = [...dismissed, message];
+    const next = [...dismissed, message].slice(-DISMISSED_MAX);   // the oldest go first, so the server's limit never turns Dismiss down
     if (!(await act(async () => { await remember(next); dismissed = next; }))) return;   // the alert stays up if it didn't save
     undoable("Alert dismissed", () => restore(message));
   }

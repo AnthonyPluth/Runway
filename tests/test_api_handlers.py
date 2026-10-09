@@ -236,7 +236,7 @@ class HandlerTests(DbCase):
     def test_settings_put_away_alerts(self):
         fc = state.api_overview(self.c, q(days=30), {})
         self.assertEqual(fc["dismissed_warnings"], [])
-        msgs = fc["warnings"][:1] + ["An alert the sample data doesn’t show"]
+        msgs = [*fc["warnings"][:1], "An alert the sample data doesn’t show"]
         state.api_settings(self.c, {}, {"overview_warnings_dismissed": msgs})
         fc = state.api_overview(self.c, q(days=30), {})
         self.assertEqual(fc["dismissed_warnings"], msgs)
