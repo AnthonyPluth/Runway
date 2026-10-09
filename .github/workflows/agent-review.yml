@@ -11,7 +11,8 @@ name: Agent review
 #
 # Authentication, one of two secrets: CLAUDE_CODE_OAUTH_TOKEN, a Claude Pro or Max subscription's token (made with
 # `claude setup-token`), or ANTHROPIC_API_KEY, an API key, which wins when both are set. The model is always Sonnet,
-# fixed in the Review step below (no variable can change it), and the most a review may spend is the
+# fixed in the Review step below (no variable can change it): the repository owner decided that every review uses
+# Sonnet and never Opus, security-sensitive changes included. The most a review may spend is the
 # AGENT_REVIEW_BUDGET_USD variable (5 US dollars, as Claude Code estimates a run's cost).
 #
 # Why pull_request_target: it runs main's copy of this workflow, its prompt and its scripts, so a pull request can't
