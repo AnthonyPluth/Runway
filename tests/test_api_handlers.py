@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway.domain import categories, demo, forecast, splits
 from runway.storage import db
+from runway.storage import settings_keys as sk
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
@@ -43,11 +44,11 @@ class HandlerTests(DbCase):
                        .values(plaid_account_id="pa1", display_name="Zed Card"))
         self.c.execute(insert(Account).values(id="gone", name="Aardvark", kind="checking", hidden=1))
         out = accounts.api_accounts(self.c, {}, {})
-        self.assertEqual([a["id"] for a in out], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings", "gone"])
+        self.assertEqual([a["id"] for a in out], ["demo-checking", "demo-travel", "demo-card", "demo-mortgage", "demo-savings", "gone"])
         cols = [c.name for c in db.schema.accounts.columns]
         self.assertEqual(list(out[0]), [*cols, "plaid_link"])
         self.assertIsNone(out[0]["plaid_link"])
-        self.assertEqual(out[1]["plaid_link"], {"institution": "Card Bank", "mask": "1234", "transactions": True,
+        self.assertEqual(out[2]["plaid_link"], {"institution": "Card Bank", "mask": "1234", "transactions": True,
                                                 "closed": "2026-09-01", "due": "2026-09-25", "statement_note": None})
 
     def test_account_update(self):
@@ -189,9 +190,9 @@ class HandlerTests(DbCase):
     def test_overview(self):
         self.c.execute(update(Account).where(Account.id == "demo-savings").values(display_name="A Savings"))
         fc = state.api_overview(self.c, q(days=30), {})
-        self.assertEqual([a["id"] for a in fc["all_accounts"]], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings"])
+        self.assertEqual([a["id"] for a in fc["all_accounts"]], ["demo-checking", "demo-card", "demo-travel", "demo-mortgage", "demo-savings"])
         self.assertEqual(list(fc["all_accounts"][0]), ["id", "name", "kind", "balance", "balance_date", "owed_positive", "hidden"])
-        self.assertEqual(fc["all_accounts"][3]["name"], "A Savings")
+        self.assertEqual(fc["all_accounts"][4]["name"], "A Savings")
         rec = [e for e in fc["events"] if e.get("recurring_id")]
         self.assertTrue(rec)
         self.assertTrue(all("logo" in e for e in rec))
@@ -232,6 +233,18 @@ class HandlerTests(DbCase):
         state.api_settings(self.c, {}, {"primary_account": ""})
         self.assertIsNone(db.get_setting(self.c, "primary_account"))
 
+    def test_settings_put_away_alerts(self):
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], [])
+        msgs = [*fc["warnings"][:1], "An alert the sample data doesn’t show"]
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": msgs})
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], msgs)
+        self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])   # put away, not taken away
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": []})
+        self.assertEqual(state.api_overview(self.c, q(days=30), {})["dismissed_warnings"], [])
+        self.assertIsNone(db.get_setting(self.c, sk.OVERVIEW_WARNINGS_DISMISSED))   # an empty list puts the key away too
+
 
     def test_budget(self):
         self.c.execute(insert(Account).values(id="c2", name="Zeta", display_name="Alpha Card", kind="credit"))
@@ -240,6 +253,7 @@ class HandlerTests(DbCase):
         b = budget.api_budget(self.c, {}, {})
         self.assertEqual(b["pay_accounts"], [{"id": "c2", "name": "Alpha Card", "kind": "credit"},
                                              {"id": "demo-card", "name": "Rewards Visa", "kind": "credit"},
+                                             {"id": "demo-travel", "name": "Travel Mastercard", "kind": "credit"},
                                              {"id": "demo-checking", "name": "Everyday Checking", "kind": "checking"},
                                              {"id": "demo-savings", "name": "High-Yield Savings", "kind": "savings"}])
         groceries = sum(r[0] for r in self.c.execute(

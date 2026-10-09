@@ -52,6 +52,7 @@ AUTO_AI_ON_SYNC = "auto_ai_on_sync"   # "1"/"0"; on unless switched off
 PRIMARY_ACCOUNT = "primary_account"
 HORIZON_DAYS = "horizon_days"
 SETUP_DISMISSED = "setup_dismissed"
+OVERVIEW_WARNINGS_DISMISSED = "overview_warnings_dismissed"   # JSON: the Overview's alerts put away, each by its message
 LAST_BACKUP = "last_backup"   # when a backup was last downloaded from Settings (ISO, the machine's local time)
 
 

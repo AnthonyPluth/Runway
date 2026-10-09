@@ -217,6 +217,8 @@ export interface Overview {
   /** The same warnings, each with the page where it's put right. */
   /** `setting`: changing a setting on that page puts it right (false: an overdue payment, a statement still to come). */
   warning_links: { text: string; href: string; setting?: boolean }[];
+  /** The alerts put away on Overview, by their message: hidden while the message reads the same. */
+  dismissed_warnings?: string[];
   missed?: Missed[];
   /** The budgets the forecast spends (`monthly` a month in all), and the ones it leaves out, with why. */
   budget?: {

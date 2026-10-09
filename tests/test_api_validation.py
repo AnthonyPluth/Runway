@@ -195,6 +195,12 @@ class WholeNumberTests(DbCase):
         self.assertEqual(db.get_setting(self.c, sk.HORIZON_DAYS), "365")
         self.assertEqual(clamped_int(7, "days", 90, 14, 365), 14)
 
+    def test_the_alerts_put_away_setting(self):
+        for bad in ("one", 1, True, {}, None, ["ok", 5], ["x"] * 51, ["y" * 401]):
+            with self.subTest(v=bad), self.assertRaisesRegex(ApiError, '^Send "overview_warnings_dismissed" as a list of messages$'):
+                state.api_settings(self.c, {}, {"overview_warnings_dismissed": bad, "auto_ai_on_sync": "1"})
+        self.assertIsNone(db.get_setting(self.c, sk.AUTO_AI_ON_SYNC))   # checked before anything is saved
+
     def test_ids_in_the_address(self):
         for bad in ("abc", "-1", "1.5", " 1", "99999999999999999999", "١٢", ""):
             with self.subTest(id=bad):
