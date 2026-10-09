@@ -413,7 +413,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     paid += in_transit(conn, card, last_close)
     charges = [t for t in txs if t["category"] not in transfers]
-    credits = sum(t["amount"] for t in charges if t["amount"] > 0 and not t["pending"])
+    credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
     over = max(0.0, paid + credits - statement)
     net = -sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
     new_charges = max(0.0, net)
