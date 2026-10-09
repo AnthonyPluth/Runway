@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 
 from runway.storage import db
 from runway.domain import demo, forecast
-from runway.storage.models import Account, Recurring
+from runway.storage.models import Account, Recurring, RetailItem, Transaction
 from tests.shared import DbCase
 
 
@@ -23,6 +23,12 @@ class DemoTests(DbCase):
         self.assertGreater(card["statement_balance"], 0)
         with self.assertRaises(SystemExit):
             demo.seed(self.c)
+
+    def test_shows_what_the_ai_buttons_need(self):
+        demo.seed(self.c, today=date(2026, 9, 28))
+        self.assertTrue(db.get_setting(self.c, "openrouter_api_key"))
+        self.assertEqual(self.c.execute(select(func.count()).select_from(Transaction).where(Transaction.needs_review == 1)).scalar(), 3)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItem).where(RetailItem.category.is_(None))).scalar(), 2)
 
 
 if __name__ == "__main__":

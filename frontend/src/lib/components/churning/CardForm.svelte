@@ -3,6 +3,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
+  import AiButton from "$lib/components/AiButton.svelte";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
@@ -136,8 +137,8 @@
       <FieldNote {uid} name="product" errors={form.errors} />
     </div>
     {#if canSuggest}
-      <Button variant="outline" size="sm" disabled={!v.product.trim() || ai.suggesting} onclick={ai.suggest}
-        title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent.">{ai.suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
+      <AiButton busy={ai.suggesting} busyLabel="Asking…" label="Fill in the rest with AI" disabled={!v.product.trim()} onclick={ai.suggest}
+        title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent." />
       <span class="self-center text-xs text-muted-foreground" data-testid="ai-consent">Sends only the bank and card name.</span>
     {/if}
   </div>

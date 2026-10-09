@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
+  import AiButton from "$lib/components/AiButton.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -103,8 +104,8 @@
     {#if o.items.length}
       {#if o.items.some((x) => !x.category)}
         <div class="flex items-center gap-2">
-          <Button size="sm" variant="outline" disabled={asking} onclick={suggest}
-            title="For the items with no category; it can propose a new one">{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
+          <AiButton busy={asking} busyLabel="Asking the AI…" label="Suggest categories with AI" onclick={suggest}
+            title="For the items with no category; it can propose a new one" />
         </div>
       {/if}
       {@const mine = family?.length ? o.items.filter((x) => x.category && family.includes(x.category)) : []}

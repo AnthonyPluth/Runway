@@ -1,0 +1,12 @@
+{
+  "name": "ai-order-items",
+  "page": "setup",
+  "steps": [
+    { "goto": "#setup/connections" },
+    { "click": "summary:has-text('Browser extension')" },
+    { "click": "summary:has-text('Recent orders')" },
+    { "click": "button[aria-expanded=false]:has-text('111-0000000-0000001')" },
+    { "wait_for": "button[aria-label='Suggest categories with AI']" },
+    { "screenshot": "order" }
+  ]
+}
