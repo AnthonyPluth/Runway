@@ -161,6 +161,35 @@ describe("EventsList", () => {
       expect(screen.queryByText("Charged so far")).toBeNull();
     });
 
+    it("opens the breakdown from the row's name too, by click and by keyboard, in step with the asterisk", async () => {
+      show([ev({ kind: "card", estimated: true, name: "Visa statement", key: "cardclose:cc:2026-03-01", amount: -1066.67, estimate: estimate() })]);
+      const mark = screen.getByRole("button", { name: "What this estimate is made of" });
+      const row = screen.getByText("Visa statement").closest("[role=button]") as HTMLElement;
+      expect(row).toHaveAttribute("tabindex", "0");
+      expect(row).toHaveAttribute("aria-expanded", "false");
+      expect(row).toHaveAttribute("aria-controls", mark.getAttribute("aria-controls"));
+      await userEvent.click(screen.getByText("Visa statement"));
+      expect(row).toHaveAttribute("aria-expanded", "true");
+      expect(mark).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("Charged so far")).toBeInTheDocument();
+      row.focus();
+      await userEvent.keyboard("{Enter}");
+      expect(screen.queryByText("Charged so far")).toBeNull();
+      await userEvent.keyboard(" ");
+      expect(row).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(mark);
+      expect(row).toHaveAttribute("aria-expanded", "false");
+      expect(api).not.toHaveBeenCalled();
+    });
+
+    it("leaves a row with no breakdown, an edited one and a recurring item's link as they were", () => {
+      show([ev({ name: "Plain" }), ev({ name: "Edited", key: "k2", kind: "card", estimated: true, overridden: true, original_amount: -1, estimate: estimate() }),
+        ev({ name: "Linked", key: "k3", recurring_id: 4, estimated: true, estimate: estimate() })]);
+      expect(screen.getByText("Plain").closest("[role=button]")).toBeNull();
+      expect(screen.getByText("Edited").closest("[role=button]")).toBeNull();
+      expect(screen.getByText("Linked").closest("[role=button]")).toBeNull();
+    });
+
     it("explains a card estimate differently from a recurring one", () => {
       show([ev({ kind: "card", estimated: true, key: undefined })]);
       expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/statement hasn't closed yet/);

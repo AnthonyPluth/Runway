@@ -32,6 +32,13 @@
   // Estimated statements whose breakdown is open under the row (by the row's id): its asterisk toggles it.
   let explained = $state<Record<string, boolean>>({});
   const uid = $props.id();
+  const toggle = (rid: string) => (explained[rid] = !explained[rid]);
+  // The row's text is a second way to open the breakdown (keyboard: Enter or Space, when the text itself has the focus).
+  function onKey(ev: KeyboardEvent, rid: string) {
+    if (ev.target !== ev.currentTarget || (ev.key !== "Enter" && ev.key !== " ")) return;
+    ev.preventDefault();
+    toggle(rid);
+  }
   // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
   // projected balance shows once a day for each account, under the day's items: the balance after its last item that day
   // (an annual fee or a recurring charge on a card is a card charge: it never moves one).
@@ -106,6 +113,9 @@
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
     {@const rid = e.key ?? `${e.date}-${e.name}-${i}`}
     {@const open = !!(e.estimate && !e.overridden && explained[rid])}
+    <!-- A statement estimate's breakdown also opens from the row's text, not only its asterisk (a recurring item's name is a
+         link, so that one keeps the asterisk alone). -->
+    {@const clickable = !!(e.estimate && !e.overridden && !e.recurring_id)}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
     <!-- On a phone the row is the same height as a Recent transaction's (the .cell default) and the day's projected balance
          sits under the last amount; from sm up the rows are tighter and the balance is the day's line below. -->
@@ -122,7 +132,11 @@
         {/if}
         {#if accounts && e.account_id}<BankBadge accountId={e.account_id} name={e.account ?? ""} />{/if}
       </span>
-      <div class="min-w-0 flex-1">
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (a button only when `clickable`) -->
+      <div class={["min-w-0 flex-1", clickable && "cursor-pointer"]}
+        role={clickable ? "button" : undefined} tabindex={clickable ? 0 : undefined}
+        aria-expanded={clickable ? open : undefined} aria-controls={clickable ? `${uid}-${rid}` : undefined}
+        onclick={clickable ? () => toggle(rid) : undefined} onkeydown={clickable ? (ev) => onKey(ev, rid) : undefined}>
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           {#if e.recurring_id}
             <!-- A recurring item's name opens it in Recurring, to change every one. -->
@@ -153,7 +167,7 @@
             save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated && !e.overridden}{#if e.estimate}{@const est = e.estimate}<button type="button"
             class="absolute top-0 left-full ml-0.5 cursor-pointer text-muted-foreground after:absolute after:-inset-y-3 after:left-0 after:-right-3 hover:text-foreground"
             aria-label="What this estimate is made of" aria-expanded={open} aria-controls={`${uid}-${rid}`}
-            title={estimateTitle(est)} onclick={() => (explained[rid] = !explained[rid])}>*</button>{:else}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments"
+            title={estimateTitle(est)} onclick={() => toggle(rid)}>*</button>{:else}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments"
               : "the statement hasn't closed yet; what's on the card so far, plus your budgets paid with it and its recurring charges"}`}>*</span>{/if}{/if}</span>
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
