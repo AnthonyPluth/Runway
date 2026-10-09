@@ -42,6 +42,11 @@ class WebAppTests(ServerCase):
         built_app(cls.static)
         with open(os.path.join(cls.static, "sw.js"), "wb") as f:
             f.write(b"// service worker")
+        os.makedirs(os.path.join(cls.static, "fonts"))
+        with open(os.path.join(cls.static, "fonts", "Inter-test.woff2"), "wb") as f:
+            f.write(b"wOF2" + bytes(2000))
+        with open(os.path.join(cls.static, "fonts", "Inter-LICENSE.txt"), "wb") as f:
+            f.write(b"licence")
 
     def get(self, path, static=None):
         with serving(static or self.static):
@@ -75,6 +80,54 @@ class WebAppTests(ServerCase):
         status, headers, body = self.get("/sw.js")
         self.assertEqual((status, body), (200, b"// service worker"))
         self.assertNotIn("immutable", headers.get("Cache-Control") or "")
+
+    def test_fonts_are_kept_a_long_while_but_not_as_if_they_never_change(self):
+        status, headers, body = self.get("/fonts/Inter-test.woff2")
+        self.assertEqual((status, len(body)), (200, 2004))
+        self.assertEqual(headers["Content-Type"], "font/woff2")
+        self.assertEqual(headers["Cache-Control"], "public, max-age=2592000, stale-while-revalidate=31536000")
+        self.assertNotIn("immutable", headers["Cache-Control"])   # a font keeps its name when it changes
+        self.assertEqual(headers["Vary"], "Accept-Encoding")
+        self.assertTrue(headers["ETag"])
+        # what else is in static/ is still checked every time
+        for path in ("/fonts/Inter-LICENSE.txt", "/sw.js"):
+            with self.subTest(path=path):
+                self.assertEqual(self.get(path)[1]["Cache-Control"], "no-cache")
+
+    def test_a_304_says_what_the_200_did(self):
+        for path in ("/fonts/Inter-test.woff2", "/assets/index-abc.js", "/sw.js"):
+            with self.subTest(path=path):
+                _, ok, _ = self.get(path)
+                with serving(self.static):
+                    request = urllib.request.Request(self.base + path, headers={"If-None-Match": ok["ETag"]})
+                    with self.assertRaises(urllib.error.HTTPError) as caught:
+                        urllib.request.build_opener(NoRedirect).open(request, timeout=10)
+                headers = caught.exception.headers
+                self.assertEqual(caught.exception.code, 304)
+                self.assertEqual(headers["ETag"], ok["ETag"])
+                self.assertEqual(headers["Cache-Control"], ok["Cache-Control"])   # the built files stay `immutable`
+                self.assertEqual(headers["Vary"], "Accept-Encoding")
+
+    def test_cache_control_by_kind_of_file(self):
+        static = server.static
+        self.assertEqual(static.cache_control(os.path.join(static.APP_DIR, "assets", "a.js")), static.IMMUTABLE)
+        self.assertEqual(static.cache_control(os.path.join(static.STATIC, "fonts", "Geist-Variable.woff2")), static.FONT)
+        for other in ("fonts/Geist-LICENSE.txt", "logo.svg", "icon-192.png", "sw.js", "manifest.webmanifest", "page.css"):
+            with self.subTest(other=other):
+                self.assertEqual(static.cache_control(os.path.join(static.STATIC, other)), static.REVALIDATE)
+
+    def test_the_page_preloads_only_the_font_the_first_screen_uses(self):
+        # frontend/index.html (what the build starts from): one preload, for the Latin Inter file, which exists, which
+        # the CSP's font-src 'self' allows, and which adds no "<script " (the nonce is put on those).
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "frontend", "index.html"), encoding="utf-8") as f:
+            page = f.read()
+        preloads = [line for line in page.splitlines() if "<link" in line and 'rel="preload"' in line]
+        self.assertEqual(len(preloads), 1)
+        self.assertIn('as="font" type="font/woff2" crossorigin href="/fonts/Inter-latin-Variable.woff2"', preloads[0])
+        self.assertTrue(os.path.isfile(os.path.join(root, "runway", "static", "fonts", "Inter-latin-Variable.woff2")))
+        self.assertEqual(page.count("<script "), 1)
+        self.assertIn("font-src 'self'", self.get("/")[1]["Content-Security-Policy"])
 
     def test_never_outside_static(self):
         status, _, body = self.get("/../../server.py")

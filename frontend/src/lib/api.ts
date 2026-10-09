@@ -2,12 +2,17 @@
 // and a cancelled read never answers, so a slow reply can't draw the old page over the new one. `keep` opts out.
 
 let pageLoads = new AbortController();
+let pageNumber = 0;
 
 /** Called by the router when the page changes. */
 export function newPage(): void {
   pageLoads.abort();
   pageLoads = new AbortController();
+  pageNumber++;
 }
+
+/** Which page's reads are running: it changes whenever `newPage` cancels them, so a read started earlier is dead. */
+export function currentPage(): number { return pageNumber; }
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }

@@ -23,6 +23,43 @@ describe("InvestmentsView", () => {
     expect(screen.queryByText("No investment accounts yet")).toBeNull();
   });
 
+  describe("asks for the status and the portfolio at once", () => {
+    it("sends both requests before the status has answered", async () => {
+      vi.mocked(api).mockImplementation((() => new Promise(() => {})) as never);
+      render(InvestmentsView);
+      await Promise.resolve();
+      expect(vi.mocked(api).mock.calls.map((c) => c[0])).toEqual(["/api/investments?period=1Y", "/api/plaid/status"]);
+    });
+
+    it("with no investment accounts, a failing portfolio request changes nothing", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => {
+        if (path.startsWith("/api/investments?")) throw new Error("boom");
+        return { inv_accounts: 0, items: [] };
+      }) as never);
+      render(InvestmentsView);
+      expect(await screen.findByTestId("getting-started")).toBeInTheDocument();
+      expect(screen.queryByText(/Something went wrong/)).toBeNull();
+    });
+
+    it("with investment accounts, a failing portfolio request is the page's error, as before", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => {
+        if (path.startsWith("/api/investments?")) throw new Error("boom");
+        return { inv_accounts: 1, items: [] };
+      }) as never);
+      render(InvestmentsView);
+      expect(await screen.findByText("Something went wrong: boom")).toBeInTheDocument();
+    });
+
+    it("a failing status is the page's error, whatever the portfolio says", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => {
+        if (path === "/api/plaid/status") throw new Error("no status");
+        return {};
+      }) as never);
+      render(InvestmentsView);
+      expect(await screen.findByText("Something went wrong: no status")).toBeInTheDocument();
+    });
+  });
+
   it("has no Accounts section or box to leave an account out (Settings → Accounts is the only way), and shows holdings' logos", async () => {
     const perf = { start: "2026-08-01", return: 0.1, benchmark_return: 0.08, gain: 100 };
     const data = {

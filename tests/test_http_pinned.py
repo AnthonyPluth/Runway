@@ -310,7 +310,8 @@ class Pinned(unittest.TestCase):
                                  ("Content-Encoding", "gzip"), *security()])
         code, heads, data = self.send("GET", "/sw.js", headers={"If-None-Match": sw_etag})
         self.assertEqual((code, data), (304, b""))
-        self.assertEqual(heads, [("Server", "Runway "), ("ETag", sw_etag), ("Cache-Control", "no-cache"), *security()])
+        self.assertEqual(heads, [("Server", "Runway "), ("ETag", sw_etag), ("Cache-Control", "no-cache"), ("Vary", "Accept-Encoding"),
+                                 *security()])
         code, heads, data = self.send("GET", "/next/budget")
         self.assertEqual((code, heads), (302, [("Server", "Runway "), ("Location", "/"), ("Content-Length", "0"),
                                                ("Cache-Control", "no-store"), *security()]))
