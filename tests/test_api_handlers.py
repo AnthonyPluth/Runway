@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, insert, select, update
 from runway.domain import categories, demo, forecast, splits
 from runway.storage import db
 from runway.server import sync
-from runway.server.api import accounts, budget, notifications, state, transactions
+from runway.server.api import accounts, budget, connections, notifications, state, transactions
 from runway.server.common import ApiError
 from runway.storage.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction,
                                    LoanTerms, ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring,
@@ -530,6 +530,39 @@ class HandlerTests(DbCase):
                 mock.patch.object(sync, "refresh_prices"):
             sync.run_sync()
         self.assertEqual(state.api_state(self.c, {}, {})["sync_warnings"], [])
+
+    def test_simplefin_failing_doesnt_stop_plaid(self):
+        db.set_setting(self.c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
+        db.set_setting(self.c, "last_sync_ok", None)
+        self.c.commit()
+        down = sync.simplefin.SimpleFinError("Couldn't reach SimpleFIN: timed out")
+        quiet = (mock.patch.object(sync.merchants, "fetch_logos"), mock.patch.object(sync.realie, "refresh_due"),
+                 mock.patch.object(sync, "refresh_prices"))
+        with mock.patch.object(sync.simplefin, "sync", side_effect=down), \
+                mock.patch.object(sync, "plaid_banks", return_value=True), \
+                mock.patch.object(sync.plaidbank, "sync_all", return_value={"items": 1, "new": ["t1"], "errors": []}) as pb, \
+                mock.patch.object(sync.categorize, "categorize", return_value={}) as cat, quiet[0], quiet[1], quiet[2]:
+            with self.assertRaises(ApiError) as cm:
+                sync.run_sync()
+            pb.assert_called_once()                       # Plaid was asked, and what it brought in was categorized
+            self.assertEqual(cat.call_args[0][1], ["t1"])
+            self.assertEqual(cm.exception.status, 502)
+            # Plaid has had its turn today: another Sync tries SimpleFIN again, without asking Plaid twice.
+            with self.assertRaises(ApiError):
+                sync.run_sync()
+            pb.assert_called_once()
+            with self.assertRaises(ApiError):   # the Sync button asks Plaid every time
+                sync.run_sync(ask_plaid=True)
+            self.assertEqual(pb.call_count, 2)
+        log =self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
+        self.assertEqual(tuple(log), (0, "Couldn't reach SimpleFIN: timed out"))   # still a failed sync, so it's retried
+        self.assertIsNone(db.get_setting(self.c, "last_sync_ok"))
+        self.assertTrue(db.get_setting(self.c, "last_plaid_bank_sync"))
+
+    def test_the_sync_button_asks_plaid(self):
+        with mock.patch.object(connections, "run_sync", return_value={"new": 0}) as run:
+            connections.api_sync(None, {}, {})
+        run.assert_called_once_with(ask_plaid=True)
 
 
 if __name__ == "__main__":
