@@ -6,7 +6,7 @@ import { categories } from "$lib/categories.svelte";
 import type { Category } from "$lib/types";
 import CatIcon from "./CatIcon.svelte";
 import CategorySelect from "./CategorySelect.svelte";
-import { pickSections, recentCategories, rememberRecent } from "./categoryPicker";
+import { pickSections } from "./categoryPicker";
 import { viewport } from "$lib/phone.svelte";
 import { pickCategory, pickedValue } from "../../test/pick";
 
@@ -143,31 +143,21 @@ describe("CategorySelect", () => {
     after.remove();
   });
 
-  it("lists the last few categories picked under Recent, newest first", async () => {
+  it("lists only the standard groups, with no Recent section, however many categories were picked", async () => {
     const { unmount } = render(CategorySelect);
     await pickCategory(screen.getByRole("combobox", { name: "Category" }), "Transfer");
     await pickCategory(screen.getByRole("combobox", { name: "Category" }), "Salary");
     unmount();
     render(CategorySelect);
     const list = await open();
-    const recent = within(list).getAllByRole("group").find((g) => g.textContent!.startsWith("Recent"))!;
-    expect(within(recent).getAllByRole("option").map((o) => o.dataset.value)).toEqual(["Salary", "Transfer"]);
+    expect(within(list).getAllByRole("group").map((g) => g.textContent!)).not.toContainEqual(expect.stringMatching(/^Recent/));
+    expect(within(list).getAllByRole("option").filter((o) => o.dataset.value === "Salary")).toHaveLength(1);
+    expect(localStorage.length).toBe(0);
   });
 
-  it("keeps Recent to five, and leaves out what this picker doesn't offer", () => {
-    for (const n of ["A", "B", "C", "D", "E", "F"]) rememberRecent(n);
-    expect(recentCategories()).toEqual(["F", "E", "D", "C", "B"]);
-    const s = pickSections({ groups: [{ label: "Spending", items: categories.list.slice(0, 1) }], query: "", recent: ["Salary", "Travel"], blank: false });
-    expect(s.find((x) => x.label === "Recent")!.items.map((o) => o.value)).toEqual(["Travel"]);
-  });
-
-  it("still picks when the browser keeps nothing", async () => {
-    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
-    const onchange = vi.fn();
-    render(CategorySelect, { onchange });
-    await pickCategory(screen.getByRole("combobox", { name: "Category" }), "Salary");
-    expect(onchange).toHaveBeenCalledWith("Salary");
-    set.mockRestore();
+  it("has no Recent section in the sections it builds", () => {
+    const s = pickSections({ groups: [{ label: "Spending", items: categories.list.slice(0, 1) }], query: "", blank: false });
+    expect(s.map((x) => x.label)).toEqual(["Spending"]);
   });
 
   it("takes options of its own before the groups", async () => {
