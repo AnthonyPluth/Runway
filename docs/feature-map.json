@@ -666,6 +666,7 @@
       "handler": "runway/server/api/budget.py:api_budget_set",
       "web": [
         "frontend/src/lib/components/budget/BudgetRow.svelte",
+        "frontend/src/lib/components/budget/BudgetSuggest.svelte",
         "frontend/src/lib/components/budget/BudgetView.svelte"
       ],
       "tests": [
@@ -675,6 +676,20 @@
         "tests/test_categorize.py",
         "tests/test_http_server.py",
         "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/budget/suggestions",
+      "handler": "runway/server/api/budget_suggest.py:api_budget_suggestions",
+      "web": [
+        "frontend/src/lib/components/budget/BudgetSuggest.svelte"
+      ],
+      "tests": [
+        "tests/test_budget_suggest.py"
       ],
       "docs": [
         "using/features"

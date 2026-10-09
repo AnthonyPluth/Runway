@@ -8,6 +8,7 @@
   import { apiCall } from "$lib/contract";
   import { loadCategories } from "$lib/categories.svelte";
   import BudgetRow from "$lib/components/budget/BudgetRow.svelte";
+  import BudgetSuggest from "$lib/components/budget/BudgetSuggest.svelte";
   import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
   import MonthPicker from "$lib/components/MonthPicker.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
@@ -119,6 +120,7 @@
 {/snippet}
 
 <div class="mb-6 flex flex-wrap items-center justify-end gap-4">
+  <BudgetSuggest month={b?.month ?? month} onchanged={refresh} />
   <MonthPicker month={b?.month ?? month} onchange={pick} />
 </div>
 
