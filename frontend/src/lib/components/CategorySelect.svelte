@@ -9,7 +9,7 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Search from "@lucide/svelte/icons/search";
-  import { pickSections, recentCategories, rememberRecent, type PickOption } from "./categoryPicker";
+  import { pickSections, type PickOption } from "./categoryPicker";
 
   // Pick a category: a button showing it, which opens a list you can type into to narrow it down ("gro" for Groceries),
   // grouped as Spending / Money in / Not spending, with the last few you picked at the top. Arrows move, Enter picks,
@@ -31,7 +31,6 @@
   let open = $state(false);
   let query = $state("");
   let active = $state(0);
-  let recent = $state<string[]>([]);
   let trigger = $state<HTMLButtonElement>();
   let input = $state<HTMLInputElement>();
   let listbox = $state<HTMLElement>();
@@ -78,17 +77,16 @@
     : extra?.find((o) => o.value === value)?.label ?? (current ? (short ? current.name : catLabel(current)) : value));
   const icon = $derived(current?.icon);
 
-  const sections = $derived(open ? pickSections({ groups: categoryGroups({ canHoldChildren, exclude }), query, recent, blank, extra }) : []);
+  const sections = $derived(open ? pickSections({ groups: categoryGroups({ canHoldChildren, exclude }), query, blank, extra }) : []);
   const flat = $derived(sections.flatMap((s, si) => s.items.map((o) => ({ ...o, id: `${uid}-${si}-${o.value}`, section: s.label }))));
   const listId = `${uid}-list`;
 
   function show(typed = "") {
     if (disabled || open) return;
-    recent = recentCategories();
     query = typed; open = true;
     // Start on the category it has (or the first one), so Enter straight away keeps it.
     tick().then(() => {
-      const at = typed ? 0 : flat.findIndex((o) => o.value === value && o.section !== "Recent");
+      const at = typed ? 0 : flat.findIndex((o) => o.value === value);
       active = Math.max(0, at);
       input?.focus();
       scrollToActive();
@@ -102,7 +100,6 @@
   function pick(o: PickOption) {
     const changed = o.value !== value;
     value = o.value;
-    rememberRecent(o.value);
     close();
     if (changed || repick) onchange?.(o.value);
   }
