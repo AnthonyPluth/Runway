@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from ..storage import db
 from . import rules
-from ..storage.models import Account, Budget, Category, Recurring, RetailItem, RetailItemMemory, Transaction, TxSplit
+from ..storage.models import Account, Budget, Category, MonthBudget, Recurring, RetailItem, RetailItemMemory, Transaction, TxSplit
 
 MAX_DEPTH = 2   # levels including the top one: Food > Restaurants
 
@@ -226,7 +226,12 @@ def rename(conn, old: str, new: str) -> None:
     _recategorize(conn, RetailItemMemory, old, new)
     rules.rename_category(conn, old, new)
     _recategorize(conn, Recurring, old, new)
+    # A month's own amount refers to its budget: it's moved off, and back once the budget has its new name.
+    months = [dict(r) for r in conn.execute(select(MonthBudget.month, MonthBudget.amount).where(MonthBudget.category == old))]
+    conn.execute(delete(MonthBudget).where(MonthBudget.category == old))
     _recategorize(conn, Budget, old, new)
+    if months:
+        conn.execute(insert(MonthBudget), [{**m, "category": new} for m in months])
 
 
 def _recategorize(conn, model, old: str, new: str) -> int:
@@ -268,6 +273,7 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
         conn.execute(delete(RetailItemMemory).where(RetailItemMemory.category == name))
         conn.execute(update(Recurring).where(Recurring.category == name).values(category=None))   # its items just have none
         rules.forget_category(conn, name)
+    conn.execute(delete(MonthBudget).where(MonthBudget.category == name))
     conn.execute(delete(Budget).where(Budget.category == name))
     conn.execute(delete(Category).where(Category.name == name))
     return n

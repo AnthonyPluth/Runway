@@ -6,6 +6,11 @@ describe("flowProblems", () => {
 
   it("accepts a well formed flow", () => expect(flowProblems(ok)).toEqual([]));
 
+  it("accepts scroll_to, which takes a selector", () => {
+    expect(flowProblems({ ...ok, steps: [{ scroll_to: "[data-x]" }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ scroll_to: 3 }] })).toEqual(["step 1: scroll_to takes a string"]);
+  });
+
   it("names what is wrong, step by step", () => {
     expect(flowProblems({ steps: [] })).toEqual(["needs a name of letters, digits, - or _", "needs a list of steps"]);
     const bad = flowProblems({ ...ok, steps: [{ click: "a", goto: "#b" }, { fill: "text" }, { hover: "x" }] });

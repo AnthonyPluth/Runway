@@ -1,0 +1,10 @@
+{
+  "name": "budget-month-reset",
+  "page": "budget",
+  "steps": [
+    { "wait_for": "[data-month-reset]" },
+    { "expect_text": { "selector": "[data-month-note]", "text": "other months" } },
+    { "scroll_to": "[data-month-reset]" },
+    { "screenshot": "reset-visible" }
+  ]
+}

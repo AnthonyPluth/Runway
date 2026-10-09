@@ -15,7 +15,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import Group from "$lib/components/ui/group/Group.svelte";
-  import { fmt0, plural, thisMonth } from "$lib/format";
+  import { fmt0, monthShort, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
@@ -102,7 +102,9 @@
     const income = familiesOf(incomeRows).filter((f) => [f.top, ...f.kids].some((c) => c.budget != null || c.spent > 0.005));
     const incomeExpected = counting(incomeRows).reduce((s, c) => s + c.budget!, 0);
     const incomeUnbudgeted = incomeRows.filter((c) => c.budget == null);
-    return { inBudget, notBudget, unusedTops, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
+    // A budget with an amount of its own this month makes the total this month's, not every month's.
+    const varies = [...counted].some((c) => c.month_budget != null);
+    return { inBudget, notBudget, unusedTops, totBudget, varies, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
       income, incomeExpected, incomeUnbudgeted,
       // pace: the share of the month gone, counting today as half gone (at the end of today the marker would sit a
       // day ahead of the date all day long)
@@ -145,7 +147,7 @@
         v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ")}
     </p>
     <StatStrip class="mt-5" items={[
-      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `each month · plus ${fmt0(v.totCarried)} rolled over` : "each month" },
+      { label: "Budgeted", value: fmt0(v.totBudget), sub: (v.varies ? `in ${monthShort(b.month)}` : "each month") + (v.totCarried > 0.005 ? ` · plus ${fmt0(v.totCarried)} rolled over` : "") },
       { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized),
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
       ...(b.income || v.incomeExpected > 0.005 ? [{ label: "Money in", value: fmt0(b.income),
