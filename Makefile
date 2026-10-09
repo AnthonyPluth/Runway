@@ -19,7 +19,7 @@ SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check \
-	fleet-checks api-contract api-contract-check pr-screenshots
+	fleet-checks api-contract api-contract-check pr-screenshots pre-push
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check api-contract-check fleet-checks test-parallel frontend-check docs-build
@@ -121,3 +121,11 @@ pr-screenshots:
 # workflows' conventions, and the Co-Authored-By trailer on your commits since main, as CI checks a pull request's.
 fleet-checks:
 	$(PYTHON) tools/fleet_checks.py --commits origin/main..HEAD
+
+# The quick checks for what fails CI most often, a minute or so, to run before each push (it doesn't replace make check,
+# which you run once before the last one): the feature map, API contract and fleet checks, and the tests that read
+# shared fixtures (the demo seed, the golden forecast, the contract's sample data, migrations, backups).
+SHARED_FIXTURE_TESTS = test_demo test_api_contract test_forecast_golden test_migrations test_backup test_api_handlers \
+	test_api_queries test_api_validation test_budget_months test_budget_suggest test_churning_api
+pre-push: feature-map-check api-contract-check fleet-checks
+	poetry run unittest-parallel -t . -s tests -j 4 $(foreach m,$(SHARED_FIXTURE_TESTS),-k tests.$(m).)
