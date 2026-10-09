@@ -80,26 +80,26 @@
     sync();
     return () => phoneQuery.removeEventListener("change", sync);
   });
-  const DAY: [SortKey, string, string] = ["day_change", "Today", "text-right desktop:max-[1279px]:hidden phone:w-24"];
-  const VALUE: [SortKey, string, string] = ["value", "Value", "text-right phone:w-22 phone:text-left"];
+  const DAY: [SortKey, string, string] = ["day_change", "Today", "text-right desktop:max-[1279px]:hidden phone:w-[calc(100cqw_-_var(--hold))]"];
+  const VALUE: [SortKey, string, string] = ["value", "Value", "text-right phone:w-22"];
   const COLS = $derived<[SortKey, string, string][]>([
-    ["name", "Holding", "text-left phone:sticky phone:left-0 phone:z-[1] phone:w-36 phone:bg-card"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"],
+    ["name", "Holding", "text-left phone:sticky phone:left-0 phone:z-[1] phone:w-(--hold) phone:bg-card"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"],
     ...(phone.on ? [DAY] : [VALUE, DAY]),
-    ["gain", "Total gain", "text-center phone:w-22"],
+    ["gain", "Total gain", "text-center phone:w-20"],
     ...(phone.on ? [VALUE] : []),
     ["allocation", "Weight", "text-right max-[1279px]:hidden"], ["cost_basis", "Cost basis", "text-right max-[1279px]:hidden"],
   ]);
 </script>
 
 {#snippet dayCell(x: Holding)}
-          <td class="text-right tabular-nums whitespace-nowrap desktop:max-[1279px]:hidden phone:w-24">
+          <td class="text-right tabular-nums whitespace-nowrap desktop:max-[1279px]:hidden phone:w-[calc(100cqw_-_var(--hold))]">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span>{#if x.day_change_pct != null}<div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}{/if}
           </td>
 {/snippet}
 
 {#snippet valueCell(x: Holding)}
-          <td class="text-right tabular-nums phone:w-22 phone:text-left" data-col="value">
+          <td class="text-right tabular-nums phone:w-22 phone:text-[13px]" data-col="value">
             <span class="font-semibold">{fmt(x.value)}</span>
           </td>
 {/snippet}
@@ -108,7 +108,7 @@
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
             {:else}
               <!-- Looks editable without hovering (a dotted underline, and the pencil always there on a touch screen) -->
-              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border max-md:min-h-10",
+              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border max-md:min-h-10 phone:px-1 phone:text-xs whitespace-nowrap",
                 x.gain == null ? "text-[var(--nw-1)]" : "text-muted-foreground hover:text-foreground")} title="Edit cost basis"
                 aria-expanded={open === keyOf(x)} onclick={() => (open === keyOf(x) ? finish() : openEditor(x))}>
                 <span class="underline decoration-dotted decoration-from-font underline-offset-4">{x.gain == null ? "Add" : fmt(x.cost_basis)}</span>
@@ -118,8 +118,12 @@
             {/if}
 {/snippet}
 
-<div class="overflow-x-auto" id="inv-holdings">
-  <table class="w-full text-sm phone:min-w-[26rem]">
+<!-- On a phone the container is a size container: --hold is the pinned holding's width, Today fills the rest of the container's
+     width (so those two fill it exactly, and nothing of Total gain or Value shows), and Total gain (5rem) and Value (5.5rem),
+     10.5rem together, follow, reached by scrolling sideways. The holding is the container less those 10.5rem (at least 7.5rem), so
+     scrolled to the end Total gain and Value start right where the pinned holding ends: no sliver of Today or of them under it. -->
+<div class="overflow-x-auto phone:[container-type:inline-size] phone:[--hold:max(7.5rem,calc(100cqw_-_10.5rem))]" id="inv-holdings">
+  <table class="w-full text-sm phone:w-[calc(100cqw_+_10.5rem)] phone:table-fixed">
     <thead>
       <tr class="text-xs text-muted-foreground">
         {#each COLS as [k, label, cls] (k)}
@@ -134,7 +138,7 @@
     <tbody>
       {#each rows as x (keyOf(x))}
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-2 min-[1280px]:[&>td:not(:first-child)]:pl-3">
-          <td class="min-w-48 max-[1279px]:min-w-0 phone:sticky phone:left-0 phone:z-[1] phone:w-36 phone:bg-card">
+          <td class="min-w-48 max-[1279px]:min-w-0 phone:sticky phone:left-0 phone:z-[1] phone:w-(--hold) phone:bg-card">
             <div class="flex gap-2.5">
               {#if x.is_cash}
                 <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
@@ -144,9 +148,9 @@
                   <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
                 </LogoPicker>
               {/if}
-              <div>
-                <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
-                <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
+              <div class="min-w-0">
+                <div class="phone:[overflow-wrap:anywhere]"><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
+                <div class="text-xs text-muted-foreground phone:[overflow-wrap:anywhere]">{x.accounts.join(", ")}</div>
                 {#if narrow.on}
                 <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
                   {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{" "}· {share(x.allocation)}
@@ -169,7 +173,7 @@
           </td>
           {#if !phone.on}{@render valueCell(x)}{/if}
           {@render dayCell(x)}
-          <td class="text-center tabular-nums phone:w-22">
+          <td class="text-center tabular-nums phone:w-20 phone:text-[13px]">
             {#if x.gain == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>

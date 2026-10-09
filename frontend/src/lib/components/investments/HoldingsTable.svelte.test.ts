@@ -182,7 +182,14 @@ describe("HoldingsTable", () => {
         expect(within(row).getAllByText(text)).toHaveLength(1);
         expect(within(row).getByText(text).closest("td")!.cellIndex).toBe(heads.indexOf(col));
       }
-      expect(screen.getByRole("table")).toHaveClass("phone:min-w-[26rem]");   // wider than the screen, so it scrolls sideways
+      // Holding and Today fill the container exactly (Today is what's left of its width after the holding), and the table is
+      // Total gain and Value (10.5rem) wider than the container, so only they need scrolling to.
+      expect(screen.getByRole("table")).toHaveClass("phone:w-[calc(100cqw_+_10.5rem)]", "phone:table-fixed");
+      expect(document.getElementById("inv-holdings")!.className).toMatch(/phone:\[container-type:inline-size\]/);
+      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:w-(--hold)");
+      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:w-[calc(100cqw_-_var(--hold))]");
+      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("phone:w-20");
+      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:w-22");
       expect(screen.getByRole("button", { name: /Value/ })).toBeInTheDocument();   // still sortable
     });
 
