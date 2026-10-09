@@ -247,27 +247,65 @@ describe("BudgetRow", () => {
   });
 
   describe("in the Budgets card", () => {
-    it("offers to roll over what's left, and says so once it does", async () => {
+    const actions = (name = "Groceries") => screen.getByRole("button", { name: `Actions for ${name}` });
+
+    it("offers rollover in the row's ⋯ menu, with the row itself quiet until it's on", async () => {
       const { onchanged } = setup(cat(), { budgets: true });
+      expect(screen.queryByText("Rolls over")).not.toBeInTheDocument();
+      await userEvent.click(actions());
       await userEvent.click(screen.getByRole("button", { name: /Roll over/ }));
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: true } });
       expect(toast.success).toHaveBeenCalledWith("Groceries rolls over from this month on");
       expect(onchanged).toHaveBeenCalled();
     });
 
-    it("turns rollover off", async () => {
+    it("turns rollover off from the same menu", async () => {
       setup(cat({ rollover_from: "2026-01" }), { budgets: true });
+      await userEvent.click(actions());
       const btn = screen.getByRole("button", { name: /Rolls over/ });
       expect(btn).toHaveAttribute("aria-pressed", "true");
       await userEvent.click(btn);
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: false } });
     });
 
+    it("says a rolling budget as a blue label that isn't a button", () => {
+      setup(cat({ rollover_from: "2026-01" }), { budgets: true });
+      const label = screen.getByText("Rolls over");
+      expect(label).toHaveClass("text-primary");
+      expect(label.closest("button")).toBeNull();
+      expect(label).toHaveAttribute("title", expect.stringContaining("carries into the next"));
+      expect(actions()).toHaveAttribute("aria-expanded", "false");
+    });
+
     it("doesn't offer rollover on a subcategory, nor a card anywhere (that's in Settings › Categories)", () => {
       setup(cat(), { sub: true, budgets: true });
+      expect(screen.queryByRole("button", { name: "Actions for Groceries" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Set card/ })).not.toBeInTheDocument();
       expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    });
+
+    it("has no ⋯ menu until the category has a budget", () => {
+      setup(cat({ budget: null }), { budgets: true });
+      expect(screen.queryByRole("button", { name: "Actions for Groceries" })).not.toBeInTheDocument();
+    });
+
+    it("has no ⋯ menu outside the Budgets card", () => {
+      setup(cat());
+      expect(screen.queryByRole("button", { name: "Actions for Groceries" })).not.toBeInTheDocument();
+    });
+
+    it("closes the menu with Done", async () => {
+      setup(cat(), { budgets: true });
+      await userEvent.click(actions());
+      expect(actions()).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
+    });
+
+    it("keeps an income category free of the menu", () => {
+      setup(cat({ name: "Paycheck", path: ["Paycheck"], top: "Paycheck", budget: 6000, spent: 3000, left: 3000 }), { income: true, budgets: true });
+      expect(screen.queryByRole("button", { name: "Actions for Paycheck" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
     });
   });
 

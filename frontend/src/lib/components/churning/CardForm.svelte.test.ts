@@ -219,7 +219,7 @@ describe("card form", () => {
     });
   });
 
-  describe("Fill in the rest with AI", () => {
+  describe("Fill in the rest", () => {
     const suggestion = {
       family: "Sapphire", currency: "ur", base_rate: 1, annual_fee: 550, portal_name: "Chase Travel",
       rates: [{ category: "Travel", multiplier: 5, portal_only: 1 }, { category: "Restaurants", multiplier: 3, portal_only: 0 }],
@@ -234,13 +234,13 @@ describe("card form", () => {
     it("is hidden without an OpenRouter key", () => {
       app.state = { connected: true, has_api_key: false } as never;
       setup();
-      expect(screen.queryByRole("button", { name: "Fill in the rest with AI" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Fill in the rest" })).toBeNull();
     });
 
     it("fills the empty fields, marks them, and saves them only with the card", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
-      const button = screen.getByRole("button", { name: "Fill in the rest with AI" });
+      const button = screen.getByRole("button", { name: "Fill in the rest" });
       expect(button).toBeDisabled();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(button);
@@ -271,7 +271,7 @@ describe("card form", () => {
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.type(screen.getByLabelText("Annual fee"), "95");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
       expect(screen.getByLabelText("Annual fee")).toHaveValue("95");
       await userEvent.click(screen.getByRole("button", { name: "Discard" }));
@@ -285,9 +285,9 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await waitFor(() => expect(calls("/api/churning/suggest")).toHaveLength(2));
       expect(within(screen.getByTestId("ai-benefits")).getAllByRole("listitem")).toHaveLength(1);
     });
@@ -296,7 +296,7 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
       await userEvent.type(screen.getByLabelText(/^Bonus \(/), "60000");
       await userEvent.clear(screen.getByLabelText(/Family/));
@@ -312,7 +312,7 @@ describe("card form", () => {
     it("on an existing card, saves only when you say so", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
       expect(calls("/api/churning/cards/1")).toHaveLength(0);
       await userEvent.click(screen.getByRole("button", { name: "Save these" }));
@@ -324,7 +324,7 @@ describe("card form", () => {
     it("on an existing card, Save these sends what the form holds, not what the AI first said", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
       await userEvent.clear(screen.getByLabelText("Annual fee"));
       await userEvent.type(screen.getByLabelText("Annual fee"), "95");
@@ -344,7 +344,7 @@ describe("card form", () => {
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? withSources : { ok: true })) as never);
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       const sources = await screen.findByTestId("ai-sources");
       expect(sources).toHaveTextContent("From: chase.com, news.example.com");
       const links = within(sources).getAllByRole("link");
@@ -362,7 +362,7 @@ describe("card form", () => {
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, web: false, sources: [] } : { ok: true })) as never);
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       expect(await screen.findByTestId("ai-sources")).toHaveTextContent("without a web search");
     });
 
@@ -370,7 +370,7 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, bonus: { amount: 100000, spend: 5000, months: 3 } } : { ok: true })) as never);
       render(CardForm, { c: card({ currency: "cash", annual_fee: 0, rates: [], bonus: null, bonus_spend: null }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
       expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("");
     });
@@ -380,10 +380,10 @@ describe("card form", () => {
       vi.mocked(api).mockRejectedValue(new Error("The AI request failed after 45s: timed out"));
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
-      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("The AI request failed after 45s: timed out"));
       expect(screen.queryByTestId("ai-marked")).toBeNull();
-      expect(screen.getByRole("button", { name: "Fill in the rest with AI" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Fill in the rest" })).toBeEnabled();
     });
   });
 

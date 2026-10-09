@@ -4,10 +4,12 @@
   import { catLook } from "$lib/categories.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
+  import { Button } from "$lib/components/ui/button";
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
   import Repeat from "@lucide/svelte/icons/repeat";
   import Calendar1 from "@lucide/svelte/icons/calendar-1";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import { cn } from "$lib/utils";
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
@@ -21,7 +23,8 @@
   // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji. What's still
   // expected this month (recurring payments that haven't come yet, `expected`) is the bar's lighter part after what's spent.
   // `income`: an income category, whose budget is what's expected to come in and `spent` what has. More is good: its
-  // bar is green, going over isn't a warning, and it has no rollover or card.
+  // bar is green, going over isn't a warning, and it has no rollover or card. Whether a budget's left rolls over is
+  // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
   let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; income?: boolean; pace: number; payAccounts: PayAccount[];
     account?: string | null; onsave: (category: string, amount: string) => void; onchanged: () => void;
@@ -45,6 +48,11 @@
   const money = (v: number | null) => (v != null && Math.abs(v) >= 0.005 && Math.abs(v) < 0.5 ? fmt(v) : fmt0(v));
   // A subcategory has no bar: its figure turns red when it's over (bold), or will be with what's still coming.
   const subNote = $derived(!sub || income ? "" : over ? `${money(c.spent - avail!)} over` : overSoon ? `${money(c.spent + expected - avail!)} over with what’s coming` : "");
+
+  // Rollover's on/off lives in the row's ⋯ menu; the row itself only says "Rolls over" (blue) when the budget's left
+  // carries into next month. An income category and a subcategory have no rollover.
+  let menu = $state(false);
+  const canRoll = $derived(budgets && c.budget != null && !sub && !income);
 
   // The category name and its spent amount open Transactions showing exactly what adds up to it (and what's still
   // expected, in its Upcoming).
@@ -122,14 +130,11 @@
     </span>
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
-    {#if budgets && c.budget != null && !sub && !income}
-      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
-        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
-          : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-2.5 text-xs sm:py-0.5 whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-          c.rollover_from ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
-        <Repeat class="size-3" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
-      </button>
+    {#if canRoll && c.rollover_from}
+      <span class="inline-flex items-center gap-1 rounded-md px-1.5 text-xs whitespace-nowrap text-primary"
+        title={`What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}); the row's ⋯ menu turns it off`}>
+        <Repeat class="size-3" aria-hidden="true" />Rolls over
+      </span>
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} class={cn("hover:underline", sub && warnOver && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
@@ -187,6 +192,23 @@
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
         {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
+      {#if canRoll}
+        <Button variant="ghost" size="icon" class={cn("-my-2 -mr-1.5 -ml-1.5 size-8 shrink-0 text-muted-foreground hover:text-foreground focus-visible:opacity-100",
+          menu ? "opacity-100" : "hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}
+          aria-label={`Actions for ${c.name}`} aria-expanded={menu} onclick={() => (menu = !menu)}><Ellipsis /></Button>
+      {/if}
+    </div>
+  {/if}
+  {#if menu && canRoll}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 pt-1 pb-1 sm:pl-[38px]">
+      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
+        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
+          : "Carry what's left at the end of each month into the next"}
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+          c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
+        <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
+      </button>
+      <Button variant="link" size="sm" class="h-auto justify-start p-0" onclick={() => (menu = false)}>Done</Button>
     </div>
   {/if}
   {#if c.budget != null && carried > 0.005}

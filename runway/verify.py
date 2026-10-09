@@ -74,7 +74,7 @@ def run(pages: list[str]) -> int:
     env = clean_env(data)
     server = None
     try:
-        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo"], env=env, cwd=ROOT,
+        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons"], env=env, cwd=ROOT,
                                 capture_output=True, text=True)
         if seeded.returncode:
             print(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", file=sys.stderr)

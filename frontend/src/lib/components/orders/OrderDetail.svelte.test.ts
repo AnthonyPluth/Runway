@@ -83,7 +83,7 @@ describe("the AI's suggestions for an order's items", () => {
       return {};
     }) as never);
     render(OrderDetail, { orderId: "x" });
-    await userEvent.click(await screen.findByRole("button", { name: "Suggest categories with AI" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Suggest categories" }));
     expect(await screen.findByRole("button", { name: "Use Groceries for BANANAS" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Create Paper Goods and use it for KS PAPER TOWEL" }));
     await waitFor(() => expect(vi.mocked(api).mock.calls.some((c) => c[0] === "/api/retail/items/2")).toBe(true));
@@ -96,7 +96,7 @@ describe("the AI's suggestions for an order's items", () => {
     vi.mocked(api).mockResolvedValue(order([item(1, "MILK", "Groceries")]) as never);
     render(OrderDetail, { orderId: "x" });
     await screen.findByText("MILK");
-    expect(screen.queryByRole("button", { name: "Suggest categories with AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Suggest categories" })).not.toBeInTheDocument();
   });
 });
 
