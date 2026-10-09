@@ -1,5 +1,6 @@
 """The Budget page: each category's budget, what it has spent this month, and what rolls over; and the income expected
-in a month (an income category's budget) against what has come in."""
+in a month (an income category's budget) against what has come in. A budget has its usual amount, and any month can
+have an amount of its own instead (that month only: domain/budgets.py)."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -9,9 +10,10 @@ from sqlalchemy import delete, func, select, update
 from ...domain import categories, forecast
 from ...storage import db
 from ... import validate
-from ...dates import days_in_month
+from ...dates import days_in_month, month_key
+from ...domain import budgets as budgetmod
 from ...domain.budgets import budget_carry, month_totals
-from ...storage.models import Account, Budget, Category
+from ...storage.models import Account, Budget, Category, MonthBudget
 from ...money import CENT
 from ..common import ApiError, _month_range, text
 from ..contract import BudgetCategory, BudgetMonth, BudgetSaved, BudgetSet, RaisedBudget
@@ -32,8 +34,11 @@ def api_budget(conn, q, _b) -> BudgetMonth:
     icats = [c for c in every if c["is_income"] and c["top"] != "Refunds"]
     income_cats = [c["name"] for c in icats]
     totals = month_totals(conn, start, end)
-    budget_rows = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
-    budgets = {k: r["amount"] for k, r in budget_rows.items()}
+    budget_rows = budgetmod.load(conn)
+    key = f"{start:%Y-%m}"
+    budgets = {k: budgetmod.amount_in(r, key) for k, r in budget_rows.items()}   # the month's
+    every_month = {k: r["amount"] for k, r in budget_rows.items()}   # the usual amounts
+    this_month = {k: r["months"][key] for k, r in budget_rows.items() if key in r["months"]}   # the month's own
     # The account each category's spending goes on: the one chosen for it, and the one used most lately (for a budget
     # that counts, as the forecast works it out: outside its subcategories that have their own).
     pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
@@ -52,6 +57,7 @@ def api_budget(conn, q, _b) -> BudgetMonth:
         carried = carry.get(c["name"], 0.0)
         out.append({"name": c["name"], "parent": c["parent"], "path": c["path"], "depth": c["depth"], "top": c["top"],
                     "has_children": bool(below), "budget": b,
+                    "usual_budget": every_month.get(c["name"]), "month_budget": this_month.get(c["name"]),
                     "pay_with": pay_with.get(c["name"]),
                     "rollover_from": row.get("rollover_from"),
                     "carried": carried,   # from earlier months, when the budget rolls over
@@ -69,7 +75,9 @@ def api_budget(conn, q, _b) -> BudgetMonth:
         received = round(own_in[c["name"]] + sum(own_in[k] for k in below), 2)
         b = budgets.get(c["name"])
         income_rows.append({"name": c["name"], "parent": c["parent"], "path": c["path"], "depth": c["depth"], "top": c["top"],
-                            "has_children": bool(below), "budget": b, "pay_with": None, "rollover_from": None, "carried": 0.0,
+                            "has_children": bool(below), "budget": b,
+                            "usual_budget": every_month.get(c["name"]), "month_budget": this_month.get(c["name"]),
+                            "pay_with": None, "rollover_from": None, "carried": 0.0,
                             "available": b, "usual_account": None, "spent": received, "own_spent": own_in[c["name"]],
                             "left": round(b - received, 2) if b is not None else None,
                             "expected": round(coming_in.get(c["name"], 0.0), 2)})
@@ -135,8 +143,11 @@ def api_budget_set(conn, _q, body: BudgetSet) -> BudgetSaved:
         except categories.CategoryError as e:
             raise ApiError(str(e)) from e
         return {"ok": True}
+    if "month" in body:
+        return set_month(conn, cat, body)
     amt = body.get("amount")
     if amt in (None, "", 0, "0"):
+        conn.execute(delete(MonthBudget).where(MonthBudget.category == cat))   # its months' own amounts go with it
         conn.execute(delete(Budget).where(Budget.category == cat))   # the parent's budget stays as it is
         return {"ok": True, "raised": []}
     amt = abs(_amount.amount(amt, "amount", cents=False, required=True))
@@ -144,19 +155,42 @@ def api_budget_set(conn, _q, body: BudgetSet) -> BudgetSaved:
     return {"ok": True, "raised": raise_parents(conn, cat)}
 
 
-def raise_parents(conn, cat: str) -> list[RaisedBudget]:
+def set_month(conn, cat: str, body: BudgetSet) -> BudgetSaved:
+    """A budget's own amount for one month ("YYYY-MM") instead of its usual amount: for that month only. An empty amount
+    takes the month back to the usual amount; 0 budgets nothing that month (the budget itself stays)."""
+    start, _ = _month_range({"month": [text(body.get("month"), "month")]})   # as GET /api/budget's ?month=
+    month = month_key(start)   # kept as "YYYY-MM", however it was sent ("2026-9")
+    if not conn.execute(select(Budget.category).where(Budget.category == cat)).fetchone():
+        raise ApiError("Set a budget for this category first")
+    amt = body.get("amount")
+    if amt in (None, ""):
+        conn.execute(delete(MonthBudget).where(MonthBudget.category == cat, MonthBudget.month == month))
+        return {"ok": True, "raised": []}
+    amt = abs(_amount.amount(amt, "amount", cents=False, required=True))
+    db.upsert(conn, MonthBudget, {"category": cat, "month": month, "amount": amt}, key=["category", "month"])
+    return {"ok": True, "raised": raise_parents(conn, cat, month)}
+
+
+def raise_parents(conn, cat: str, month: str | None = None) -> list[RaisedBudget]:
     """A parent's budget covers its subcategories', so one that's now less than its subcategories' budgets added up
     (those that have one) goes up to that, and so on up the tree. A parent is never lowered, and one without a budget
-    is left without one. Returns the budgets raised, nearest first."""
+    is left without one. Returns the budgets raised, nearest first.
+
+    Without a `month` the usual amounts are compared, and a parent's usual amount is raised; with one (a month's own
+    amount was just set) that month's amounts are, and the parent gets an amount of its own for that month."""
     parents = dict(conn.execute(select(Category.name, Category.parent)).fetchall())
-    budgets = dict(conn.execute(select(Budget.category, Budget.amount)).fetchall())
+    rows = budgetmod.load(conn)
+    budgets = {k: budgetmod.amount_in(r, month) if month else r["amount"] for k, r in rows.items()}
     raised: list[RaisedBudget] = []
     for above in reversed(categories.path(parents, cat)[:-1]):
         if above not in budgets:
             continue
         total = round(sum(budgets[k] for k, p in parents.items() if p == above and k in budgets), 2)
         if total > budgets[above] + CENT:
-            conn.execute(update(Budget).where(Budget.category == above).values(amount=total))
+            if month:
+                db.upsert(conn, MonthBudget, {"category": above, "month": month, "amount": total}, key=["category", "month"])
+            else:
+                conn.execute(update(Budget).where(Budget.category == above).values(amount=total))
             budgets[above] = total
             raised.append({"category": above, "amount": total})
     return raised

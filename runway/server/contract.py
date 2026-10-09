@@ -120,7 +120,9 @@ class AccountItem(AccountColumns):
 
 class BudgetCategory(TypedDict):
     """A category's month on the Budget page: what's been spent (its subcategories included) against its budget, if it
-    has one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come."""
+    has one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come.
+    `budget` is the month's: its own amount (`month_budget`, set for that month only) when it has one, else the
+    budget's usual amount (`usual_budget`, every other month's)."""
     name: str
     parent: str | None
     path: list[str]
@@ -128,6 +130,8 @@ class BudgetCategory(TypedDict):
     top: str
     has_children: bool
     budget: float | None
+    usual_budget: float | None
+    month_budget: float | None
     pay_with: str | None
     rollover_from: str | None
     carried: float
@@ -159,9 +163,11 @@ class BudgetMonth(TypedDict):
 
 class BudgetSet(TypedDict):
     """POST /api/budget: a category's budget (an empty or zero amount removes it), or whether it rolls over, or (kept
-    for a release) the account it's paid with."""
+    for a release) the account it's paid with. With `month` ("YYYY-MM"), the budget's own amount for that month only
+    (it needs a budget already): an empty amount takes the month back to the usual amount, 0 budgets nothing then."""
     category: str
     amount: NotRequired[float | str | None]
+    month: NotRequired[str]
     rollover: NotRequired[bool]
     pay_with: NotRequired[str | None]
 

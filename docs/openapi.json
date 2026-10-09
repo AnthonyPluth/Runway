@@ -428,7 +428,7 @@
       },
       "BudgetCategory": {
         "type": "object",
-        "description": "A category's month on the Budget page: what's been spent (its subcategories included) against its budget, if it\nhas one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come.",
+        "description": "A category's month on the Budget page: what's been spent (its subcategories included) against its budget, if it\nhas one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come.\n`budget` is the month's: its own amount (`month_budget`, set for that month only) when it has one, else the\nbudget's usual amount (`usual_budget`, every other month's).",
         "properties": {
           "name": {
             "type": "string"
@@ -455,6 +455,18 @@
             "type": "boolean"
           },
           "budget": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "usual_budget": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "month_budget": {
             "type": [
               "number",
               "null"
@@ -511,6 +523,8 @@
           "top",
           "has_children",
           "budget",
+          "usual_budget",
+          "month_budget",
           "pay_with",
           "rollover_from",
           "carried",
@@ -594,7 +608,7 @@
       },
       "BudgetSet": {
         "type": "object",
-        "description": "POST /api/budget: a category's budget (an empty or zero amount removes it), or whether it rolls over, or (kept\nfor a release) the account it's paid with.",
+        "description": "POST /api/budget: a category's budget (an empty or zero amount removes it), or whether it rolls over, or (kept\nfor a release) the account it's paid with. With `month` (\"YYYY-MM\"), the budget's own amount for that month only\n(it needs a budget already): an empty amount takes the month back to the usual amount, 0 budgets nothing then.",
         "properties": {
           "category": {
             "type": "string"
@@ -605,6 +619,9 @@
               "string",
               "null"
             ]
+          },
+          "month": {
+            "type": "string"
           },
           "rollover": {
             "type": "boolean"
