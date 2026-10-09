@@ -1,5 +1,6 @@
 """Made-up sample data for a preview or a demo: a few accounts, six months of transactions, bills and paychecks,
 budgets and a home. Nothing here is real, and seeding refuses to touch a database that already has accounts."""
+import math
 import random
 from datetime import date, timedelta
 
@@ -9,8 +10,8 @@ from ..storage import db
 from ..storage import settings_keys as sk
 from .forecast import NO_STATEMENT_DUE_DAYS
 from .retail import token as retail_token
-from ..storage.models import (Account, Asset, Budget, Category, ManualStatement, MonthBudget, Recurring, RetailCharge,
-                              RetailItem, RetailOrder, SyncLog, Transaction)
+from ..storage.models import (Account, Asset, Budget, Category, Holding, InvAccount, ManualStatement, MonthBudget, Price, PriceMeta,
+                              Recurring, RetailCharge, RetailItem, RetailOrder, Security, SyncLog, Transaction)
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -47,6 +48,14 @@ EVERYDAY = [
 
 BUDGETS = [("Groceries", 600), ("Restaurants", 250), ("Coffee & Snacks", 60), ("Shopping", 300)]
 MONTH_BUDGETS = [("Shopping", 450)]   # this month's own amount (gifts, say); other months keep the usual one
+
+# ticker, name, type, shares, price paid per share, yesterday's close, today's close: one up, one down, one barely moved
+# (made-up tickers, so a live price service never has a quote that replaces these prices)
+HOLDINGS = [
+    ("DEMOTM", "Sample Total Market ETF", "etf", 42.0, 205.00, 281.40, 284.95),
+    ("DEMOIN", "Sample International ETF", "etf", 60.0, 61.00, 68.20, 67.55),
+    ("DEMOSI", "Sample Industries Inc", "equity", 15.0, 140.00, 192.10, 192.15),
+]
 
 PART_PAYMENT = 400.0   # paid toward the card's latest statement a few days after it closed (at most half of it)
 
@@ -145,3 +154,26 @@ def seed_ai_buttons(conn, today: date | None = None) -> None:
     conn.execute(insert(RetailCharge).values(id=f"{order}|1", order_id=order, date=placed, amount=-53.97, payment="Visa 1234"))
     retail_token.new_token(conn, {"sub": "demo", "email": "demo@example.invalid"})   # with an owner, as a real key has
     db.set_setting(conn, sk.OPENROUTER_API_KEY, "sk-or-demo-not-a-real-key")
+
+
+def seed_investments(conn, today: date) -> None:
+    """A brokerage account with three holdings and a year of closes, so the Investments page has a day's gain, a day's
+    loss and a nearly flat day to show."""
+    total = 0.0
+    conn.execute(insert(InvAccount).values(id="demo-brokerage", item_id="demo-item", name="Sample Brokerage", type="investment",
+                                           subtype="brokerage", mask="0000", currency="USD", source="plaid",
+                                           institution="Sample Brokerage Co", account_id="pl:demo-brokerage"))
+    for ticker, name, kind, shares, paid, before, close in HOLDINGS:
+        value = round(shares * close, 2)
+        total += value
+        conn.execute(insert(Security).values(id=f"demo-{ticker}", ticker=ticker, name=name, type=kind, is_cash=0, close_price=close,
+                                             close_as_of=today.isoformat()))
+        conn.execute(insert(Holding).values(account_id="demo-brokerage", security_id=f"demo-{ticker}", quantity=shares, price=close,
+                                            price_as_of=today.isoformat(), value=value, cost_basis=round(shares * paid, 2)))
+        # A year of closes before yesterday's: a steady climb with a wobble, so the page's charts have something to draw.
+        closes = [(today - timedelta(days=k), round(before * (1 - 0.15 * k / 365) * (1 + 0.012 * math.sin(k / 5 + len(ticker))), 2))
+                  for k in range(2, 366)]
+        closes += [(today - timedelta(days=1), before), (today, close)]
+        conn.execute(insert(Price), [{"ticker": ticker, "date": d.isoformat(), "close": c, "adjclose": c} for d, c in closes])
+        conn.execute(insert(PriceMeta).values(ticker=ticker, fetched_at=f"{today.isoformat()}T00:00:00", ok=1, splits="[]"))
+    conn.execute(update(InvAccount).where(InvAccount.id == "demo-brokerage").values(balance=round(total, 2)))

@@ -4,7 +4,7 @@ from datetime import date
 from sqlalchemy import func, select
 
 from runway.storage import db
-from runway.domain import demo, forecast
+from runway.domain import demo, forecast, portfolio
 from runway.domain import retail
 from runway.storage.models import Account, Recurring, RetailItem, Transaction
 from tests.shared import DbCase
@@ -40,6 +40,18 @@ class DemoTests(DbCase):
         self.assertEqual(waiting(), 3)
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItem).where(RetailItem.category.is_(None))).scalar(), 2)
         self.assertEqual(retail.token_owner(self.c), {"sub": "demo", "email": "demo@example.invalid"})
+
+    def test_the_brokerage_has_a_gain_a_loss_and_a_flat_day(self):
+        demo.seed(self.c, today=date(2026, 10, 9))
+        self.assertEqual(portfolio.holdings(self.c), [])   # opt-in, so tests built on the plain sample see no investments
+        demo.seed_investments(self.c, date(2026, 10, 9))
+        by = {h["ticker"]: h for h in portfolio.holdings(self.c)}
+        self.assertEqual(set(by), {"DEMOTM", "DEMOIN", "DEMOSI"})
+        self.assertGreater(by["DEMOTM"]["day_change"], 0)
+        self.assertLess(by["DEMOIN"]["day_change"], 0)
+        self.assertAlmostEqual(by["DEMOTM"]["day_change"], 42 * (284.95 - 281.40), places=2)
+        self.assertAlmostEqual(by["DEMOIN"]["day_change_pct"], 67.55 / 68.20 - 1, places=5)
+        self.assertLess(abs(by["DEMOSI"]["day_change_pct"]), 0.001)
 
     def test_the_card_has_a_part_payment_since_its_statement(self):
         demo.seed(self.c, today=date(2026, 10, 9))

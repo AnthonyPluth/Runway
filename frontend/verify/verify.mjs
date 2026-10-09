@@ -63,7 +63,20 @@ async function runStep(page, step, shot) {
   } else if ("wait_for" in step) {
     await page.locator(step.wait_for).first().waitFor({ timeout });
   } else if ("scroll_to" in step) {   // so a screenshot of the viewport shows it
-    await page.locator(step.scroll_to).first().evaluate((el) => el.scrollIntoView({ block: "center" }), undefined, { timeout });
+    // It then waits until the element has stopped moving (smooth scrolling and scroll snapping animate), so the screenshot after
+    // it shows where it came to rest.
+    await page.locator(step.scroll_to).first().evaluate((el) => new Promise((done) => {
+      el.scrollIntoView({ block: "center", inline: "start" });
+      let last = "", still = 0, frames = 0;
+      const tick = () => {
+        const r = el.getBoundingClientRect();
+        const at = `${Math.round(r.left)},${Math.round(r.top)}`;
+        still = at === last ? still + 1 : 0;
+        last = at;
+        if (still >= 8 || ++frames > 180) done(undefined); else setTimeout(tick, 16);
+      };
+      setTimeout(tick, 16);
+    }), undefined, { timeout });
   } else if ("expect_text" in step) {
     const el = page.locator(step.expect_text.selector).first();
     await el.waitFor({ timeout });
