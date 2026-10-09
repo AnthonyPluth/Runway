@@ -7,6 +7,7 @@
     { "click": "summary:has-text('Recent orders')" },
     { "click": "button[aria-expanded=false]:has-text('111-0000000-0000001')" },
     { "wait_for": "button[aria-label='Suggest categories with AI']" },
+    { "press": { "selector": "button[aria-label='Suggest categories with AI']", "key": "Shift" } },
     { "screenshot": "order" }
   ]
 }
