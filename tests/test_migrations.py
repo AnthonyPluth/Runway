@@ -430,6 +430,10 @@ class MigrationTests(unittest.TestCase):
                               "walmart": ("example.com", 0)})
             self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
                              ["chk|amazon|monthly", "chk|amzn digital|monthly", "chk|costco gas|weekly"])
+        with db.engine(self.path).begin() as c:
+            # Matching below is today's code, which reads today's recurring columns (0041's, on this 0034 database).
+            c.exec_driver_sql("ALTER TABLE recurring ADD COLUMN category TEXT")
+        with db.session(self.path) as conn:
             # The next Kindle payment, synced with the brand's name, still finds its recurring item, and an Amazon order doesn't.
             conn.execute(insert(Transaction), [
                 {"id": "chk|10", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": digital, "payee": "Amazon"},
@@ -629,6 +633,22 @@ class MigrationTests(unittest.TestCase):
             self.assertFalse([f for f in os.listdir(where) if f.startswith("runway-before-migration")])
         with db.session(self.path) as conn:
             self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
+
+    def test_0041_gives_recurring_items_a_category_they_start_without(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0040")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("category", {col["name"] for col in sa.inspect(c).get_columns("recurring")})
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('chk', 'Checking', 'checking')")
+            c.exec_driver_sql("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) "
+                              "VALUES (1, 'Water', 'chk', -40, 'monthly', '2026-09-05')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(tuple(conn.execute(select(Recurring.name, Recurring.category)).fetchone()), ("Water", None))
+        self.assertEqual(drift(self.path), [])
 
     @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
     def test_migrating_doesnt_cascade_on_sqlite(self):

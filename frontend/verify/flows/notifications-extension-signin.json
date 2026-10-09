@@ -1,0 +1,9 @@
+{
+  "name": "notifications-extension-signin",
+  "page": "setup",
+  "steps": [
+    { "goto": "#setup/notifications" },
+    { "expect_text": { "selector": "body", "text": "Browser extension needs a sign-in" } },
+    { "screenshot": "rules" }
+  ]
+}

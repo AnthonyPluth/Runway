@@ -16,6 +16,7 @@ from .api.accounts import (
 )
 from .api.backups import api_backup, api_backup_inspect, api_restore
 from .api.budget import api_budget, api_budget_set
+from .api.budget_suggest import api_budget_suggestions
 from .api.categories import (
     api_categories, api_category_add, api_category_look, api_category_move, api_category_pay_with, api_category_remove,
     api_category_rename, api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
@@ -117,6 +118,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/push/test", api_push_test),
     ("GET", "/api/budget", api_budget),
     ("POST", "/api/budget", api_budget_set),
+    ("GET", "/api/budget/suggestions", api_budget_suggestions),
     ("POST", "/api/ai/suggest", api_ai_suggest),
     ("POST", "/api/ai/apply", api_ai_apply),
     ("GET", "/api/ai/log", api_ai_log),

@@ -68,7 +68,7 @@ describe("an order's items", () => {
 });
 
 describe("a recurring item's fields", () => {
-  const v = () => ({ name: "Rent", account_id: "a1", amount: -1200, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-10-01", match: "", amount_min: "", amount_max: "", end_date: "" });
+  const v = () => ({ name: "Rent", account_id: "a1", amount: -1200, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-10-01", match: "", amount_min: "", amount_max: "", end_date: "", category: "" });
   const accounts = [{ id: "a1", name: "Checking", kind: "checking" }] as never;
 
   it("have More options on a phone", () => {
