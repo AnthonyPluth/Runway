@@ -8,7 +8,8 @@ request's). Standard library only.
                                   line, oldest first), writes the review comment's text to OUT.md and prints the commit
                                   it reviewed and its verdict ("<sha> <pass|blocking>"), or nothing when there is none.
   agent_review.py plan            Gathers the change into $OUT_DIR from the pull request's checkout in $REPO_DIR (git
-                                  only reads it), and writes mode (review, or carry to copy the last passing verdict),
+                                  only reads it), and writes mode (review; carry to copy the last passing verdict; docs
+                                  to pass documentation without a review),
                                   description and incremental (true when the reviewer gets the last review's findings
                                   and the diff since it) to $GITHUB_OUTPUT. See plan().
   agent_review.py report OUT.json Turns the reviewer's output (claude --output-format json, with --json-schema) into a
@@ -50,6 +51,13 @@ GENERATED = ("docs/openapi.json", "frontend/src/lib/api-types.ts", "docs/feature
              "docs/src/content/docs/contributing/feature-map.md", "tests/fixtures/forecast_golden.json")
 LOCKFILES = ("poetry.lock", "uv.lock", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
 IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico")
+
+# A pull request whose every file is documentation gets a passing status without a review. Kept narrow: Markdown at the
+# root or in the docs site's pages (not .mdx, which runs code when the site builds), and raster images in its assets;
+# never the agents' instructions or the security policy, never a symlink or a submodule (the site's build would follow
+# one), never anything else under docs/ (the site's config, components, packages, generated files).
+INSTRUCTIONS = ("agents.md", "claude.md", "security.md")   # compared case-insensitively
+REGULAR_FILE = ("100644", "000000")   # a plain file, or a deleted one
 
 
 def is_agent(messages: list[str], body: str) -> bool:
@@ -100,6 +108,32 @@ def own_files(repo: str, main: str, rev: str) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+def changes(repo: str, main: str, rev: str) -> list[tuple[str, str]]:
+    """(new mode, path) for each file a commit's change touches (git diff --raw, no rename detection)."""
+    fields = git(repo, "diff", "--no-renames", "--raw", "-z", f"{main}...{rev}").split("\0")
+    out = []
+    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+        if meta.startswith(":") and path:
+            out.append((meta[1:].split()[1], path))
+    return out
+
+
+def is_docs(path: str) -> bool:
+    if path.casefold().rsplit("/", 1)[-1] in INSTRUCTIONS:
+        return False
+    if "/" not in path:
+        return path.endswith(".md")
+    if path.startswith("docs/src/content/docs/"):
+        return path.endswith(".md")
+    if path.startswith("docs/src/assets/"):
+        return path.lower().endswith(IMAGES) and not path.lower().endswith(".ico")
+    return False
+
+
+def docs_only(found: list[tuple[str, str]]) -> bool:
+    return bool(found) and all(mode in REGULAR_FILE and is_docs(path) for mode, path in found)
+
+
 def is_ancestor(repo: str, old: str, new: str) -> bool:
     if not (SHA.match(old) and SHA.match(new)) or old == new:
         return False
@@ -129,7 +163,8 @@ def only_main_merged(repo: str, main: str, prev: str, head: str) -> bool:
 def plan(env: dict[str, str]) -> dict[str, str]:
     """Decides what the review does (mode) and writes the change into OUT_DIR for the reviewer.
 
-    mode is carry when the last review passed (PREV_VERDICT pass and its "Agent review" status, PREV_STATE, success)
+    mode is docs when every file it changes is documentation (docs_only()), the last review is known (PREV_OK) and it
+    wasn't blocking: it passes without a review. It is carry when the last review passed (PREV_VERDICT pass and its "Agent review" status, PREV_STATE, success)
     and only_main_merged(): its verdict is copied to the new head instead of reviewing again. Otherwise it is review,
     with OUT_DIR holding:
 
@@ -154,6 +189,14 @@ def plan(env: dict[str, str]) -> dict[str, str]:
     (out / "commits.txt").write_text(git(repo, "log", "--format=commit %H%n%B", f"{main}..{head}"))
     result = {"mode": "review", "description": "", "incremental": "false"}
     prev = env.get("PREV_SHA", "")
+    # Skipping needs the last review known (PREV_OK) and not blocking: a push to a pull request with blocking findings
+    # is reviewed, so the findings are checked, even when what is left is documentation (it can leak private data too).
+    settled = env.get("PREV_OK") == "true" and env.get("PREV_VERDICT") != "blocking"
+    try:
+        if settled and docs_only(changes(repo, main, head)):
+            return {**result, "mode": "docs", "description": "Docs only; not reviewed"}
+    except Exception as e:   # can't tell: review
+        print(f"::warning::Reviewing: couldn't tell whether only documentation changed ({type(e).__name__}).")
     try:
         if env.get("PREV_VERDICT") == "pass" and env.get("PREV_STATE") == "success" \
                 and only_main_merged(repo, main, prev, head):

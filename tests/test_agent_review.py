@@ -239,6 +239,51 @@ class Plan(unittest.TestCase):
         self.assertIn("+a = 3", since)
         self.assertNotIn("openapi", since)
 
+    FIRST = {"PREV_OK": "true"}   # the last review was looked up, and there was none
+
+    def test_documentation_alone_passes_without_a_review(self):
+        self.write("README.md", "# Runway, better\n")
+        self.write("docs/src/content/docs/start/docker.md", "Run it.\n")
+        self.write("docs/src/assets/screenshots/budget.png", "png")
+        head = self.commit("docs")
+        self.assertEqual(self.plan(head, **self.FIRST),
+                         {"mode": "docs", "description": "Docs only; not reviewed", "incremental": "false"})
+        self.assertEqual(self.plan(head, PREV_OK="true", PREV_SHA=self.base, PREV_VERDICT="pass")["mode"], "docs")
+
+    def test_documentation_with_anything_else_is_reviewed(self):
+        for extra in ("runway/app.py", "frontend/src/App.svelte", ".github/workflows/x.yml", ".github/scripts/x.sh",
+                      "AGENTS.md", "CLAUDE.md", "SECURITY.md", "docs/astro.config.mjs", "docs/package.json",
+                      "docs/src/content/docs/page.mdx", "docs/src/styles/custom.css", "docs/openapi.json",
+                      "pyproject.toml", "Makefile", ".github/README.md", "runway/notes.md", "tests/README.md",
+                      ".claude/settings.md", "docs/src/assets/logo.svg"):
+            with self.subTest(extra=extra):
+                self.git("checkout", "-q", "-B", "pr", self.base)
+                self.write("docs/src/content/docs/start/docker.md", "Run it.\n")
+                self.write(extra, "changed\n")
+                head = self.commit("docs and more")
+                self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
+
+    def test_a_symlink_or_an_executable_isn_t_documentation(self):
+        (self.repo / "docs/src/content/docs").mkdir(parents=True)
+        (self.repo / "docs/src/content/docs/env.md").symlink_to("../../../../.env")
+        head = self.commit("a link")
+        self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
+        self.git("checkout", "-q", "-B", "pr", self.base)
+        self.write("CONTRIBUTING.md", "x\n")
+        (self.repo / "CONTRIBUTING.md").chmod(0o755)
+        self.assertEqual(self.plan(self.commit("executable"), **self.FIRST)["mode"], "review")
+
+    def test_documentation_is_reviewed_after_a_blocking_review_or_when_the_last_one_is_unknown(self):
+        self.write("README.md", "# Runway, better\n")
+        head = self.commit("docs")
+        for extra in ({"PREV_OK": "true", "PREV_SHA": self.base, "PREV_VERDICT": "blocking"},
+                      {"PREV_OK": ""},     # looking up the last review failed
+                      {}):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.plan(head, **extra)["mode"], "review")
+        with mock.patch.object(ar, "changes", side_effect=subprocess.CalledProcessError(128, "git")):
+            self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
+
     def merge_main(self, main_path="runway/other.py", main_text="b = 1\n"):
         """The pull request reviewed at prev; main moves on; main is merged in. Returns (prev, head)."""
         self.write("runway/app.py", "a = 2\n")

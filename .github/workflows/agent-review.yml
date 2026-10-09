@@ -17,6 +17,11 @@ name: Agent review
 # The diff the reviewer reads leaves out generated files and fixtures that deterministic checks cover, lockfiles and
 # images (GENERATED in agent_review.py, the one list); files.txt still lists them, and the prompt says why.
 #
+# A pull request that changes only documentation passes as "Docs only; not reviewed": every file Markdown at the root
+# or in the docs site's pages, or an image in its assets, as plain files (agent_review.py's docs_only(); not AGENTS.md,
+# CLAUDE.md or SECURITY.md, nothing else under docs/, no code, workflow, script or config). Only when the last review is
+# known and wasn't blocking; when in doubt it is reviewed.
+#
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
 # saying so; Dependabot's get none (the merge gate doesn't ask for one).
@@ -90,8 +95,8 @@ jobs:
           { echo "agent=$agent"; echo "same_repo=$same_repo"; } | tee -a "$GITHUB_OUTPUT"
 
       # The last review's comment, while no code of the pull request is checked out (this and the step above are the
-      # only ones with a token): the commit it read and its findings, for a re-review. If this fails, the review reads
-      # the whole change as if it were the first.
+      # only ones with a token): the commit it read, its findings and whether it passed. If this fails (no ok output),
+      # nothing is skipped or carried forward, and the review reads the whole change as if it were the first.
       - name: The last review
         id: prev
         if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
@@ -112,7 +117,7 @@ jobs:
                       --jq '.[] | select(.context == "Agent review") | [.state, .creator.login] | @tsv' \
                     | awk -F'\t' 'NR == 1 && $2 == "github-actions[bot]" { print $1 }')
           fi
-          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; echo "state=$state"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; echo "state=$state"; echo "ok=true"; } | tee -a "$GITHUB_OUTPUT"
 
       # The pull request's code, to read only: nothing in it is run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -135,6 +140,7 @@ jobs:
           PREV_SHA: ${{ steps.prev.outputs.sha }}
           PREV_VERDICT: ${{ steps.prev.outputs.verdict }}
           PREV_STATE: ${{ steps.prev.outputs.state }}
+          PREV_OK: ${{ steps.prev.outputs.ok }}
           REPO_DIR: review/pr
           OUT_DIR: review
           TRUSTED: trusted/.github/agent-review
@@ -194,7 +200,7 @@ jobs:
             { echo "verdict=pass"; echo "description=Not an agent's pull request"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ "$SAME_REPO" != true ]; then
             { echo "verdict=error"; echo "description=Agents' pull requests are reviewed only from this repository's branches"; echo "comment="; } >> "$GITHUB_OUTPUT"
-          elif [ "$MODE" = carry ]; then
+          elif [ "$MODE" = carry ] || [ "$MODE" = docs ]; then
             # The last review's comment stays as it is: it, and its state line, describe the commit it read.
             { echo "verdict=pass"; echo "description=$PLANNED"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
