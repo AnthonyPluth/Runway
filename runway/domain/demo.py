@@ -45,6 +45,8 @@ EVERYDAY = [
 
 BUDGETS = [("Groceries", 600), ("Restaurants", 250), ("Coffee & Snacks", 60), ("Shopping", 300)]
 
+PART_PAYMENT = 400.0   # paid toward the card's latest statement a few days after it closed (at most half of it)
+
 
 def seed(conn, today: date | None = None) -> int:
     """Fill an empty database with sample data. Returns the number of transactions added."""
@@ -100,6 +102,15 @@ def seed(conn, today: date | None = None) -> int:
     owed = -sum(t[3] for t in txs if t[1] == "demo-card" and prev.isoformat() < t[2] <= close.isoformat() and t[6] != "Credit Card Payment")
     conn.execute(insert(ManualStatement).values(account_id="demo-card", statement_date=close.isoformat(), balance=round(owed, 2),
                                                 due_date=(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()))
+    # A part payment a few days after it closed (once that day has come), so the card has less left to pay than its
+    # statement.
+    paid_on = close + timedelta(days=3)
+    if paid_on <= today and owed > 0:
+        part = round(min(PART_PAYMENT, owed / 2), 2)
+        conn.execute(insert(Transaction), [
+            {"id": f"{acct}|demo-part", "account_id": acct, "posted": paid_on.isoformat(), "amount": amount,
+             "description": payee.upper(), "payee": payee, "category": "Credit Card Payment", "category_source": "rule"}
+            for acct, amount, payee in (("demo-checking", -part, "Rewards Visa Payment"), ("demo-card", part, "Payment Thank You"))])
     conn.execute(insert(Asset).values(name="Sample House", kind="home", value=415000, as_of=today.isoformat(), yearly_change=3,
                                       loan_account_id="demo-mortgage"))
     # The app shows its "connect your bank" screen until a bank is set up. This address never resolves (.invalid), so

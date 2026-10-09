@@ -1,0 +1,10 @@
+{
+  "name": "card-amount-due",
+  "page": "overview",
+  "steps": [
+    { "wait_for": "button[title^='Amount due']" },
+    { "click": ".cell:has(button[title^='Amount due']) >> text=/^balance /" },
+    { "expect_text": { "selector": ".cell:has(button[title^='Amount due'])", "text": "due " } },
+    { "screenshot": "row" }
+  ]
+}

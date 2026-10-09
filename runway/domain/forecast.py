@@ -4,7 +4,7 @@ Model, per cash account (checking/savings marked "in forecast"):
   start balance (the bank's posted balance plus what's pending)
   + recurring items (paychecks, mortgage, bills) on their dates
   - the budgets paid from the account, spent day by day on banking days (a weekend's or holiday's on the next one)
-  - each credit card's payment on its due date, sized to the statement balance
+  - each credit card's payment on its due date, sized to what's left of the statement balance (card_cycle)
 
 Nothing is taken out for spending that isn't scheduled or budgeted: there's no average of past spending.
 
@@ -390,7 +390,15 @@ def interest(plan: dict, carried: float, charges: float = 0.0) -> float:
 
 
 def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
-    """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
+    """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement).
+
+    What's left to pay on the statement (`remaining`) is the statement less what's come off it since it closed: the
+    payments (money in that's a transfer, pending ones too, and any still in transit from the paying account) and the
+    posted credits (refunds and other money in that isn't a transfer). A pending credit isn't taken off it until it
+    posts; until then it comes off the new charges, as before. New charges never add to it: they're the next
+    statement's. Never below nothing: what comes off beyond the statement comes off the new charges (or is a credit
+    toward the next statement). The plan's payment (statement_payment) counts the payments toward it, not the credits:
+    an issuer's minimum or your fixed amount is paid as before, but never more than what's left."""
     transfers = _transfer_categories(conn)
     last_close = parse_day(bank["last_statement_date"])
     T = Transaction
@@ -404,12 +412,14 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     statement = known if known is not None else reported
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     paid += in_transit(conn, card, last_close)
-    over = max(0.0, paid - statement)
-    net = -sum(t["amount"] for t in txs if t["category"] not in transfers) - over
+    charges = [t for t in txs if t["category"] not in transfers]
+    credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
+    over = max(0.0, paid + credits - statement)
+    net = -sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
     new_charges = max(0.0, net)
     due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, bank["due_day"])
-    remaining = max(0.0, statement - paid)
+    remaining = max(0.0, statement - paid - credits)
     plan = payment_plan(conn, card["id"], bank.get("purchase_apr"))
     payment = min(remaining, max(0.0, statement_payment(plan, statement, bank["minimum_payment"]) - paid))
     return {
@@ -422,6 +432,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
         "minimum_payment": bank["minimum_payment"],
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "paid_since_close": round(paid, 2),
+        "credits_since_close": round(credits, 2),
         "remaining": round(remaining, 2),
         **plan,
         "payment": round(payment, 2),
