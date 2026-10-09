@@ -46,12 +46,12 @@ class DemoTests(DbCase):
         self.assertEqual(portfolio.holdings(self.c), [])   # opt-in, so tests built on the plain sample see no investments
         demo.seed_investments(self.c, date(2026, 10, 9))
         by = {h["ticker"]: h for h in portfolio.holdings(self.c)}
-        self.assertEqual(set(by), {"VTI", "VXUS", "SMPL"})
-        self.assertGreater(by["VTI"]["day_change"], 0)
-        self.assertLess(by["VXUS"]["day_change"], 0)
-        self.assertAlmostEqual(by["VTI"]["day_change"], 42 * (284.95 - 281.40), places=2)
-        self.assertAlmostEqual(by["VXUS"]["day_change_pct"], 67.55 / 68.20 - 1, places=5)
-        self.assertLess(abs(by["SMPL"]["day_change_pct"]), 0.001)
+        self.assertEqual(set(by), {"DEMOTM", "DEMOIN", "DEMOSI"})
+        self.assertGreater(by["DEMOTM"]["day_change"], 0)
+        self.assertLess(by["DEMOIN"]["day_change"], 0)
+        self.assertAlmostEqual(by["DEMOTM"]["day_change"], 42 * (284.95 - 281.40), places=2)
+        self.assertAlmostEqual(by["DEMOIN"]["day_change_pct"], 67.55 / 68.20 - 1, places=5)
+        self.assertLess(abs(by["DEMOSI"]["day_change_pct"]), 0.001)
 
     def test_the_card_has_a_part_payment_since_its_statement(self):
         demo.seed(self.c, today=date(2026, 10, 9))

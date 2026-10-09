@@ -57,8 +57,7 @@
     if (h.lots.length === 1) finish();   // one account: done as soon as it's saved
   };
   // Under 1280px (phones, tablets and a narrow window next to the sidebar) the secondary columns fold into the holding's cell,
-  // and the cost basis button goes with them (rendered once). Holding, value and total gain stay as columns, so the table
-  // never needs scrolling sideways.
+  // and the cost basis button goes with them (rendered once). Holding, Today, Total gain and Value stay as columns.
   const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 1279px)") : null;
   const narrow = $state({ on: narrowQuery?.matches ?? false });
   $effect(() => {
@@ -68,41 +67,15 @@
     sync();
     return () => narrowQuery.removeEventListener("change", sync);
   });
-  // On a phone the table is wider than the screen: the holding (sticky) and Today's change stay in view, and Value and Total
-  // gain are reached by scrolling it sideways. The same media query as the
-  // `phone:` variant in app.css.
-  const phoneQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 767px), (max-height: 500px) and (pointer: coarse)") : null;
-  const phone = $state({ on: phoneQuery?.matches ?? false });
-  $effect(() => {
-    if (!phoneQuery) return;
-    const sync = () => { phone.on = phoneQuery.matches; };
-    phoneQuery.addEventListener("change", sync);
-    sync();
-    return () => phoneQuery.removeEventListener("change", sync);
-  });
-  const DAY: [SortKey, string, string] = ["day_change", "Today", "text-right desktop:max-[1279px]:hidden phone:w-[calc(100cqw_-_var(--hold))]"];
-  const VALUE: [SortKey, string, string] = ["value", "Value", "text-right phone:w-22"];
-  const COLS = $derived<[SortKey, string, string][]>([
-    ["name", "Holding", "text-left phone:sticky phone:left-0 phone:z-[1] phone:w-(--hold) phone:bg-card"], ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"],
-    ...(phone.on ? [DAY] : [VALUE, DAY]),
-    ["gain", "Total gain", "text-center phone:w-20"],
-    ...(phone.on ? [VALUE] : []),
+  // Every width has the same order: Holding, Today, Total gain, Value, then the columns that only a wide screen has room for
+  // (under 1280px they are folded into the holding's cell). On a phone the table is wider than the screen: see the container below.
+  const COLS: [SortKey, string, string][] = [
+    ["name", "Holding", "text-left phone:sticky phone:left-0 phone:z-[1] phone:w-(--hold) phone:bg-card"],
+    ["day_change", "Today", "text-right phone:w-22 phone:snap-start phone:scroll-ml-(--hold)"], ["gain", "Total gain", "text-center phone:w-21 phone:snap-start phone:scroll-ml-(--hold)"], ["value", "Value", "text-right phone:w-22 phone:snap-start phone:scroll-ml-(--hold)"],
+    ["quantity", "Shares", "text-right max-[1279px]:hidden"], ["price", "Price", "text-right max-[1279px]:hidden"],
     ["allocation", "Weight", "text-right max-[1279px]:hidden"], ["cost_basis", "Cost basis", "text-right max-[1279px]:hidden"],
-  ]);
+  ];
 </script>
-
-{#snippet dayCell(x: Holding)}
-          <td class="text-right tabular-nums whitespace-nowrap desktop:max-[1279px]:hidden phone:w-[calc(100cqw_-_var(--hold))]">
-            {#if x.day_change == null}<span class="text-muted-foreground">—</span>
-            {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span>{#if x.day_change_pct != null}<div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}{/if}
-          </td>
-{/snippet}
-
-{#snippet valueCell(x: Holding)}
-          <td class="text-right tabular-nums phone:w-22 phone:text-[13px]" data-col="value">
-            <span class="font-semibold">{fmt(x.value)}</span>
-          </td>
-{/snippet}
 
 {#snippet costBasis(x: Holding)}
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
@@ -118,12 +91,11 @@
             {/if}
 {/snippet}
 
-<!-- On a phone the container is a size container: --hold is the pinned holding's width, Today fills the rest of the container's
-     width (so those two fill it exactly, and nothing of Total gain or Value shows), and Total gain (5rem) and Value (5.5rem),
-     10.5rem together, follow, reached by scrolling sideways. The holding is the container less those 10.5rem (at least 7.5rem), so
-     scrolled to the end Total gain and Value start right where the pinned holding ends: no sliver of Today or of them under it. -->
-<div class="overflow-x-auto phone:[container-type:inline-size] phone:[--hold:max(7.5rem,calc(100cqw_-_10.5rem))]" id="inv-holdings">
-  <table class="w-full text-sm phone:w-[calc(100cqw_+_10.5rem)] phone:table-fixed">
+<!-- On a phone the container is a size container (100cqw is its width): the holding is what is left of it after Today (5.5rem), so
+     the two fill it exactly and nothing of Total gain (5.25rem) or Value (5.5rem) shows; those two follow and are reached by scrolling
+     sideways, snapping to a column at a time next to the pinned holding. -->
+<div class="overflow-x-auto phone:[container-type:inline-size] phone:[--hold:calc(100cqw_-_5.5rem)] phone:snap-x phone:snap-proximity" id="inv-holdings">
+  <table class="w-full text-sm phone:w-[calc(100cqw_+_10.75rem)] phone:table-fixed">
     <thead>
       <tr class="text-xs text-muted-foreground">
         {#each COLS as [k, label, cls] (k)}
@@ -155,29 +127,27 @@
                 <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
                   {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{" "}· {share(x.allocation)}
                 </div>
-                {#if !phone.on && x.day_change != null}
-                  <!-- The day's change, on its own line under the quantity so the row stays short; not on a phone or from 1280px, where it has its own column -->
-                  <div class="mt-0.5 text-xs tabular-nums" data-day-change>
-                    <span class="text-muted-foreground">Today</span> <span class={cn("whitespace-nowrap", gainCls(x.day_change))}>{signed(x.day_change)}</span>{#if x.day_change_pct != null}{" "}<span class={cn("whitespace-nowrap", gainCls(x.day_change_pct))}>({pct(x.day_change_pct, 2)})</span>{/if}
-                  </div>
-                {/if}
                 <div>{@render costBasis(x)}</div>
                 {/if}
               </div>
             </div>
+          </td>
+          <td class="text-right tabular-nums whitespace-nowrap phone:snap-start phone:scroll-ml-(--hold)">
+            {#if x.day_change == null}<span class="text-muted-foreground">—</span>
+            {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span>{#if x.day_change_pct != null}<div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}{/if}
+          </td>
+          <td class="text-center tabular-nums phone:text-[13px] phone:snap-start phone:scroll-ml-(--hold)">
+            {#if x.gain == null}<span class="text-muted-foreground">—</span>
+            {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
+          </td>
+          <td class="text-right tabular-nums phone:text-[13px] phone:snap-start phone:scroll-ml-(--hold)" data-col="value">
+            <span class="font-semibold">{fmt(x.value)}</span>
           </td>
           <td class="text-right tabular-nums max-[1279px]:hidden">{x.is_cash ? "—" : qty(x.quantity)}</td>
           <td class="text-right tabular-nums max-[1279px]:hidden">
             {x.is_cash ? "—" : fmt(x.price)}
             {#if x.live}<LiveDot class="ml-1.5 size-[7px] align-[2px]" label="Live price" title={`Live price · ${liveAt(x.live_time)}`} />{/if}
           </td>
-          {#if !phone.on}{@render valueCell(x)}{/if}
-          {@render dayCell(x)}
-          <td class="text-center tabular-nums phone:w-20 phone:text-[13px]">
-            {#if x.gain == null}<span class="text-muted-foreground">—</span>
-            {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
-          </td>
-          {#if phone.on}{@render valueCell(x)}{/if}
           <td class="text-right tabular-nums max-[1279px]:hidden">
             <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{share(x.allocation)}</span>
           </td>

@@ -71,11 +71,6 @@ describe("HoldingsTable", () => {
     expect(within(screen.getAllByRole("row")[1]).getByText("+$500.00").closest("td")).toHaveClass("text-center");
   });
 
-  it("doesn't repeat the day change under the holding at desktop width, where it has its own column", () => {
-    setup([holding({ day_change: -30, day_change_pct: -0.012 })]);
-    expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
-  });
-
   it("shows a dash instead of a gain when the cost basis is unknown, and offers to add it", () => {
     setup([holding({ gain: null, gain_pct: null, day_change: null, day_change_pct: null, cost_known: false })]);
     const row = screen.getAllByRole("row")[1];
@@ -101,141 +96,127 @@ describe("HoldingsTable", () => {
     expect(screen.getAllByRole("row")[1].querySelector("b")).toHaveTextContent("");
   });
 
-  describe("on a wide screen (1280px and up)", () => {
-    const queries: string[] = [];
-    beforeEach(() => {
-      queries.length = 0;
-      vi.stubGlobal("matchMedia", (q: string) => { queries.push(q); return { matches: false, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }; });
-    });
+  // The same order at every width: Holding, Today, Total gain, Value, then Shares, Price, Weight, Cost basis (hidden under 1280px).
+  const ORDER = ["name", "day_change", "gain", "value", "quantity", "price", "allocation", "cost_basis"];
+  const stub = (matches: (q: string) => boolean) => vi.stubGlobal("matchMedia", (q: string) => ({ matches: matches(q), media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  const heads = () => screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
+  const cellOf = (row: HTMLElement, text: string) => within(row).getByText(text).closest("td") as HTMLTableCellElement;
+  const one = () => holding({ value: 2500, gain: 500, gain_pct: 0.25, day_change: -30, day_change_pct: -0.012 });
+
+  const everyWidth: [string, (q: string) => boolean][] = [
+    ["a wide screen (1280px and up)", () => false],
+    ["a tablet (768px to 1279px)", (q) => q === "(max-width: 1279px)"],
+    ["a phone", () => true],
+  ];
+  describe.each(everyWidth)("on %s", (_name, matches) => {
+    beforeEach(() => stub(matches));
     afterEach(() => vi.unstubAllGlobals());
 
-    it("shows every column, with cost basis in its own cell and total gain centred", () => {
-      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
-      expect(queries).toContain("(max-width: 1279px)");
-      expect(screen.getAllByRole("columnheader")).toHaveLength(8);
+    it("orders the columns Holding, Today, Total gain, Value, then the rest, header and cells alike", () => {
+      setup([one()]);
+      expect(heads()).toEqual(ORDER);
       const row = screen.getAllByRole("row")[1];
-      const costCell = within(row).getByTitle("Edit cost basis").closest("td") as HTMLTableCellElement;
-      expect(costCell.cellIndex).toBe(7);   // its own last column, not folded into the holding cell
-      const gainCell = within(row).getByText("+$500.00").closest("td")!;
-      expect(gainCell).toHaveClass("text-center");
-      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
-    });
-  });
-
-  describe("on a tablet (768px to 1279px)", () => {
-    beforeEach(() => vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(max-width: 1279px)", media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
-    afterEach(() => vi.unstubAllGlobals());
-
-    it("keeps Value beside the holding, before Total gain", () => {
-      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
-      const heads = screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
-      expect(heads.indexOf("value")).toBeLessThan(heads.indexOf("gain"));
-      expect(within(screen.getAllByRole("row")[1]).getByText("$2,500.00").closest("td")!.cellIndex).toBe(heads.indexOf("value"));
-    });
-
-    it("shows each holding's day change in dollars and percent on a line under its quantity, coloured", () => {
-      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
-      const [down, up] = screen.getAllByRole("row").slice(1).map((r) => r.querySelector("[data-day-change]") as HTMLElement);
-      expect(down).toHaveTextContent("Today −$30.00 (−1.20%)");
-      expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
-      expect(within(down).getByText("(−1.20%)")).toHaveClass("text-loss");
-      expect(up).toHaveTextContent("Today +$12.50 (+0.40%)");
-      expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
-      expect(within(up).getByText("(+0.40%)")).toHaveClass("text-good");
-      expect(down.previousElementSibling).toHaveTextContent("10 × $250.00");   // its own line, not crammed into the quantity line
-      expect(down.previousElementSibling).not.toHaveTextContent("Today");
-    });
-
-    it("shows the dollar change alone when the percent isn't known", () => {
-      setup([holding({ day_change: 12.5, day_change_pct: null })]);
-      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toHaveTextContent(/^Today\s*\+\$12\.50$/);
-    });
-
-    it("leaves the day-change line off when the day's change isn't known", () => {
-      setup([holding({ day_change: null, day_change_pct: null })]);
-      expect(screen.getAllByRole("row")[1].querySelector("[data-day-change]")).toBeNull();
-    });
-  });
-
-  describe("on a phone", () => {
-    const phone = () => vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-    beforeEach(phone);
-    afterEach(() => vi.unstubAllGlobals());
-
-    it("keeps total gain as its own centred column, not repeated under the value", () => {
-      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25 })]);
-      const row = screen.getAllByRole("row")[1];
-      const gainCell = within(row).getByText("+$500.00").closest("td")!;
-      expect(gainCell).toHaveClass("text-center");
-      expect(gainCell).not.toHaveClass("max-[1279px]:hidden");   // shown at phone and tablet widths, not clipped
-      expect(within(row).getByText("$2,500.00").closest("td")).not.toHaveTextContent("+$500.00");
-      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
-    });
-
-    it("shows Holding then Today in view, with Total gain and Value after them, as header and cells alike", () => {
-      setup([holding({ value: 2500, gain: 500, gain_pct: 0.25, day_change: -30, day_change_pct: -0.012 })]);
-      const heads = screen.getAllByRole("columnheader").map((h) => h.getAttribute("data-col"));
-      const visible = heads.filter((h) => !["quantity", "price", "allocation", "cost_basis"].includes(h!));
-      expect(visible).toEqual(["name", "day_change", "gain", "value"]);
-      const row = screen.getAllByRole("row")[1];
-      for (const [text, col] of [["−$30.00", "day_change"], ["$2,500.00", "value"], ["+$500.00", "gain"]] as const) {
+      for (const [text, col] of [["−$30.00", "day_change"], ["+$500.00", "gain"], ["$2,500.00", "value"]] as const) {
         expect(within(row).getAllByText(text)).toHaveLength(1);
-        expect(within(row).getByText(text).closest("td")!.cellIndex).toBe(heads.indexOf(col));
+        expect(cellOf(row, text).cellIndex).toBe(ORDER.indexOf(col));
       }
-      // Holding and Today fill the container exactly (Today is what's left of its width after the holding), and the table is
-      // Total gain and Value (10.5rem) wider than the container, so only they need scrolling to.
-      expect(screen.getByRole("table")).toHaveClass("phone:w-[calc(100cqw_+_10.5rem)]", "phone:table-fixed");
-      expect(document.getElementById("inv-holdings")!.className).toMatch(/phone:\[container-type:inline-size\]/);
-      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:w-(--hold)");
-      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:w-[calc(100cqw_-_var(--hold))]");
-      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("phone:w-20");
-      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:w-22");
-      expect(screen.getByRole("button", { name: /Value/ })).toBeInTheDocument();   // still sortable
     });
 
-    it("shows Today's dollars over its percent, coloured, as a column that isn't hidden on a phone", () => {
-      setup([holding({ day_change: -30, day_change_pct: -0.012 }), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
+    it("has Today as a column, coloured, dollars over percent, and not as a line under the holding", () => {
+      setup([one(), holding({ security_id: "s2", ticker: "UP", day_change: 12.5, day_change_pct: 0.004 })]);
       const [down, up] = screen.getAllByRole("row").slice(1);
-      const cell = (r: HTMLElement, text: string) => within(r).getByText(text).closest("td")!;
-      expect(cell(down, "−$30.00")).toHaveTextContent("−$30.00−1.20%");
+      expect(cellOf(down, "−$30.00")).toHaveTextContent("−$30.00−1.20%");
       expect(within(down).getByText("−$30.00")).toHaveClass("text-loss");
       expect(within(down).getByText("−1.20%")).toHaveClass("text-loss");
       expect(within(up).getByText("+$12.50")).toHaveClass("text-good");
       expect(within(up).getByText("+0.40%")).toHaveClass("text-good");
-      expect(cell(down, "−$30.00")).not.toHaveClass("max-[1279px]:hidden");
-      expect(cell(down, "−$30.00").className).toMatch(/desktop:max-\[1279px\]:hidden/);   // hidden at tablet width only
-      expect(screen.getByRole("columnheader", { name: /Today/ }).className).not.toMatch(/(^| )max-\[1279px\]:hidden/);
+      expect(cellOf(down, "−$30.00").className).not.toMatch(/hidden/);
+      expect(screen.getByRole("columnheader", { name: /Today/ }).className).not.toMatch(/hidden/);
+      expect(down.querySelector("td")).not.toHaveTextContent("Today");
+      expect(down.querySelector("[data-day-change]")).toBeNull();
     });
 
-    it("no longer repeats the day change under the holding, keeping its shares line compact", () => {
-      setup([holding({ day_change: -30, day_change_pct: -0.012 })]);
+    it("shows the dollar change alone when the percent isn't known, and a dash when the change isn't", () => {
+      setup([holding({ day_change: 12.5, day_change_pct: null }), holding({ security_id: "s2", ticker: "NONE", day_change: null, day_change_pct: null })]);
+      const [known, unknown] = screen.getAllByRole("row").slice(1);
+      expect(cellOf(known, "+$12.50")).toHaveTextContent(/^\+\$12\.50$/);
+      expect((unknown.querySelectorAll("td")[1] as HTMLElement)).toHaveTextContent("—");
+    });
+
+    it("keeps total gain a centred column, not repeated under the value", () => {
+      setup([one()]);
       const row = screen.getAllByRole("row")[1];
-      expect(row.querySelector("[data-day-change]")).toBeNull();
-      expect(row.querySelector("td")).toHaveTextContent("10 × $250.00");
-      expect(row.querySelector("td")).not.toHaveTextContent("Today");
+      expect(cellOf(row, "+$500.00")).toHaveClass("text-center");
+      expect(cellOf(row, "$2,500.00")).not.toHaveTextContent("+$500.00");
+      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("text-center");
     });
 
-    it("shows the dollar change alone when the percent isn't known", () => {
-      setup([holding({ day_change: 12.5, day_change_pct: null })]);
-      const cell = within(screen.getAllByRole("row")[1]).getByText("+$12.50").closest("td")!;
-      expect(cell).toHaveTextContent(/^\+\$12\.50$/);
+    it("sorts from every column header, Today and Total gain included", async () => {
+      setup([holding({ ticker: "AAA", gain: 100, day_change: 5 }), holding({ security_id: "s2", ticker: "BBB", gain: 900, day_change: 1 })]);
+      await userEvent.click(screen.getByRole("button", { name: /Total gain/ }));
+      expect(inv.sort).toEqual({ key: "gain", dir: -1 });
+      await userEvent.click(screen.getByRole("button", { name: /Today/ }));
+      expect(inv.sort).toEqual({ key: "day_change", dir: -1 });
+      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveAttribute("aria-sort", "descending");
+    });
+  });
+
+  describe("on a wide screen (1280px and up)", () => {
+    beforeEach(() => stub(() => false));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("shows every column, with cost basis in its own last cell", () => {
+      setup([one()]);
+      expect(screen.getAllByRole("columnheader")).toHaveLength(8);
+      const costCell = within(screen.getAllByRole("row")[1]).getByTitle("Edit cost basis").closest("td") as HTMLTableCellElement;
+      expect(costCell.cellIndex).toBe(7);   // its own last column, not folded into the holding cell
+    });
+  });
+
+  describe("on a tablet (768px to 1279px)", () => {
+    beforeEach(() => stub((q) => q === "(max-width: 1279px)"));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("folds shares, price and weight into the holding's cell, and hides those columns", () => {
+      setup([one()]);
+      expect(screen.getAllByRole("row")[1].querySelector("td")).toHaveTextContent("10 × $250.00");
+      for (const k of ["quantity", "price", "allocation", "cost_basis"]) expect(document.querySelector(`th[data-col=${k}]`)).toHaveClass("max-[1279px]:hidden");
+      for (const k of ["day_change", "gain", "value"]) expect(document.querySelector(`th[data-col=${k}]`)!.className).not.toMatch(/hidden/);
+    });
+  });
+
+  describe("on a phone", () => {
+    beforeEach(() => stub(() => true));
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("fills the table with Holding and Today, so Total gain and Value are past the edge and scrolled to", () => {
+      setup([one()]);
+      // 100cqw is the container's width: Holding is that less Today (5.5rem), so the two fill it exactly, and the table is
+      // Total gain (5.25rem) and Value (5.5rem) wider than the container.
+      const container = document.getElementById("inv-holdings")!;
+      expect(container.className).toMatch(/phone:\[container-type:inline-size\]/);
+      expect(container.className).toContain("phone:[--hold:calc(100cqw_-_5.5rem)]");
+      expect(screen.getByRole("table")).toHaveClass("phone:w-[calc(100cqw_+_10.75rem)]", "phone:table-fixed");
+      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:w-(--hold)");
+      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:w-22");
+      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("phone:w-21");
+      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:w-22");
     });
 
-    it("shows a dash in Today when the day's change isn't known", () => {
-      setup([holding({ day_change: null, day_change_pct: null })]);
-      expect(within(screen.getAllByRole("row")[1]).getAllByText("—").length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("keeps the holding in view while the table scrolls", () => {
+    it("keeps the holding in view while the table scrolls, and snaps to a column beside it", () => {
       setup();
       expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
       expect(screen.getAllByRole("row")[1].querySelector("td")).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
+      expect(document.getElementById("inv-holdings")!.className).toMatch(/phone:snap-x/);
+      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:scroll-ml-(--hold)");   // snaps and scrolls to just right of the pinned holding
+      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:snap-start");
     });
 
-    it("sorts by gain from the Total gain column header", async () => {
-      setup([holding({ ticker: "AAA", gain: 100 }), holding({ security_id: "s2", ticker: "BBB", gain: 900 })]);
-      await userEvent.click(screen.getByRole("button", { name: /Total gain/ }));
-      expect(inv.sort).toEqual({ key: "gain", dir: -1 });
+    it("keeps the shares line and the cost basis button under the holding's name", () => {
+      setup([one()]);
+      const cell = screen.getAllByRole("row")[1].querySelector("td")!;
+      expect(cell).toHaveTextContent("10 × $250.00");
+      expect(within(cell).getByTitle("Edit cost basis")).toBeInTheDocument();
     });
 
     it("shows a dash in the gain column when the cost basis is unknown", () => {

@@ -50,10 +50,11 @@ BUDGETS = [("Groceries", 600), ("Restaurants", 250), ("Coffee & Snacks", 60), ("
 MONTH_BUDGETS = [("Shopping", 450)]   # this month's own amount (gifts, say); other months keep the usual one
 
 # ticker, name, type, shares, price paid per share, yesterday's close, today's close: one up, one down, one barely moved
+# (made-up tickers, so a live price service never has a quote that replaces these prices)
 HOLDINGS = [
-    ("VTI", "Sample Total Market ETF", "etf", 42.0, 205.00, 281.40, 284.95),
-    ("VXUS", "Sample International ETF", "etf", 60.0, 61.00, 68.20, 67.55),
-    ("SMPL", "Sample Industries Inc", "equity", 15.0, 140.00, 192.10, 192.15),
+    ("DEMOTM", "Sample Total Market ETF", "etf", 42.0, 205.00, 281.40, 284.95),
+    ("DEMOIN", "Sample International ETF", "etf", 60.0, 61.00, 68.20, 67.55),
+    ("DEMOSI", "Sample Industries Inc", "equity", 15.0, 140.00, 192.10, 192.15),
 ]
 
 PART_PAYMENT = 400.0   # paid toward the card's latest statement a few days after it closed (at most half of it)

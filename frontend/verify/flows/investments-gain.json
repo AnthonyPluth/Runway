@@ -6,7 +6,9 @@
     { "wait_for": "#inv-holdings tbody tr" },
     { "scroll_to": "#inv-holdings" },
     { "screenshot": "holdings" },
+    { "scroll_to": "#inv-holdings th[data-col=gain]" },
+    { "screenshot": "holdings-total-gain" },
     { "scroll_to": "#inv-holdings th[data-col=value]" },
-    { "screenshot": "holdings-scrolled" }
+    { "screenshot": "holdings-value" }
   ]
 }
