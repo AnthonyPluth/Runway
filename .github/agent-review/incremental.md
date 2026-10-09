@@ -9,4 +9,5 @@ An earlier commit of this pull request was reviewed, and the author has pushed s
 
 1. For each earlier finding, blocking or advisory, check whether the new commits fix it. Repeat any that still applies, at the same severity unless the fix changed what is at stake; leave out any that is fixed.
 2. Read every line of `since-last-review.patch` closely, as you would a new change: a fix can break something else.
-3. Don't re-derive what the earlier review already passed in lines that haven't changed, unless the new lines change what they mean (a caller, a test or a type they rely on).
+3. Still open every changed image, as above: `since-last-review.patch` leaves them out like `diff.patch` does, so you can't tell from it which changed since.
+4. Don't re-derive what the earlier review already passed in lines that haven't changed, unless the new lines change what they mean (a caller, a test or a type they rely on).

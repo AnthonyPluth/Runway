@@ -15,20 +15,10 @@ name: Agent review
 # review is never carried forward, and anything that can't be proved identical is reviewed.
 #
 # The diff the reviewer reads leaves out generated files and fixtures that deterministic checks cover, lockfiles and
-# images (GENERATED in agent_review.py, the one list); files.txt still lists them, and the prompt says why.
-#
-# A pull request that changes only documentation passes as "Docs only; not reviewed": every file Markdown at the root
-# or in the docs site's pages, or an image in its assets, as plain files (agent_review.py's docs_only(); not AGENTS.md,
-# CLAUDE.md or SECURITY.md, nothing else under docs/, no code, workflow, script or config). Only when the last review is
-# known and wasn't blocking; when in doubt it is reviewed.
-#
-# An optional first screen, off unless the AGENT_REVIEW_SCREEN variable is "true": Haiku decides whether the Sonnet
-# review is needed, but is only asked about what agent_review.py's screenable() lets through (documentation, or prose
-# and images outside the code, 20 changed lines at most, no path naming anything sensitive; never runway/, frontend/,
-# tests, migrations, workflows, scripts, config, auth, secretbox, encryption, backups, money or the forecast). Only a
-# finished answer of "skip" passes ("Screened by Haiku ..."); an error, a limit or any other answer runs the review.
-# It is off by default because the owner decided every review uses Sonnet: the screen reviews nothing, and a review
-# that runs is still Sonnet, but turning it on lets Haiku wave a few tiny changes through.
+# images (GENERATED in agent_review.py, the one list); files.txt and omitted.txt still list them, and the prompt says
+# why and has the reviewer open every changed image to look for private data. Documentation is always reviewed: the
+# review is the only check for personal financial data in the (public) repository, and docs and screenshots are where
+# it is likeliest to land.
 #
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
@@ -37,8 +27,7 @@ name: Agent review
 # Authentication, one of two secrets: CLAUDE_CODE_OAUTH_TOKEN, a Claude Pro or Max subscription's token (made with
 # `claude setup-token`), or ANTHROPIC_API_KEY, an API key, which wins when both are set. The model is always Sonnet,
 # fixed in the Review step below (no variable can change it): the repository owner decided that every review uses
-# Sonnet and never Opus, security-sensitive changes included. (The optional screen above is Haiku, fixed in its step,
-# and only decides whether to skip.) The most a review may spend is the
+# Sonnet and never Opus, security-sensitive changes included. The most a review may spend is the
 # AGENT_REVIEW_BUDGET_USD variable (3 US dollars, as Claude Code estimates a run's cost), and the most round trips to
 # the model it may take is AGENT_REVIEW_MAX_TURNS (60). Reviews have taken 10 to 50 seconds, well inside both; one that
 # hits either fails as an error (never a pass), and each run logs the turns and cost it took, to tune them by.
@@ -106,8 +95,8 @@ jobs:
           { echo "agent=$agent"; echo "same_repo=$same_repo"; } | tee -a "$GITHUB_OUTPUT"
 
       # The last review's comment, while no code of the pull request is checked out (this and the step above are the
-      # only ones with a token): the commit it read, its findings and whether it passed. If this fails (no ok output),
-      # nothing is skipped or carried forward, and the review reads the whole change as if it were the first.
+      # only ones with a token): the commit it read, its findings and whether it passed. If this fails (no outputs),
+      # nothing is carried forward, and the review reads the whole change as if it were the first.
       - name: The last review
         id: prev
         if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
@@ -128,7 +117,7 @@ jobs:
                       --jq '.[] | select(.context == "Agent review") | [.state, .creator.login] | @tsv' \
                     | awk -F'\t' 'NR == 1 && $2 == "github-actions[bot]" { print $1 }')
           fi
-          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; echo "state=$state"; echo "ok=true"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "sha=${sha:-}"; echo "verdict=${verdict:-}"; echo "state=$state"; } | tee -a "$GITHUB_OUTPUT"
 
       # The pull request's code, to read only: nothing in it is run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -151,28 +140,25 @@ jobs:
           PREV_SHA: ${{ steps.prev.outputs.sha }}
           PREV_VERDICT: ${{ steps.prev.outputs.verdict }}
           PREV_STATE: ${{ steps.prev.outputs.state }}
-          PREV_OK: ${{ steps.prev.outputs.ok }}
           REPO_DIR: review/pr
           OUT_DIR: review
           TRUSTED: trusted/.github/agent-review
-          SCREEN: ${{ vars.AGENT_REVIEW_SCREEN }}
         run: |
-          cp trusted/AGENTS.md trusted/.github/agent-review/{prompt.md,schema.json,screen.md,screen-schema.json} review/
+          cp trusted/AGENTS.md trusted/.github/agent-review/prompt.md trusted/.github/agent-review/schema.json review/
           if [ -n "$PREV_SHA" ] && [ -s "$RUNNER_TEMP/previous-review.md" ]; then export PREV_BODY="$RUNNER_TEMP/previous-review.md"; fi
           python3 trusted/.github/scripts/agent_review.py plan
           echo "$(wc -l < review/files.txt) file(s), $(wc -l < review/diff.patch) diff line(s)"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
-        if: steps.plan.outputs.mode == 'review' || steps.plan.outputs.mode == 'screen'
+        if: steps.plan.outputs.mode == 'review'
         with:
           node-version-file: trusted/.nvmrc
           package-manager-cache: false
 
       # At the version main's .github/agent-review/package-lock.json locks, installed in $RUNNER_TEMP, outside both
-      # checkouts and none of their parents (so no .npmrc of the pull request's applies). Only when a review or the screen
-      # runs.
+      # checkouts and none of their parents (so no .npmrc of the pull request's applies). Only when a review runs.
       - name: Install Claude Code
-        if: steps.plan.outputs.mode == 'review' || steps.plan.outputs.mode == 'screen'
+        if: steps.plan.outputs.mode == 'review'
         run: |
           mkdir -p "$RUNNER_TEMP/claude-code"
           cp trusted/.github/agent-review/package.json trusted/.github/agent-review/package-lock.json "$RUNNER_TEMP/claude-code/"
@@ -180,33 +166,9 @@ jobs:
           npm ci --no-audit --no-fund
           node_modules/.bin/claude --version
 
-      # The optional first screen (the AGENT_REVIEW_SCREEN variable, off unless set to true), only for what plan found
-      # within its guard rails: Haiku, isolated exactly as the reviewer (the same script), says whether the full review
-      # is needed. Only a finished answer of "skip" passes it; anything else, a failure included, runs the review.
-      - name: Screen
-        id: screen
-        if: steps.plan.outputs.mode == 'screen'
-        continue-on-error: true
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          CLAUDE: ${{ runner.temp }}/claude-code/node_modules/.bin/claude
-          MODEL: haiku
-          BUDGET: '0.25'
-          MAX_TURNS: '6'
-          PROMPT: screen.md
-          SCHEMA: screen-schema.json
-          OUTPUT: screen.json
-        run: |
-          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          cd review
-          ../trusted/.github/scripts/agent-review-run.sh
-          python3 ../trusted/.github/scripts/agent_review.py screen screen.json
-
-      # The reviewer, in review/ (main's script; see it for how it is isolated), with whichever secret is set. Always
-      # Sonnet.
+      # The reviewer, in review/ (main's script; see it for how it is isolated), with whichever secret is set.
       - name: Review
-        if: steps.plan.outputs.mode == 'review' || (steps.plan.outputs.mode == 'screen' && steps.screen.outputs.skip != 'true')
+        if: steps.plan.outputs.mode == 'review'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -228,7 +190,6 @@ jobs:
           SAME_REPO: ${{ steps.who.outputs.same_repo }}
           MODE: ${{ steps.plan.outputs.mode }}
           PLANNED: ${{ steps.plan.outputs.description }}
-          SCREENED: ${{ steps.screen.outputs.skip }}
           REVIEWED_SHA: ${{ github.event.pull_request.head.sha }}   # in the comment, for the next push's re-review
           # Only to make sure the answer contains neither before it is posted.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -239,11 +200,9 @@ jobs:
             { echo "verdict=pass"; echo "description=Not an agent's pull request"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ "$SAME_REPO" != true ]; then
             { echo "verdict=error"; echo "description=Agents' pull requests are reviewed only from this repository's branches"; echo "comment="; } >> "$GITHUB_OUTPUT"
-          elif [ "$MODE" = carry ] || [ "$MODE" = docs ]; then
+          elif [ "$MODE" = carry ]; then
             # The last review's comment stays as it is: it, and its state line, describe the commit it read.
             { echo "verdict=pass"; echo "description=$PLANNED"; echo "comment="; } >> "$GITHUB_OUTPUT"
-          elif [ "$MODE" = screen ] && [ "$SCREENED" = true ]; then
-            { echo "verdict=pass"; echo "description=Screened by Haiku as a tiny non-code change; not reviewed"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             { echo "verdict=error"; echo "description=No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret to review with"; echo "comment="; } >> "$GITHUB_OUTPUT"
           else

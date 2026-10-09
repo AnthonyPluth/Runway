@@ -255,82 +255,25 @@ class Plan(unittest.TestCase):
         self.assertIn("+a = 3", since)
         self.assertNotIn("openapi", since)
 
-    FIRST = {"PREV_OK": "true"}   # the last review was looked up, and there was none
-
-    def test_documentation_alone_passes_without_a_review(self):
+    def test_documentation_and_screenshots_are_always_reviewed(self):
+        # The review is the only check for private data in the (public) repository: docs and screenshots included.
         self.write("README.md", "# Runway, better\n")
         self.write("docs/src/content/docs/start/docker.md", "Run it.\n")
         self.write("docs/src/assets/screenshots/budget.png", "png")
         head = self.commit("docs")
-        self.assertEqual(self.plan(head, **self.FIRST),
-                         {"mode": "docs", "description": "Docs only; not reviewed", "incremental": "false"})
-        self.assertEqual(self.plan(head, PREV_OK="true", PREV_SHA=self.base, PREV_VERDICT="pass")["mode"], "docs")
+        values = self.plan(head, PREV_SHA=self.base, PREV_VERDICT="pass", PREV_STATE="success")
+        self.assertEqual(values["mode"], "review")
+        self.assertIn("+Run it.", (self.out / "diff.patch").read_text())
+        self.assertEqual((self.out / "omitted.txt").read_text(), "docs/src/assets/screenshots/budget.png\n")
+        self.assertIn("docs/src/assets/screenshots/budget.png", (self.out / "files.txt").read_text())
 
-    def test_documentation_with_anything_else_is_reviewed(self):
-        for extra in ("runway/app.py", "frontend/src/App.svelte", ".github/workflows/x.yml", ".github/scripts/x.sh",
-                      "AGENTS.md", "CLAUDE.md", "SECURITY.md", "docs/astro.config.mjs", "docs/package.json",
-                      "docs/src/content/docs/page.mdx", "docs/src/styles/custom.css", "docs/openapi.json",
-                      "pyproject.toml", "Makefile", ".github/README.md", "runway/notes.md", "tests/README.md",
-                      ".claude/settings.md", "docs/src/assets/logo.svg"):
-            with self.subTest(extra=extra):
-                self.git("checkout", "-q", "-B", "pr", self.base)
-                self.write("docs/src/content/docs/start/docker.md", "Run it.\n")
-                self.write(extra, "changed\n")
-                head = self.commit("docs and more")
-                self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
-
-    def test_a_symlink_or_an_executable_isn_t_documentation(self):
-        (self.repo / "docs/src/content/docs").mkdir(parents=True)
-        (self.repo / "docs/src/content/docs/env.md").symlink_to("../../../../.env")
-        head = self.commit("a link")
-        self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
-        self.git("checkout", "-q", "-B", "pr", self.base)
-        self.write("CONTRIBUTING.md", "x\n")
-        (self.repo / "CONTRIBUTING.md").chmod(0o755)
-        self.assertEqual(self.plan(self.commit("executable"), **self.FIRST)["mode"], "review")
-
-    def test_documentation_is_reviewed_after_a_blocking_review_or_when_the_last_one_is_unknown(self):
-        self.write("README.md", "# Runway, better\n")
-        head = self.commit("docs")
-        for extra in ({"PREV_OK": "true", "PREV_SHA": self.base, "PREV_VERDICT": "blocking"},
-                      {"PREV_OK": ""},     # looking up the last review failed
-                      {}):
-            with self.subTest(extra=extra):
-                self.assertEqual(self.plan(head, **extra)["mode"], "review")
-        with mock.patch.object(ar, "changes", side_effect=subprocess.CalledProcessError(128, "git")):
-            self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
-
-    def test_the_screen_is_off_unless_turned_on(self):
-        self.write("notes/changelog.txt", "Fixed a typo.\n")
-        head = self.commit("prose")
-        self.assertEqual(self.plan(head, **self.FIRST)["mode"], "review")
-        self.assertEqual(self.plan(head, SCREEN="1", **self.FIRST)["mode"], "review")
-        self.assertEqual(self.plan(head, SCREEN="true", **self.FIRST)["mode"], "screen")
-
-    def test_the_screen_is_asked_only_about_tiny_prose_or_images(self):
-        on = {"SCREEN": "true", **self.FIRST}
-        for path, text in (("runway/notes.txt", "x\n"), ("frontend/src/README.md", "x\n"), ("tests/data.txt", "x\n"),
-                           ("runway/storage/migrations/README.md", "x\n"), (".github/workflows/README.md", "x\n"),
-                           ("tools/notes.txt", "x\n"), ("docs/notes.txt", "x\n"), ("notes/secretbox.md", "x\n"),
-                           ("notes/forecast.txt", "x\n"), ("notes/money.md", "x\n"), ("notes/backup.md", "x\n"),
-                           ("notes/auth.md", "x\n"), ("notes/encryption.md", "x\n"), ("notes/oidc.md", "x\n"),
-                           ("AGENTS.md", "x\n"), ("CLAUDE.md", "x\n"), ("notes/run.sh", "x\n"),
-                           ("notes/config.yml", "x\n"), ("pyproject.toml", "x\n"), ("Makefile", "x\n"),
-                           ("notes/long.txt", "".join(f"line {i}\n" for i in range(ar.TINY + 1)))):
-            with self.subTest(path=path):
-                self.git("checkout", "-q", "-B", "pr", self.base)
-                self.write(path, text)
-                head = self.commit("change")
-                self.assertEqual(self.plan(head, **on)["mode"], "review")
-
-    def test_the_screen_isn_t_asked_after_a_blocking_review_or_when_unsure(self):
-        self.write("notes/changelog.txt", "Fixed a typo.\n")
-        head = self.commit("prose")
-        self.assertEqual(self.plan(head, SCREEN="true", PREV_OK="true", PREV_SHA=self.base,
-                                   PREV_VERDICT="blocking")["mode"], "review")
-        self.assertEqual(self.plan(head, SCREEN="true")["mode"], "review")    # the last review unknown
-        with mock.patch.object(ar, "changed_lines", side_effect=subprocess.CalledProcessError(128, "git")):
-            self.assertEqual(self.plan(head, SCREEN="true", **self.FIRST)["mode"], "review")
+    def test_the_prompts_have_the_reviewer_open_every_changed_image(self):
+        # Images are left out of the diffs only because a diff can't show them: the reviewer reads them itself.
+        self.assertTrue(any(ar.left_out(f"docs/src/assets/x{ext}") for ext in ar.IMAGES))
+        prompt = (ROOT / ".github/agent-review/prompt.md").read_text()
+        self.assertIn("Open every added or modified image", prompt)
+        self.assertIn("Personal financial data in the repo", prompt)
+        self.assertIn("open every changed image", (ROOT / ".github/agent-review/incremental.md").read_text())
 
     def merge_main(self, main_path="runway/other.py", main_text="b = 1\n"):
         """The pull request reviewed at prev; main moves on; main is merged in. Returns (prev, head)."""
@@ -440,43 +383,6 @@ class Plan(unittest.TestCase):
                 self.assertEqual((self.out / "prompt.md").read_text(), "PROMPT\n")
 
 
-class Screen(unittest.TestCase):
-    """The first screen's answer: only a finished, well-formed "skip" lets a pull request pass without the review."""
-
-    def screened(self, output):
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            f.write(output if isinstance(output, str) else json.dumps(output))
-        self.addCleanup(os.unlink, f.name)
-        return ar.screened(f.name)
-
-    def test_a_skip_skips(self):
-        self.assertTrue(self.screened({"type": "result", "subtype": "success", "is_error": False,
-                                       "structured_output": {"decision": "skip", "reason": "A typo."}}))
-
-    def test_anything_else_runs_the_review(self):
-        for output in ({"is_error": False, "structured_output": {"decision": "review", "reason": "r"}},
-                       {"is_error": False, "structured_output": {"decision": "Skip", "reason": "r"}},
-                       {"is_error": False, "structured_output": {"reason": "skip"}},
-                       {"is_error": True, "structured_output": {"decision": "skip", "reason": "r"}},
-                       {"is_error": False, "subtype": "error_max_turns", "structured_output": {"decision": "skip"}},
-                       {"is_error": False, "result": "skip"},
-                       {"is_error": False, "result": "I'd say skip."},
-                       [], "not json", ""):
-            with self.subTest(output=output):
-                self.assertFalse(self.screened(output))
-        self.assertFalse(ar.screened("/nonexistent/screen.json"))
-
-    def test_the_guard_rails_don_t_depend_on_haiku(self):
-        self.assertTrue(ar.screenable([("100644", "notes/changelog.txt")], 3))
-        self.assertTrue(ar.screenable([("100644", "README.md"), ("100644", "notes/diagram.png")], 0))
-        self.assertFalse(ar.screenable([], 0))
-        self.assertFalse(ar.screenable([("100644", "notes/changelog.txt")], ar.TINY + 1))
-        self.assertFalse(ar.screenable([("120000", "notes/changelog.txt")], 1))      # a symlink
-        self.assertFalse(ar.screenable([("100644", "notes/changelog.txt"), ("100644", "runway/money.py")], 1))
-        self.assertFalse(ar.screenable([("100644", "extension/README.md")], 1))
-        self.assertFalse(ar.screenable([("100644", ".claude/notes.md")], 1))
-
-
 FAKE_CLAUDE = """#!/usr/bin/env bash
 { printf '%s\\n' "$@"; echo "KEY=${ANTHROPIC_API_KEY:-}"; echo "OAUTH=${CLAUDE_CODE_OAUTH_TOKEN:-}";
   echo "MDS=${CLAUDE_CODE_DISABLE_CLAUDE_MDS:-}"; } > "$RECORD"
@@ -491,11 +397,9 @@ class Run(unittest.TestCase):
     def run_script(self, **secrets):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        d = self.dir = Path(tmp.name)
+        d = Path(tmp.name)
         (d / "prompt.md").write_text("Review it.")
         (d / "schema.json").write_text("{}")
-        (d / "screen.md").write_text("Screen it.")
-        (d / "screen-schema.json").write_text('{"screen": true}')
         fake = d / "claude"
         fake.write_text(FAKE_CLAUDE)
         fake.chmod(0o755)
@@ -536,22 +440,6 @@ class Run(unittest.TestCase):
         self.assertIn("KEY=api-key", args)
         self.assertIn("OAUTH=", args)
         self.assertNotIn("api-key", done.stdout + done.stderr)
-
-    def test_the_screen_runs_the_same_way_with_its_own_files(self):
-        done, args, _ = self.run_script(CLAUDE_CODE_OAUTH_TOKEN="oat-token", PROMPT="screen.md",
-                                        SCHEMA="screen-schema.json", OUTPUT="screen.json")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assert_isolated(args)
-        self.assertIn("Screen it.", args)
-        self.assertEqual(args[args.index("--json-schema") + 1], '{"screen": true}')
-        self.assertTrue((self.dir / "screen.json").exists())
-
-    def test_files_outside_the_directory_are_refused(self):
-        for name in ("../prompt.md", "/etc/passwd", "a b"):
-            with self.subTest(name=name):
-                done, args, _ = self.run_script(CLAUDE_CODE_OAUTH_TOKEN="oat-token", PROMPT=name)
-                self.assertEqual(done.returncode, 1)
-                self.assertEqual(args, [])
 
     def test_no_secret_fails_without_starting_claude(self):
         done, args, _ = self.run_script()

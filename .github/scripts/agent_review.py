@@ -8,12 +8,9 @@ request's). Standard library only.
                                   line, oldest first), writes the review comment's text to OUT.md and prints the commit
                                   it reviewed and its verdict ("<sha> <pass|blocking>"), or nothing when there is none.
   agent_review.py plan            Gathers the change into $OUT_DIR from the pull request's checkout in $REPO_DIR (git
-                                  only reads it), and writes mode (review; carry to copy the last passing verdict; docs
-                                  to pass documentation without a review; screen to ask Haiku first),
+                                  only reads it), and writes mode (review, or carry to copy the last passing verdict),
                                   description and incremental (true when the reviewer gets the last review's findings
                                   and the diff since it) to $GITHUB_OUTPUT. See plan().
-  agent_review.py screen OUT.json Whether the first screen's answer lets the pull request pass without the full review:
-                                  writes skip (true or false) to $GITHUB_OUTPUT. See screened().
   agent_review.py report OUT.json Turns the reviewer's output (claude --output-format json, with --json-schema) into a
                                   verdict: writes verdict (pass, blocking or error), description and comment (the PR
                                   comment, base64) to $GITHUB_OUTPUT. A blocking finding, or output it can't read, fails
@@ -47,29 +44,13 @@ SECRETS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")   # what the reviewer
 
 # Left out of diff.patch, to spare the reviewer reading them, but still in files.txt (and in omitted.txt): files that
 # are generated, or fixtures, which deterministic checks cover (make api-contract-check, make feature-map-check, the
-# forecast's golden test), lockfiles and images. The reviewer can still Read them in pr/, and is asked to say when one
-# looks stale beside its source. This is the only list of them; prompt.md describes it.
+# forecast's golden test), lockfiles and images (a binary diff says only that it changed). The reviewer can still Read
+# them in pr/, is asked to say when one looks stale beside its source, and to open every changed image to look for
+# private data. This is the only list of them; prompt.md describes it.
 GENERATED = ("docs/openapi.json", "frontend/src/lib/api-types.ts", "docs/feature-map.json",
              "docs/src/content/docs/contributing/feature-map.md", "tests/fixtures/forecast_golden.json")
 LOCKFILES = ("poetry.lock", "uv.lock", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
 IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico")
-
-# A pull request whose every file is documentation gets a passing status without a review. Kept narrow: Markdown at the
-# root or in the docs site's pages (not .mdx, which runs code when the site builds), and raster images in its assets;
-# never the agents' instructions or the security policy, never a symlink or a submodule (the site's build would follow
-# one), never anything else under docs/ (the site's config, components, packages, generated files).
-INSTRUCTIONS = ("agents.md", "claude.md", "security.md")   # compared case-insensitively
-REGULAR_FILE = ("100644", "000000")   # a plain file, or a deleted one
-
-# The optional first screen (AGENT_REVIEW_SCREEN, off by default): Haiku may pass a pull request without the Sonnet
-# review only when this script has first found it to be one of these, whatever Haiku says: documentation as above, or
-# prose and images outside the code, TINY changed lines in all, with nothing in a path that names something sensitive.
-# Anything else goes to the full review without asking Haiku.
-TINY = 20
-NON_CODE = (".md", ".txt", ".rst", *IMAGES)
-NEVER_SCREENED = ("runway", "frontend", "extension", "tests", "tools", "docs", "scripts", "migrations")   # top-level
-SENSITIVE = re.compile(r"auth|oidc|session|secret|token|crypt|key|backup|restore|money|forecast|migration|plaid|"
-                       r"simplefin|workflow|script|hook|config|settings", re.IGNORECASE)
 
 
 def is_agent(messages: list[str], body: str) -> bool:
@@ -120,71 +101,6 @@ def own_files(repo: str, main: str, rev: str) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
-def changes(repo: str, main: str, rev: str) -> list[tuple[str, str]]:
-    """(new mode, path) for each file a commit's change touches (git diff --raw, no rename detection)."""
-    fields = git(repo, "diff", "--no-renames", "--raw", "-z", f"{main}...{rev}").split("\0")
-    out = []
-    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
-        if meta.startswith(":") and path:
-            out.append((meta[1:].split()[1], path))
-    return out
-
-
-def is_docs(path: str) -> bool:
-    if path.casefold().rsplit("/", 1)[-1] in INSTRUCTIONS:
-        return False
-    if "/" not in path:
-        return path.endswith(".md")
-    if path.startswith("docs/src/content/docs/"):
-        return path.endswith(".md")
-    if path.startswith("docs/src/assets/"):
-        return path.lower().endswith(IMAGES) and not path.lower().endswith(".ico")
-    return False
-
-
-def docs_only(found: list[tuple[str, str]]) -> bool:
-    return bool(found) and all(mode in REGULAR_FILE and is_docs(path) for mode, path in found)
-
-
-def changed_lines(repo: str, main: str, rev: str) -> int:
-    """Lines added plus removed in a commit's change (a binary file counts none: only images can pass the screen)."""
-    total = 0
-    for entry in git(repo, "diff", "--no-renames", "--numstat", "-z", f"{main}...{rev}").split("\0"):
-        added, _, rest = entry.partition("\t")
-        removed = rest.partition("\t")[0]
-        total += sum(int(n) for n in (added, removed) if n.isdigit())
-    return total
-
-
-def is_prose(path: str) -> bool:
-    parts = path.split("/")
-    return (parts[0] not in NEVER_SCREENED and not parts[0].startswith(".") and path.lower().endswith(NON_CODE)
-            and parts[-1].casefold() not in INSTRUCTIONS)
-
-
-def screenable(found: list[tuple[str, str]], lines: int) -> bool:
-    """The guard rails of the first screen: whether Haiku may be asked at all. Narrow on purpose: never code, tests,
-    migrations, workflows, scripts or config, nor anything whose path names auth, secrets, encryption, backups, money or
-    the forecast."""
-    return (bool(found) and lines <= TINY
-            and all(mode in REGULAR_FILE and (is_docs(path) or is_prose(path)) and not SENSITIVE.search(path)
-                    for mode, path in found))
-
-
-def screened(path: str) -> bool:
-    """Whether the screen's answer lets the pull request pass without the full review: only a finished run whose
-    answer is exactly {"decision": "skip", ...}. Anything else (an error, a limit, no answer, doubt) is False."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            output = json.load(f)
-        if not isinstance(output, dict) or output.get("is_error") or output.get("subtype", "success") != "success":
-            return False
-        answer = structured(output)
-        return isinstance(answer, dict) and answer.get("decision") == "skip"
-    except Exception:
-        return False
-
-
 def is_ancestor(repo: str, old: str, new: str) -> bool:
     if not (SHA.match(old) and SHA.match(new)) or old == new:
         return False
@@ -214,17 +130,9 @@ def only_main_merged(repo: str, main: str, prev: str, head: str) -> bool:
 def plan(env: dict[str, str]) -> dict[str, str]:
     """Decides what the review does (mode) and writes the change into OUT_DIR for the reviewer.
 
-    mode is one of:
-
-      docs    every file it changes is documentation (docs_only()), the last review is known (PREV_OK) and it wasn't
-              blocking: it passes without a review.
-      carry   the last review passed (PREV_VERDICT pass, and its "Agent review" status, PREV_STATE, success) and
-              only_main_merged(): that verdict is copied to the new head instead of reviewing again.
-      screen  SCREEN is "true" (off by default), the last review is known and wasn't blocking, and screenable(): Haiku
-              is asked first whether the full review is needed (screened() reads its answer).
-      review  anything else, or anything going wrong above: the full review, with Sonnet.
-
-    For screen and review, OUT_DIR holds:
+    mode is carry when the last review passed (PREV_VERDICT pass, and its "Agent review" status, PREV_STATE, success)
+    and only_main_merged(): that verdict is copied to the new head instead of reviewing again. It is review for
+    anything else, or anything going wrong on the way: the review, with Sonnet, with OUT_DIR holding:
 
       diff.patch   the pull request's change against main (git diff main...head), without the files left_out()
       files.txt    every file it changes (--name-status)
@@ -247,14 +155,6 @@ def plan(env: dict[str, str]) -> dict[str, str]:
     (out / "commits.txt").write_text(git(repo, "log", "--format=commit %H%n%B", f"{main}..{head}"))
     result = {"mode": "review", "description": "", "incremental": "false"}
     prev = env.get("PREV_SHA", "")
-    # Skipping needs the last review known (PREV_OK) and not blocking: a push to a pull request with blocking findings
-    # is reviewed, so the findings are checked, even when what is left is documentation (it can leak private data too).
-    settled = env.get("PREV_OK") == "true" and env.get("PREV_VERDICT") != "blocking"
-    try:
-        if settled and docs_only(changes(repo, main, head)):
-            return {**result, "mode": "docs", "description": "Docs only; not reviewed"}
-    except Exception as e:   # can't tell: review
-        print(f"::warning::Reviewing: couldn't tell whether only documentation changed ({type(e).__name__}).")
     try:
         if env.get("PREV_VERDICT") == "pass" and env.get("PREV_STATE") == "success" \
                 and only_main_merged(repo, main, prev, head):
@@ -278,12 +178,6 @@ def plan(env: dict[str, str]) -> dict[str, str]:
         for name in ("since-last-review.patch", "previous-review.md"):
             (out / name).unlink(missing_ok=True)
         result["incremental"] = "false"
-    try:
-        if env.get("SCREEN") == "true" and settled \
-                and screenable(changes(repo, main, head), changed_lines(repo, main, head)):
-            result["mode"] = "screen"
-    except Exception as e:   # can't tell: the full review
-        print(f"::warning::Not screening: couldn't check the guard rails ({type(e).__name__}).")
     return result
 
 
@@ -422,11 +316,6 @@ def main(argv: list[str]) -> int:
         if sha:
             Path(argv[2]).write_text(text, encoding="utf-8")
             print(sha, verdict)
-        return 0
-    if len(argv) == 2 and argv[0] == "screen":
-        skip = screened(argv[1])
-        append_outputs([f"skip={'true' if skip else 'false'}"])
-        print("The screen passed it without the full review." if skip else "The full review runs.")
         return 0
     if argv == ["plan"]:
         values = plan(dict(os.environ))

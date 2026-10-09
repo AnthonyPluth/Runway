@@ -16,15 +16,10 @@
 # Needs: CLAUDE (the claude executable), MODEL, BUDGET (US dollars, the most it may spend), MAX_TURNS (the most
 # round trips to the model it may take; --max-turns, a print-mode flag the locked version has but its --help doesn't
 # list), and one of the two secrets. Hitting either limit ends the run with an error result, which fails the review
-# rather than passing it (agent_review.py report). PROMPT, SCHEMA and OUTPUT name the files (prompt.md, schema.json and
-# output.json unless set; the optional first screen uses its own), always in this directory.
+# rather than passing it (agent_review.py report).
 set -euo pipefail
 
 : "${CLAUDE:?}" "${MODEL:?}" "${BUDGET:?}" "${MAX_TURNS:?}"
-PROMPT=${PROMPT:-prompt.md} SCHEMA=${SCHEMA:-schema.json} OUTPUT=${OUTPUT:-output.json}
-for f in "$PROMPT" "$SCHEMA" "$OUTPUT"; do
-  [[ "$f" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Not a file name in this directory: $f"; exit 1; }
-done
 
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   unset CLAUDE_CODE_OAUTH_TOKEN
@@ -40,9 +35,9 @@ fi
 export CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 status=0
-"$CLAUDE" --print "$(cat "$PROMPT")" \
+"$CLAUDE" --print "$(cat prompt.md)" \
   --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --permission-mode dontAsk --restricted --safe-mode \
   --setting-sources "" --settings '{"disableAllHooks":true}' --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
   --disable-slash-commands --no-session-persistence --model "$MODEL" --max-budget-usd "$BUDGET" --max-turns "$MAX_TURNS" \
-  --json-schema "$(cat "$SCHEMA")" --output-format json > "$OUTPUT" || status=$?
+  --json-schema "$(cat schema.json)" --output-format json > output.json || status=$?
 echo "Claude Code exited with $status"
