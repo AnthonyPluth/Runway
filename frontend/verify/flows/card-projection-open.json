@@ -1,0 +1,13 @@
+{
+  "name": "card-projection-open",
+  "page": "transactions",
+  "steps": [
+    { "click": "text=/^Show all \\d+/" },
+    { "wait_for": "[data-projected] [role=button][aria-expanded=false]" },
+    { "screenshot": "closed" },
+    { "click": "[data-projected] [role=button][aria-expanded=false]" },
+    { "wait_for": "[data-projected] [role=button][aria-expanded=true]" },
+    { "expect_text": { "selector": "[data-projected]:has([role=button][aria-expanded=true])", "text": "Charged so far" } },
+    { "screenshot": "open" }
+  ]
+}
