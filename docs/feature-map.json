@@ -1180,8 +1180,7 @@
       "handler": "runway/server/api/recurring.py:api_recurring",
       "web": [
         "frontend/src/lib/components/recurring/RecurringItem.svelte",
-        "frontend/src/lib/components/recurring/RecurringView.svelte",
-        "frontend/src/pages/Transactions.svelte"
+        "frontend/src/lib/components/recurring/load.ts"
       ],
       "tests": [
         "tests/test_api_queries.py",

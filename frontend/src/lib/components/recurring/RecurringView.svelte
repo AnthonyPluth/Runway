@@ -1,6 +1,7 @@
 <script lang="ts" module>
-  import { loadAccounts } from "$lib/accounts";
+  import { loadAccounts, staleAccounts } from "$lib/accounts";
   import { actGet, act } from "$lib/act";
+  import { loadRecurring, staleRecurring } from "$lib/components/recurring/load";
   // Which items you've opened: they stay open when the page loads again (after a save, a sync), like the classic app.
   const openRecurring = new Set<string>();
 </script>
@@ -42,23 +43,28 @@
   let loaded = $state(false);    // the first load came in
   let failed = $state(false);    // the latest load didn't: the page says so (no stale list) and offers Retry
   let loading = $state(false);
+  let swapped = $state(0);       // bumped when the server's items replace the remembered ones
+  let stale = $state(false);     // what's drawn is the remembered list: it isn't current until the server answers
 
   // Loads (or loads again) this page's data. A failure shows the error in place of the list, never the old list.
   async function load() {
     loading = true;
     try {
-      const [a, list] = await Promise.all([loadAccounts(), api<Item[]>("/api/recurring")]);
-      accounts = a; items = list; failed = false;
-      if (!loaded) {
-        // The Add form starts open when there's nothing yet, with your primary account chosen.
-        adding = !list.length;
-        primary = app.state?.primary_account || a.find((x) => !x.hidden)?.id || "";
-        blank.account_id = primary;
-      }
-      loaded = true;
-    } catch { failed = true; }
+      const [a, list] = await Promise.all([loadAccounts(), loadRecurring()]);
+      // An item reads its fields once when it's drawn, so the fresh ones replace the remembered ones by drawing them afresh.
+      if (stale) swapped++;
+      accounts = a; items = list; failed = false; stale = false;
+      if (!loaded) start(list, a);
+    } catch { failed = true; stale = false; }   // the remembered list too: it comes down, as the page says it couldn't load
     finally { loading = false; }
     if (!failed) await loadSuggestions();
+  }
+  function start(list: Item[], a: Account[]) {
+    // The Add form starts open when there's nothing yet, with your primary account chosen.
+    adding = !list.length;
+    primary = app.state?.primary_account || a.find((x) => !x.hidden)?.id || "";
+    blank.account_id = primary;
+    loaded = true;
   }
   // What's spotted in your history is extra: if it can't be looked up, the page goes on without it.
   async function loadSuggestions() {
@@ -80,6 +86,10 @@
   let formKey = $state(0);         // a new key starts the fields over (they read the amount once)
   const errors = $derived(submitted ? validate(blank) : {});
   let form = $state<HTMLElement | null>(null);
+  // Seen before in this visit: the items are there at once, without their due dates and what's missed (lib/swr.ts), held
+  // still and dimmed until the server's answer replaces them.
+  const seenAccounts = staleAccounts(), seenItems = staleRecurring();
+  if (seenAccounts && seenItems) { accounts = seenAccounts; items = seenItems; stale = true; start(seenItems, seenAccounts); }
   load();
 
   // Money in and money out, by what the forecast expects (the usual amount, or the fixed one); soonest due first.
@@ -208,7 +218,7 @@
 <div class="mb-6 flex items-center justify-between gap-3">
   <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Recurring</h1>
   {#if loaded && !failed}
-    <Button variant="outline" size="sm" title="You can also start one from any transaction, with its repeat button" onclick={openForm}>Add</Button>
+    <Button variant="outline" size="sm" title="You can also start one from any transaction, with its repeat button" disabled={stale} onclick={openForm}>Add</Button>
   {/if}
 </div>
 {#if !connected}
@@ -235,6 +245,10 @@
     </div>
   </div>
 {:else}
+  {#if stale}<p class="mb-3 px-4 text-xs text-muted-foreground" role="status">Refreshing…</p>{/if}
+  <!-- While the remembered list shows, nothing on it can be used: it has no due dates yet. -->
+  <div inert={stale} aria-busy={stale} class={stale ? "opacity-60" : ""}>
+  {#key swapped}
   {#if attention.length}
     <Group title="Needs attention" inset="3.75rem" class="mb-6">
       {#each attention as m (m.key)}
@@ -278,4 +292,6 @@
   {:else if !suggestions.length && dismissed.length}
     <div class="mb-6">{@render dismissedList()}</div>
   {/if}
+  {/key}
+  </div>
 {/if}

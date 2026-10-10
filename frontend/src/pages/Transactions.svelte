@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { loadAccounts } from "$lib/accounts";
+  import { loadAccounts, staleAccounts, type LoadedAccount } from "$lib/accounts";
+  import { loadRecurring, staleRecurring } from "$lib/components/recurring/load";
   import { api } from "$lib/api";
   import { app, refreshState } from "$lib/app.svelte";
-  import { catLabel, catPath, categories, loadCategories } from "$lib/categories.svelte";
+  import { catLabel, catPath, categories, loadCategories, staleCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
   import AiButton from "$lib/components/AiButton.svelte";
@@ -48,8 +49,21 @@
   const rv = new ReviewMode(txs, { accept: (t) => accept(t), save: (t, category) => save(t, category) });
 
   // What the page needs before the list: categories, accounts (for the filter) and recurring items (for ↻).
-  const loadSetup = () => Promise.all([loadCategories(), loadAccounts(), api<RecurringItem[]>("/api/recurring")]);
-  let setup = $state(loadSetup());
+  // Seen before in this visit, they're there at once (without balances and due dates: lib/swr.ts) while they load again;
+  // if that fails they come down with an error rather than stay as if current.
+  type Setup = { accounts: LoadedAccount[]; recurring: RecurringItem[] };
+  const seenCats = staleCategories(), seenAccounts = staleAccounts(), seenRecurring = staleRecurring();
+  let ready = $state<Setup | null>(seenCats && seenAccounts && seenRecurring ? { accounts: seenAccounts, recurring: seenRecurring } : null);
+  if (seenCats && seenAccounts && seenRecurring) categories.list = seenCats;
+  let setupError = $state("");
+  async function loadSetup() {
+    setupError = "";
+    try {
+      const [, accounts, recurring] = await Promise.all([loadCategories(), loadAccounts(), loadRecurring()]);
+      ready = { accounts, recurring };
+    } catch (err) { ready = null; setupError = errMsg(err); }
+  }
+  loadSetup();
   // Upcoming (projected) items for the forecast account, and recurring charges on cards, on All only.
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
   let upcoming = $state<UpcomingEvent[]>([]);
@@ -198,9 +212,16 @@
 {#if !app.state?.connected}
   <NotConnected title={review ? "Connect a bank to review transactions" : "Connect a bank to see your transactions"} />
 {:else}
-{#await setup}
+{#if setupError}
+  <Card.Root><Card.Content>
+    <p class="text-sm">Something went wrong: {setupError}</p>
+    <Button class="mt-3" variant="outline" onclick={loadSetup}>Try again</Button>
+  </Card.Content></Card.Root>
+{:else if !ready}
   <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
-{:then [, accounts, recurring]}
+{:else}
+  {@const accounts = ready.accounts}
+  {@const recurring = ready.recurring}
   {#if review}
     <AiSuggest bind:this={ai} bind:status={aiStatus} onasked={(failed) => aiLog?.refresh(failed)} onchanged={txs.load} />
     {#if app.state?.has_api_key}<AiLog bind:this={aiLog} />{/if}
@@ -235,7 +256,7 @@
   {#if !review && txs.list}
     <!-- How many, and what they add up to (as the day totals count: transfers aren't money in or out). Not up to date
          after a failed reload, so it's dimmed then. -->
-    <p class={cn("mb-4 text-sm text-muted-foreground tabular-nums", txs.refreshError && "opacity-50")} data-summary>
+    <p class={cn("mb-4 text-sm text-muted-foreground tabular-nums", (txs.refreshError || txs.stale) && "opacity-50")} data-summary>
       {plural(txs.list.total, "transaction")} · <span title={txs.applied.kind === "transfer" ? undefined : "Transfers not counted"}>{fmtSigned(txs.list.sum ?? 0)} net</span>
       {#if txs.ignoredCount !== 0 || txShow.ignored}
         · {txs.ignoredCount == null ? "Ignored" : `${txs.ignoredCount} ignored`} <button type="button" class="cursor-pointer font-medium text-primary"
@@ -281,6 +302,8 @@
       {/if}
     </Card.Content></Card.Root>
   {:else}
+    <!-- The remembered rows while the fresh ones load: not known to be current, so dimmed and not to be used yet. -->
+    <div inert={txs.stale} aria-busy={txs.stale} class={txs.stale ? "opacity-60" : ""} data-testid="tx-rows">
     {#if review && rv.grouped}
       <ReviewGroups items={txs.list.items} onapplied={rv.groupApplied} onchanged={txs.load} />
     {:else}
@@ -289,6 +312,7 @@
           bind:selecting focused={rv.keyed} onsave={save} onaccept={accept} onchanged={txs.load} onmore={txs.more} onopen={openTx} />
       {/key}
     {/if}
+    </div>
   {/if}
 
   <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={txs.applied.account} {recurring} family={txs.list?.family} onsave={saveFromSheet} onchanged={txs.load}
@@ -297,12 +321,7 @@
   {#if app.state?.logodev_configured}
     <p class="mt-3 text-xs text-muted-foreground"><a class="underline underline-offset-4 hover:text-foreground" href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></p>
   {/if}
-{:catch err}
-  <Card.Root><Card.Content>
-    <p class="text-sm">Something went wrong: {err.message}</p>
-    <Button class="mt-3" variant="outline" onclick={() => (setup = loadSetup())}>Try again</Button>
-  </Card.Content></Card.Root>
-{/await}
+{/if}
 {/if}
 
 <svelte:window onkeydown={rv.onkey} />
