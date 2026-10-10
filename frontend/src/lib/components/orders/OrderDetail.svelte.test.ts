@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
-vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, categoryGroups: () => [] }));
+vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, categoryGroups: () => [], catLook: (n: string) => ({ icon: n === "Groceries" ? "🛒" : "🏷️", color: "gray" }) }));
 
 import { api } from "$lib/api";
 import { toast } from "svelte-sonner";
@@ -110,17 +110,25 @@ describe("undo and failures", () => {
     return {};
   }) as never);
 
-  it("shows each item with just its price and category picker, without saying who chose the category", async () => {
+  it("shows each item's name and price as the line, with the category as a small chip (icon, then name) and no chevron", async () => {
     vi.mocked(api).mockResolvedValue({ ...order, items: [
-      { id: 7, title: "Tea", quantity: 1, amount: 10, category: "Groceries", category_source: "manual" },
+      { id: 7, title: "Tea", quantity: 2, amount: 10, category: "Groceries", category_source: "manual" },
       { id: 8, title: "Lamp", quantity: 1, amount: 20, category: "Shopping", category_source: "memory" },
-      { id: 9, title: "Mug", quantity: 1, amount: 5, category: "Shopping", category_source: "ai" },
       { id: 10, title: "Bag", quantity: 1, amount: 2, category: null, category_source: null }] } as never);
     render(OrderDetail, { orderId: "x" });
     expect(await screen.findByText("Tea")).toBeInTheDocument();
     for (const label of [/you picked/, /as before/, /^AI$/, /store's department/, /uses the transaction's category/])
       expect(screen.queryByText(label)).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Category for Tea" }).closest(".col-span-2, [class*='col-span-2']")).not.toBeNull();
+    expect(screen.getByText("2×")).toBeInTheDocument();
+    expect(screen.getByText("$10.00")).toBeInTheDocument();
+    const chip = screen.getByRole("combobox", { name: "Category for Tea" });
+    expect(chip).toHaveTextContent("🛒 Groceries");
+    expect(chip.querySelector("svg")).toBeNull();
+    expect(chip.className).toContain("text-xs");
+    const name = screen.getByText("Tea");
+    expect(name.className).toContain("font-medium");
+    expect(name.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Category for Bag" })).toHaveTextContent("Choose category");
   });
 
   it("says a picked category applies to the item in every order", async () => {
