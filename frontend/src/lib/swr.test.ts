@@ -27,6 +27,12 @@ describe("the cache", () => {
     expect(recall("other")).toBeUndefined();
   });
 
+  it("does not fail what it follows when a copy can't be made", () => {
+    remember("k", [1]);
+    expect(() => remember("k", [() => 1])).not.toThrow();   // functions can't be cloned
+    expect(recall("k")).toBeUndefined();
+  });
+
   it("does not take a reply whose read began before it was emptied", () => {
     const at = cacheEpoch();
     clearCache();
@@ -84,6 +90,13 @@ describe("what empties it", () => {
     fill();
     fetchMock.mockReturnValue(reply({ error: "no" }, 500));
     await expect(api("/api/x", { method: "POST" })).rejects.toBeInstanceOf(ApiError);
+    expect(recall("k")).toBeUndefined();
+  });
+
+  it("a change whose request never got an answer (a dropped connection), which may still have reached the server", async () => {
+    fill();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(api("/api/x", { method: "DELETE" })).rejects.toMatchObject({ status: 0 });
     expect(recall("k")).toBeUndefined();
   });
 

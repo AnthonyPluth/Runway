@@ -19,7 +19,9 @@ export const cacheEpoch = (): number => epoch;
 
 /** Keep a copy of `value` (raw API data, as it came) under `key`, unless the cache was emptied since `at`. */
 export function remember<T>(key: string, value: T, at: number = epoch): void {
-  if (at === epoch) store.set(key, structuredClone(value));
+  if (at !== epoch) return;
+  // A copy that can't be made (not plain data) is a reply that isn't kept: remembering must never fail the load it follows.
+  try { store.set(key, structuredClone(value)); } catch { store.delete(key); }
 }
 
 /** A copy of what was last kept under `key`, or undefined: yours to change without touching the cache. */

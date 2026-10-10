@@ -302,6 +302,8 @@
       {/if}
     </Card.Content></Card.Root>
   {:else}
+    <!-- The remembered rows while the fresh ones load: not known to be current, so dimmed and not to be used yet. -->
+    <div inert={txs.stale} aria-busy={txs.stale} class={txs.stale ? "opacity-60" : ""} data-testid="tx-rows">
     {#if review && rv.grouped}
       <ReviewGroups items={txs.list.items} onapplied={rv.groupApplied} onchanged={txs.load} />
     {:else}
@@ -310,6 +312,7 @@
           bind:selecting focused={rv.keyed} onsave={save} onaccept={accept} onchanged={txs.load} onmore={txs.more} onopen={openTx} />
       {/key}
     {/if}
+    </div>
   {/if}
 
   <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={txs.applied.account} {recurring} family={txs.list?.family} onsave={saveFromSheet} onchanged={txs.load}

@@ -42,11 +42,18 @@ describe("Transactions page, seen before", () => {
     expect(await screen.findByText("Alpha")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /Loading/ })).not.toBeInTheDocument();
     expect(summary()).toHaveClass("opacity-50");
+    // the remembered rows can't be used yet: inert, dimmed and busy
+    const rowsBox = screen.getByTestId("tx-rows");
+    expect(rowsBox).toHaveProperty("inert", true);
+    expect(rowsBox).toHaveAttribute("aria-busy", "true");
+    expect(rowsBox).toHaveClass("opacity-60");
     const alpha = screen.getByText("Alpha");
     refresh.go({ items: [tx({ id: "a", payee: "Alpha", category: "Coffee" }), tx({ id: "c", payee: "Charlie", category: "Groceries" })], total: 2, sum: 5 });
     expect(await screen.findByText("Charlie")).toBeInTheDocument();
     expect(screen.queryByText("Bravo")).not.toBeInTheDocument();
     expect(summary()).not.toHaveClass("opacity-50");
+    expect(screen.getByTestId("tx-rows")).toHaveProperty("inert", false);
+    expect(screen.getByTestId("tx-rows")).toHaveAttribute("aria-busy", "false");
     expect(screen.getByText("Alpha")).toBe(alpha);   // the same row, updated where it is: no redraw, so no lost place
   });
 

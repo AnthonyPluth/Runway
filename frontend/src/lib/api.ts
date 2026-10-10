@@ -54,6 +54,9 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   else if (opts.body !== undefined) { headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
   const page = init.method === "GET" && !opts.keep ? pageLoads : null;
   if (page) init.signal = page.signal;
+  // A change (not a read, nor Runway checking in): what lib/swr.ts remembers may no longer be right, whether or not it
+  // worked (a dropped connection may have come after the server acted), so it goes before the request.
+  if (init.method !== "GET" && !opts.background) clearCache();
   let res: Response;
   try { res = await fetch(path, init); }
   catch (err) {
@@ -72,8 +75,6 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     if (page?.signal.aborted) return new Promise(() => {});
     throw new ApiError(LOCKED, 423);
   }
-  // A change (not a read, nor Runway checking in): what lib/swr.ts remembers may no longer be right, whether or not it worked.
-  if (init.method !== "GET" && !opts.background) clearCache();
   const data = await res.json().catch(() => ({}));
   if (page?.signal.aborted) return new Promise(() => {});
   if (!res.ok) {
