@@ -449,6 +449,21 @@ class AuthSession(Base):
     id_token: Mapped[str | None]
 
 
+class AppLock(Base):
+    __table__ = schema.app_locks
+    id: Mapped[str]
+    session: Mapped[str]
+    credential_id: Mapped[str]
+    public_key: Mapped[str]
+    alg: Mapped[int]
+    sign_count: Mapped[int]
+    idle: Mapped[int]
+    unlocked_at: Mapped[float | None]
+    unlocked_until: Mapped[float | None]
+    created: Mapped[float]
+    last_used: Mapped[float | None]
+
+
 class OAuthClient(Base):
     __table__ = schema.oauth_clients
     id: Mapped[str]

@@ -131,6 +131,257 @@
         }
       }
     },
+    "/api/lock": {
+      "get": {
+        "operationId": "api_lock",
+        "x-handler": "runway/server/api/lock.py:api_lock",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "api_lock_off",
+        "x-handler": "runway/server/api/lock.py:api_lock_off",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/lock/challenge": {
+      "post": {
+        "operationId": "api_lock_challenge",
+        "x-handler": "runway/server/api/lock.py:api_lock_challenge",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockChallengeAsk"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockChallenge"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/lock/register": {
+      "post": {
+        "operationId": "api_lock_register",
+        "x-handler": "runway/server/api/lock.py:api_lock_register",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockRegister"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/lock/unlock": {
+      "post": {
+        "operationId": "api_lock_unlock",
+        "x-handler": "runway/server/api/lock.py:api_lock_unlock",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockUnlock"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/lock/engage": {
+      "post": {
+        "operationId": "api_lock_engage",
+        "x-handler": "runway/server/api/lock.py:api_lock_engage",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/lock/settings": {
+      "post": {
+        "operationId": "api_lock_settings",
+        "x-handler": "runway/server/api/lock.py:api_lock_settings",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LockIdle"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/budget": {
       "get": {
         "operationId": "api_budget",
@@ -840,6 +1091,156 @@
           "set_rate",
           "set_payment",
           "inferred_payment"
+        ],
+        "additionalProperties": false
+      },
+      "LockChallenge": {
+        "type": "object",
+        "description": "A single-use challenge (base64url) for this session, the relying party's ID (Runway's host), and for an unlock,\nthe passkey to use.",
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "rp_id": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "challenge",
+          "rp_id",
+          "credential_id"
+        ],
+        "additionalProperties": false
+      },
+      "LockChallengeAsk": {
+        "type": "object",
+        "description": "POST /api/lock/challenge: a challenge for turning the lock on (register) or unlocking.",
+        "properties": {
+          "purpose": {
+            "enum": [
+              "register",
+              "unlock"
+            ]
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "additionalProperties": false
+      },
+      "LockIdle": {
+        "type": "object",
+        "description": "POST /api/lock/settings: how long away locks it (seconds: 0, 60, 300 or 900).",
+        "properties": {
+          "idle": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "idle"
+        ],
+        "additionalProperties": false
+      },
+      "LockRegister": {
+        "type": "object",
+        "description": "POST /api/lock/register: the passkey navigator.credentials.create made, all base64url, and when to lock.",
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "client_data": {
+            "type": "string"
+          },
+          "authenticator_data": {
+            "type": "string"
+          },
+          "public_key": {
+            "type": "string"
+          },
+          "alg": {
+            "type": "integer"
+          },
+          "idle": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential_id",
+          "client_data",
+          "authenticator_data",
+          "public_key",
+          "alg",
+          "idle"
+        ],
+        "additionalProperties": false
+      },
+      "LockStatus": {
+        "type": "object",
+        "description": "This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked\nnow, how long away locks it (seconds: 0, 60, 300 or 900), its passkey's id (base64url) and the device's id (dev_...).",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "idle": {
+            "type": "integer"
+          },
+          "credential_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "on",
+          "locked",
+          "idle",
+          "credential_id",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "LockUnlock": {
+        "type": "object",
+        "description": "POST /api/lock/unlock: navigator.credentials.get's answer to the unlock challenge, all base64url.",
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "client_data": {
+            "type": "string"
+          },
+          "authenticator_data": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "client_data",
+          "authenticator_data",
+          "signature"
         ],
         "additionalProperties": false
       },

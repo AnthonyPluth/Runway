@@ -20,7 +20,7 @@ from typing import Any
 from ..providers import carta
 from ..storage import db, secretbox
 from . import mcp_oauth, mcp_server
-from .. import monitoring, oidc
+from .. import applock, monitoring, oidc
 from ..domain import retail
 from ..storage import settings_keys as sk
 from . import mcp_http, oauth_http, routes, static, sync
@@ -45,6 +45,7 @@ NOT_SAME_SITE = ("Blocked a request that didn’t come from Runway’s own addre
                  "RUNWAY_PUBLIC_URL and RUNWAY_ALLOWED_HOSTS.")
 NO_APP_HEADER = ("Blocked a change that didn’t come from Runway’s app (it was missing the X-Runway header). Reload the page "
                  "and try again; if you run Runway behind a proxy, make sure it passes that header on.")
+LOCKED = "Runway is locked on this device. Unlock it to carry on."   # (the app lock: runway/applock.py)
 
 # Plaid Link (Settings → Connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
 PLAID_ORIGINS = "https://cdn.plaid.com"
@@ -269,7 +270,17 @@ class Handler(BaseHTTPRequestHandler):
             user = oidc.session_user(conn, token)
             if user and token and renew and (max_age := oidc.renew_session(conn, token)):
                 self._set_cookies.append(self._cookie_header("runway_session", token, max_age))
+        self._session_key = oidc.session_key(token) if user else None   # what this session's app lock is kept under
         return user
+
+    def _locked(self, method: str, path: str) -> bool:
+        """Whether this session's app lock refuses this request (runway/applock.py). A request the web app makes while
+        it's in the background says so (X-Runway-Hidden), so it doesn't keep an unlock going."""
+        if not self._session_key:
+            return False
+        with db.session() as conn:
+            return applock.refuses(conn, self._session_key, method, path, self.headers.get("X-Runway-Hidden") == "1",
+                                   time.time())
 
     def end_headers(self):
         # A renewed session (_user), on whatever this request answers. Taken before sending, so a cookie send_header
@@ -376,6 +387,8 @@ class Handler(BaseHTTPRequestHandler):
         self._started, self._responded = time.monotonic(), False
         self._set_cookies = []
         self._ext_call = False
+        self._session_key = None
+        _current.session_key = None   # (a thread serves one connection's requests in turn: nothing carries over)
         path = urllib.parse.urlsplit(self.path).path
         if not _traced(path):
             return self._handle(method)
@@ -450,6 +463,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
                 back = (url.path or "/") + ("?" + url.query if url.query else "")   # e.g. /plaid/oauth?oauth_state_id=…
                 return self._redirect("/auth/login?next=" + urllib.parse.quote(back, safe=""))
+        # A locked app lock: no data, and no approving an assistant (which would hand someone else the data), until it's
+        # unlocked. The web app's page and files hold no data, so they still load, to show the lock screen.
+        if (url.path.startswith("/api/") or url.path == "/oauth/authorize") and self._locked(method, url.path):
+            if url.path.startswith("/api/"):
+                return self._json(423, {"error": LOCKED, "locked": True})
+            return self._page(423, "Runway is locked", "Open Runway on this device and unlock it, then try again.",
+                              ("/", "Open Runway"))
         if url.path == "/oauth/authorize":   # approving an assistant: you, signed in
             return oauth_http.authorize(self, method, url)
         if url.path == "/carta/callback" and method == "GET":
@@ -482,6 +502,7 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(url.query)
         _current.user = getattr(self, "user", None)
         _current.host = self.headers.get("Host")
+        _current.session_key = self._session_key   # the app lock's routes act on this session's (api/lock.py)
         try:
             result = routes.dispatch(hit, q, body)
         except ApiError as e:

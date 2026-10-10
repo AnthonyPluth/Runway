@@ -5,6 +5,7 @@ import { startMonitoring } from "./monitoring";
 import { toast } from "svelte-sonner";
 import type { AppState } from "./types";
 import { errMsg } from "./act";
+import { afterUnlock, isLocked } from "./lock.svelte";
 
 export const app = $state({
   state: null as AppState | null,
@@ -108,7 +109,7 @@ export async function syncOnVisit(): Promise<void> {
   try {
     const r = await api<{ started: boolean }>("/api/sync/auto", { method: "POST", background: true });
     if (r.started) watchSync();
-  } catch (err) { console.error(err); }
+  } catch (err) { if (!isLocked()) console.error(err); }
 }
 
 /** Watch a sync that's running on the server until it ends, then say how it went and load the page again. */
@@ -119,7 +120,8 @@ function watchSync(sayFailure = false): void {
   const beforeLog = app.state?.last_log?.at;
   syncWatch = setInterval(async () => {
     try { await refreshState(true); }
-    catch (err) {   // keep checking through a blip, but not once signed out
+    catch (err) {   // keep checking through a blip, but not once signed out (or locked: the unlock loads it all again)
+      if (isLocked()) { clearInterval(syncWatch!); syncWatch = null; return; }
       console.error(err);
       if (app.sessionExpired) { clearInterval(syncWatch!); syncWatch = null; }
       return;
@@ -173,13 +175,20 @@ export async function boot(): Promise<void> {
   onBoot.splice(0).forEach((fn) => fn());
   syncOnVisit();
 }
-window.addEventListener("online", () => { if (!booted) boot(); });
+// While the app lock is locked (lib/lock.svelte.ts) Runway is asked for nothing: it would refuse anyway (423), and the
+// first boot waits for the unlock (main.ts).
+window.addEventListener("online", () => { if (!booted && !isLocked()) boot(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && booted && !app.sessionExpired) syncOnVisit();
+  if (document.visibilityState === "visible" && booted && !app.sessionExpired && !isLocked()) syncOnVisit();
+});
+// Unlocked again: the page is drawn afresh (App.svelte), and the state catches up on what happened while it was locked.
+afterUnlock(() => {
+  if (!booted) { boot(); return; }   // it locked before Runway first answered (the device had forgotten the lock: a 423)
+  refreshState(true).then(() => { if (app.state?.syncing) watchSync(); }).catch((err) => console.error(err));
 });
 /** Every minute: pick up what changed meanwhile (or try to boot again, if Runway hasn't answered yet). */
 export function checkIn(): void {
-  if (app.sessionExpired) return;   // nothing more to ask until you've signed in again
-  if (booted) refreshState(true).catch((err) => console.error(err)); else boot();
+  if (app.sessionExpired || isLocked()) return;   // nothing more to ask until you've signed in again, or unlocked
+  if (booted) refreshState(true).catch((err) => { if (!isLocked()) console.error(err); }); else boot();
 }
 setInterval(checkIn, 60_000);

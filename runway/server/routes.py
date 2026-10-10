@@ -43,6 +43,9 @@ from .api.investments import (
     api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_investments_sync, api_live_quotes, api_plan_save,
     api_quote_stream, api_tracked_get, api_tracked_save
 )
+from .api.lock import (
+    api_lock, api_lock_challenge, api_lock_engage, api_lock_off, api_lock_register, api_lock_settings, api_lock_unlock
+)
 from .api.mcp import api_mcp_all, api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
     api_holding_logo, api_holding_logo_options, api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo,
@@ -116,6 +119,13 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/push/unsubscribe", api_push_unsubscribe),
     ("POST", "/api/push/prefs", api_push_prefs),
     ("POST", "/api/push/test", api_push_test),
+    ("GET", "/api/lock", api_lock),
+    ("POST", "/api/lock/challenge", api_lock_challenge),
+    ("POST", "/api/lock/register", api_lock_register),
+    ("POST", "/api/lock/unlock", api_lock_unlock),
+    ("POST", "/api/lock/engage", api_lock_engage),
+    ("POST", "/api/lock/settings", api_lock_settings),
+    ("DELETE", "/api/lock", api_lock_off),
     ("GET", "/api/budget", api_budget),
     ("POST", "/api/budget", api_budget_set),
     ("GET", "/api/budget/suggestions", api_budget_suggestions),

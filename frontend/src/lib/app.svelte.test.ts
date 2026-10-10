@@ -5,12 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("./categories.svelte", () => ({ loadCategories: vi.fn().mockResolvedValue([]) }));
 vi.mock("./monitoring", () => ({ startMonitoring: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
+vi.mock("./webauthn", async (real) => ({ ...(await real<typeof import("./webauthn")>()), signChallenge: vi.fn() }));
 
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
 import { startMonitoring } from "./monitoring";
 import { app, boot, checkIn, editing, refreshState, reload, route, syncOnVisit, whenBooted } from "./app.svelte";
+import { lock, unlock } from "./lock.svelte";
+import { signChallenge } from "./webauthn";
 import type { AppState } from "./types";
 
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, ...extra });
@@ -235,5 +238,28 @@ describe("checking in", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     checkIn();
     expect(api).not.toHaveBeenCalled();
+  });
+});
+
+describe("the app lock", () => {
+  it("asks Runway nothing while locked, and catches up once unlocked", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
+    await boot();
+    vi.mocked(api).mockClear();
+    lock.phase = "locked";
+    checkIn();
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    expect(api).not.toHaveBeenCalled();
+    vi.mocked(api).mockImplementation((async (path: string) => {
+      if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID" };
+      if (path === "/api/lock/unlock") return { available: true, on: true, locked: false, idle: 60, credential_id: "AQID", device_id: "dev_1" };
+      return state();
+    }) as never);
+    vi.mocked(signChallenge).mockResolvedValue({ answer: { credential_id: "AQID", client_data: "e30", authenticator_data: "AA", signature: "AA" }, prf: null });
+    lock.launch = false;
+    expect(await unlock()).toBe(true);
+    await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/state", { keep: true, background: true }));
+    lock.phase = "off";
   });
 });

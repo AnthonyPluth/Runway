@@ -2,12 +2,15 @@ import { mount } from "svelte";
 import "./app.css";
 import App from "./App.svelte";
 import { boot, whenBooted } from "$lib/app.svelte";
+import { whenUnlocked } from "$lib/lock.svelte";
 import { prefetchOverview } from "$lib/prefetch";
 
+// With the app lock on (lib/lock.svelte.ts), App draws the lock screen first and nothing else, and Runway is asked for
+// no data, not even Overview's early request, until it's unlocked. Without it, all of this starts at once.
 // Overview's data doesn't need the state first: ask for both at once (lib/prefetch.ts).
-prefetchOverview();
+whenUnlocked(prefetchOverview);
 const app = mount(App, { target: document.getElementById("app")! });
-boot();
+whenUnlocked(boot);
 
 // Back from a bank's own sign-in page (Plaid OAuth): finish linking the account once Runway has answered.
 if (location.pathname === "/plaid/oauth") whenBooted(() => {

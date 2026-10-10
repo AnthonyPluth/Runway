@@ -1,6 +1,8 @@
 <script lang="ts">
   import { signInUrl } from "$lib/api";
   import { app, boot, route, whenBooted } from "$lib/app.svelte";
+  import { lock } from "$lib/lock.svelte";
+  import LockScreen from "$lib/components/LockScreen.svelte";
   import MobileNav from "$lib/components/MobileNav.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -38,6 +40,12 @@
   whenBooted(() => setTimeout(() => Object.values(LOADERS).forEach((load) => load().catch(() => { /* a failed preload says nothing: see above */ })), 1500));
 </script>
 
+<!-- With the app lock on (lib/lock.svelte.ts), the lock screen is all there is until it's unlocked: from the first
+     frame (whether it's on is known before anything is drawn), and again whenever it locks, when the page and what it
+     showed go. -->
+{#if lock.phase === "locked"}
+<LockScreen />
+{:else}
 <!-- On a phone in the installed app the page runs under the status bar (viewport-fit=cover): a solid strip keeps what scrolls
      by from showing through behind the clock, and the page starts below it (main's top padding). -->
 <div aria-hidden="true" class="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)] bg-background desktop:hidden"></div>
@@ -83,4 +91,9 @@
   </main>
 </div>
 <MobileNav />
+{#if lock.covered}
+  <!-- In the background with the lock on: covered, so the app switcher's preview shows nothing of yours. -->
+  <div class="fixed inset-0 z-[100] flex items-center justify-center bg-background" aria-hidden="true"><img src="/logo.svg" width="56" height="56" alt="" /></div>
+{/if}
+{/if}
 <Toaster theme="dark" position="bottom-center" mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 5rem)" }} />

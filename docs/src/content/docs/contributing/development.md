@@ -90,7 +90,7 @@ make verify                          # every page, and the scripted flows
 make verify PAGES="budget setup"     # only these pages (and the flows that start on them)
 ```
 
-It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` by default); without one, run `npx playwright install chromium` in `frontend/` once. A scripted flow is a small JSON file in `frontend/verify/flows/`: a list of steps such as opening Settings → Categories and tapping a category's emoji. A pull request that changes the UI adds or edits a flow for it; the format is in `frontend/verify/flows/README.md`. Pull requests that change the UI show the `make verify` screenshots inline (below).
+It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` by default); without one, run `npx playwright install chromium` in `frontend/` once. A scripted flow is a small JSON file in `frontend/verify/flows/`: a list of steps such as opening Settings → Categories and tapping a category's emoji. A pull request that changes the UI adds or edits a flow for it; the format is in `frontend/verify/flows/README.md`. A flow that needs a sign-in (`"signed_in": true`, the app lock) runs against a second demo server with sign-in on and a session made for it, with Chrome's virtual WebAuthn authenticator standing in for Face ID or Touch ID. Pull requests that change the UI show the `make verify` screenshots inline (below).
 
 ### Screenshots in a pull request
 

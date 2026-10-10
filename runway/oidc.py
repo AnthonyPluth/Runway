@@ -151,6 +151,11 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def session_key(token: str | None) -> str | None:
+    """How the database knows a session (auth_sessions.token_hash, which what belongs to it refers to): never the token."""
+    return _hash(token) if token else None
+
+
 # ------------------------------------------------------------------------------------------------ login flow
 
 def start_login(conn, next_path: str = "/", choose_account: bool = False) -> tuple[str, str]:

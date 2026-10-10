@@ -25,6 +25,14 @@ describe("flowProblems", () => {
     expect(flowProblems({ ...ok, steps: [{ scroll_to: 3 }] })).toEqual(["step 1: scroll_to takes a string"]);
   });
 
+  it("accepts a reload, and a signed-in flow's authenticator steps (only there, and only the two states)", () => {
+    expect(flowProblems({ ...ok, steps: [{ reload: true }] })).toEqual([]);
+    expect(flowProblems({ ...ok, signed_in: true, steps: [{ authenticator: "unverified" }, { authenticator: "verified" }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ authenticator: "verified" }] })).toEqual(['step 1: authenticator needs "signed_in": true']);
+    expect(flowProblems({ ...ok, signed_in: true, steps: [{ authenticator: "maybe" }] })).toEqual(["step 1: authenticator is verified or unverified"]);
+    expect(flowProblems({ ...ok, signed_in: "yes" })).toEqual(["signed_in is true or false"]);
+  });
+
   it("rejects a viewport it doesn't know", () => expect(flowProblems({ ...ok, viewports: ["watch"] })).toEqual(["unknown viewport watch"]));
 
   it("rejects a page the app doesn't have, so a typo can't pass for a clean run", () => {

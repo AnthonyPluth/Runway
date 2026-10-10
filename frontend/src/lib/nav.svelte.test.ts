@@ -135,4 +135,15 @@ describe("signOut", () => {
     await signOut(new Event("click"));
     expect(toast.error).toHaveBeenCalledWith("Server down");
   });
+
+  it("forgets this device's app lock once signed out, and keeps it when signing out failed", async () => {
+    vi.stubGlobal("location", { href: "" });
+    localStorage.setItem("runway.lock", JSON.stringify({ on: true, idle: 60 }));
+    vi.mocked(api).mockRejectedValueOnce(new Error("Server down"));
+    await signOut(new Event("click"));
+    expect(localStorage.getItem("runway.lock")).not.toBeNull();   // still signed in, so still locked
+    vi.mocked(api).mockResolvedValueOnce({});
+    await signOut(new Event("click"));
+    expect(localStorage.getItem("runway.lock")).toBeNull();
+  });
 });

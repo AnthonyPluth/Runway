@@ -6,6 +6,7 @@
       "handler": "runway/server/api/backups.py:api_backup",
       "web": [],
       "tests": [
+        "tests/test_applock.py",
         "tests/test_backup.py",
         "tests/test_http_pinned.py"
       ],
@@ -156,6 +157,7 @@
       "tests": [
         "tests/test_api_handlers.py",
         "tests/test_api_queries.py",
+        "tests/test_applock.py",
         "tests/test_backup.py",
         "tests/test_categorize.py",
         "tests/test_churn_found.py",
@@ -181,6 +183,7 @@
       "tests": [
         "tests/test_api_handlers.py",
         "tests/test_api_validation.py",
+        "tests/test_applock.py",
         "tests/test_categorize.py",
         "tests/test_forecast_cycles.py",
         "tests/test_http_server.py"
@@ -354,6 +357,7 @@
         "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_api_validation.py",
+        "tests/test_applock.py",
         "tests/test_categorize.py",
         "tests/test_merchants.py",
         "tests/test_retail.py",
@@ -643,6 +647,117 @@
     },
     {
       "method": "GET",
+      "path": "/api/lock",
+      "handler": "runway/server/api/lock.py:api_lock",
+      "web": [
+        "frontend/src/lib/components/settings/AppLockCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/lock/challenge",
+      "handler": "runway/server/api/lock.py:api_lock_challenge",
+      "web": [
+        "frontend/src/lib/components/settings/AppLockCard.svelte",
+        "frontend/src/lib/lock.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/lock/register",
+      "handler": "runway/server/api/lock.py:api_lock_register",
+      "web": [
+        "frontend/src/lib/components/settings/AppLockCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/lock/unlock",
+      "handler": "runway/server/api/lock.py:api_lock_unlock",
+      "web": [
+        "frontend/src/lib/lock.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/lock/engage",
+      "handler": "runway/server/api/lock.py:api_lock_engage",
+      "web": [
+        "frontend/src/lib/lock.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/lock/settings",
+      "handler": "runway/server/api/lock.py:api_lock_settings",
+      "web": [
+        "frontend/src/lib/components/settings/AppLockCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/lock",
+      "handler": "runway/server/api/lock.py:api_lock_off",
+      "web": [
+        "frontend/src/lib/components/settings/AppLockCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/budget",
       "handler": "runway/server/api/budget.py:api_budget",
       "web": [
@@ -773,6 +888,7 @@
       ],
       "tests": [
         "tests/test_api_validation.py",
+        "tests/test_applock.py",
         "tests/test_http_server.py",
         "tests/test_server.py",
         "tests/test_server_errors.py"

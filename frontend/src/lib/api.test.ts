@@ -134,3 +134,25 @@ describe("api", () => {
     expect(settled).not.toHaveBeenCalled();
   });
 });
+
+describe("the app lock", () => {
+  afterEach(() => { Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true }); });
+
+  it("tells the app when this device's lock is locked (423), and says so", async () => {
+    const locked = vi.fn();
+    window.addEventListener("runway:locked", locked);
+    fetchMock.mockReturnValue(reply({ error: "Runway is locked on this device.", locked: true }, 423));
+    await expect(api("/api/x", { keep: true })).rejects.toMatchObject({ status: 423 });
+    expect(locked).toHaveBeenCalledOnce();
+    window.removeEventListener("runway:locked", locked);
+  });
+
+  it("marks what it asks from the background, which doesn't keep an unlock going, and can outlive the page", async () => {
+    fetchMock.mockReturnValue(reply({}));
+    await api("/api/x");
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("X-Runway-Hidden");
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    await api("/api/lock/engage", { method: "POST", keepalive: true });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ keepalive: true, headers: { "X-Runway-Hidden": "1", "X-Runway": "1" } });
+  });
+});

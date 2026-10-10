@@ -7,6 +7,7 @@ touches your own data: the server gets its own folder and SQLite database, and n
 error-report settings.
 """
 import os
+import secrets
 import shutil
 import socket
 import subprocess
@@ -30,6 +31,30 @@ def clean_env(data: str, base: dict[str, str] | None = None) -> dict[str, str]:
            and k not in ("DATABASE_URL", "RUNWAY_PUBLIC_URL", "RUNWAY_ALLOW_NO_AUTH")}
     env.update(RUNWAY_DATA=data, RUNWAY_NO_SYNC="1", PYTHONUNBUFFERED="1")
     return env
+
+
+# The signed-in demo server: the same demo data with sign-in on, for the flows that need a sign-in (the app lock). Its
+# issuer is never contacted: nobody signs in, the browser is handed the session seed_session made (its token passed in
+# SESSION_ENV). Only ever this loopback server and its throwaway database.
+SESSION_ENV = "RUNWAY_VERIFY_SESSION"
+DEMO_EMAIL = "demo@example.com"
+
+
+def signed_in_env(env: dict[str, str], public_url: str) -> dict[str, str]:
+    return {**env, "OIDC_ISSUER": "http://127.0.0.1:9/verify-sign-in", "OIDC_CLIENT_ID": "runway-verify",
+            "RUNWAY_PUBLIC_URL": public_url, "OIDC_ALLOWED_EMAILS": DEMO_EMAIL}
+
+
+def seed_session(conn, token: str) -> None:
+    """`run.py demo --signed-in`: a signed-in browser for the signed-in demo server, with the token in SESSION_ENV."""
+    from sqlalchemy import insert
+
+    from . import oidc
+    from .storage.models import AuthSession
+    now = time.time()
+    conn.execute(insert(AuthSession).values(token_hash=oidc.session_key(token), sub="demo", email=DEMO_EMAIL, name="Demo",
+                                            created=now, expires=now + 86400))
+    oidc.remember_user(conn, "demo", DEMO_EMAIL, "Demo", "Demo", now)
 
 
 def server_command(port: int) -> list[str]:
@@ -72,31 +97,32 @@ def run(pages: list[str]) -> int:
         return 2
     data = tempfile.mkdtemp(prefix="runway-verify-")
     env = clean_env(data)
-    server = None
+    token = secrets.token_urlsafe(32)
+    servers: list[subprocess.Popen] = []
     try:
-        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt"], env=env, cwd=ROOT,
-                                capture_output=True, text=True)
+        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt",
+                                 "--signed-in"], env={**env, SESSION_ENV: token}, cwd=ROOT, capture_output=True, text=True)
         if seeded.returncode:
             print(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", file=sys.stderr)
             return 2
-        port = free_port()
-        log_path = os.path.join(data, "server.log")
-        with open(log_path, "w") as log:
-            server = subprocess.Popen(server_command(port),
-                                      env=env, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
-            url = f"http://127.0.0.1:{port}"
+        port, signed_in_port = free_port(), free_port()
+        url, signed_in_url = f"http://127.0.0.1:{port}", f"http://localhost:{signed_in_port}"
+        for name, p, server_env in (("server", port, env), ("signed-in server", signed_in_port, signed_in_env(env, signed_in_url))):
+            log_path = os.path.join(data, f"{name.replace(' ', '-')}.log")
+            with open(log_path, "w") as log:
+                servers.append(subprocess.Popen(server_command(p), env=server_env, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT))
             try:
-                wait_ready(url, server)
+                wait_ready(f"http://127.0.0.1:{p}/healthz", servers[-1])
             except RuntimeError as e:
-                log.flush()
                 with open(log_path) as f:
-                    print(f"verify: {e}\n{f.read()[-2000:]}", file=sys.stderr)
+                    print(f"verify: the {name}: {e}\n{f.read()[-2000:]}", file=sys.stderr)
                 return 2
-            print(f"verify: demo data served at {url}")
-            return subprocess.run([node, os.path.join(frontend, "verify", "verify.mjs"), "--url", url, "--out", OUT, *pages],
-                                  cwd=frontend, env=env).returncode
+        print(f"verify: demo data served at {url} (and signed in, for the flows that need it, at {signed_in_url})")
+        return subprocess.run([node, os.path.join(frontend, "verify", "verify.mjs"), "--url", url, "--out", OUT,
+                               "--signed-in-url", signed_in_url, *pages],
+                              cwd=frontend, env={**env, SESSION_ENV: token}).returncode
     finally:
-        if server:
+        for server in servers:
             server.terminate()
             try:
                 server.wait(10)

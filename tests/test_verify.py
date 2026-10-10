@@ -76,6 +76,29 @@ class RunTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"http://127\.0\.0\.1:1 after 0 seconds"):
             verify.wait_ready("http://127.0.0.1:1", server, timeout=0)
 
+    def test_the_signed_in_server_is_this_demo_s_own_sign_in_on_loopback(self):
+        env = verify.signed_in_env(verify.clean_env("/tmp/demo", {"PATH": "/bin"}), "http://localhost:8124")
+        self.assertEqual({k: v for k, v in env.items() if k.startswith(("OIDC_", "RUNWAY_PUBLIC"))},
+                         {"OIDC_ISSUER": "http://127.0.0.1:9/verify-sign-in", "OIDC_CLIENT_ID": "runway-verify",
+                          "RUNWAY_PUBLIC_URL": "http://localhost:8124", "OIDC_ALLOWED_EMAILS": verify.DEMO_EMAIL})
+        self.assertEqual(env["RUNWAY_DATA"], "/tmp/demo")
+        with tempfile.TemporaryDirectory() as tmp:   # run.py demo --signed-in: a session for the token it's handed, hashed
+            done = subprocess.run([sys.executable, os.path.join(verify.ROOT, "run.py"), "demo", "--signed-in"], cwd=tmp,
+                                  env={**verify.clean_env(tmp), verify.SESSION_ENV: "tok"}, capture_output=True, text=True, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            from sqlalchemy import create_engine, select
+
+            from runway import oidc
+            from runway.storage.models import AuthSession
+            # The demo's own SQLite file (clean_env drops DATABASE_URL), whatever database these tests run on.
+            engine = create_engine(f"sqlite:///{os.path.join(tmp, 'runway.db')}")
+            try:
+                with engine.connect() as conn:
+                    rows = [tuple(r) for r in conn.execute(select(AuthSession.token_hash, AuthSession.email))]
+            finally:
+                engine.dispose()
+            self.assertEqual(rows, [(oidc.session_key("tok"), verify.DEMO_EMAIL)])
+
     def test_missing_packages_say_what_to_run(self):
         with mock.patch("os.path.isdir", return_value=False), mock.patch("builtins.print") as out:
             self.assertEqual(verify.run([]), 2)

@@ -444,9 +444,10 @@ class AllowlistTests(unittest.TestCase):
         for p in ("/api/mcp-settings", "/api/mcp-settings/all", "/api/mcp-settings/connections/{id}/revoke", "/api/settings",
                   "/api/connect", "/api/plaid/items/{id}/remove", "/api/carta/connect", "/api/finnhub/settings", "/api/logodev/fetch",
                   "/api/realie/settings", "/api/retail/token", "/api/retail/token/remove", "/api/retail/settings", "/api/push",
-                  "/api/push/test", "/api/accounts/{id}/logo", "/api/merchants/logo", "/api/investments/logo", "/api/state"):
+                  "/api/push/test", "/api/accounts/{id}/logo", "/api/merchants/logo", "/api/investments/logo", "/api/state",
+                  "/api/lock", "/api/lock/unlock", "/api/lock/register", "/api/lock/engage"):
             self.assertTrue(mcp_access.blocked(p), p)
-        for p in ("/api/settingsx", "/api/retail/tokens", "/api/accounts/{id}", "/api/pushed", "/api/retail/match"):
+        for p in ("/api/settingsx", "/api/retail/tokens", "/api/accounts/{id}", "/api/pushed", "/api/retail/match", "/api/locks"):
             self.assertFalse(mcp_access.blocked(p), p)
         gets = {p for m, p, _ in server.ROUTES if m == "GET"}
         for p in (*mcp_access.READABLE, *mcp_access.READABLE_PATTERNS, *mcp_access.WRITE_READABLE):

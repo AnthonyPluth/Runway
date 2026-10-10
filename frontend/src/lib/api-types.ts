@@ -151,6 +151,57 @@ export interface LoanTerms {
   inferred_payment: number | null;
 }
 
+/**
+ * A single-use challenge (base64url) for this session, the relying party's ID (Runway's host), and for an unlock,
+ * the passkey to use.
+ */
+export interface LockChallenge {
+  challenge: string;
+  rp_id: string;
+  credential_id: string | null;
+}
+
+/** POST /api/lock/challenge: a challenge for turning the lock on (register) or unlocking. */
+export interface LockChallengeAsk {
+  purpose: "register" | "unlock";
+}
+
+/** POST /api/lock/settings: how long away locks it (seconds: 0, 60, 300 or 900). */
+export interface LockIdle {
+  idle: number;
+}
+
+/** POST /api/lock/register: the passkey navigator.credentials.create made, all base64url, and when to lock. */
+export interface LockRegister {
+  credential_id: string;
+  client_data: string;
+  authenticator_data: string;
+  public_key: string;
+  alg: number;
+  idle: number;
+}
+
+/**
+ * This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked
+ * now, how long away locks it (seconds: 0, 60, 300 or 900), its passkey's id (base64url) and the device's id (dev_...).
+ */
+export interface LockStatus {
+  available: boolean;
+  on: boolean;
+  locked: boolean;
+  idle: number;
+  credential_id: string | null;
+  device_id: string | null;
+}
+
+/** POST /api/lock/unlock: navigator.credentials.get's answer to the unlock challenge, all base64url. */
+export interface LockUnlock {
+  credential_id: string;
+  client_data: string;
+  authenticator_data: string;
+  signature: string;
+}
+
 /** A card statement you entered (statements.history_of). */
 export interface ManualStatement {
   statement_date: string;
@@ -286,6 +337,13 @@ export interface Endpoints {
   "GET /api/transactions": { body: never; reply: TxList };
   "POST /api/transactions": { body: TxNew; reply: TxCreated };
   "DELETE /api/transactions/{id}": { body: never; reply: Ok };
+  "GET /api/lock": { body: never; reply: LockStatus };
+  "DELETE /api/lock": { body: never; reply: LockStatus };
+  "POST /api/lock/challenge": { body: LockChallengeAsk; reply: LockChallenge };
+  "POST /api/lock/register": { body: LockRegister; reply: LockStatus };
+  "POST /api/lock/unlock": { body: LockUnlock; reply: LockStatus };
+  "POST /api/lock/engage": { body: never; reply: LockStatus };
+  "POST /api/lock/settings": { body: LockIdle; reply: LockStatus };
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
   "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
