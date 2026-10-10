@@ -39,6 +39,9 @@ export async function createPasskey(ch: LockChallenge, userId: Uint8Array<ArrayB
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged", requireResidentKey: false },
       attestation: "none",
       timeout: TIMEOUT_MS,
+      // The passkey can give a PRF secret later (#357's encrypted cache): asked for now, so a lock turned on today
+      // needn't be made again then. Nothing is evaluated yet, and a browser without PRF ignores it.
+      extensions: { prf: {} },
     },
   }) as PublicKeyCredential | null;
   if (!cred) throw new Error("No passkey was made.");
@@ -49,8 +52,9 @@ export async function createPasskey(ch: LockChallenge, userId: Uint8Array<ArrayB
            authenticator_data: b64uEncode(r.getAuthenticatorData()), public_key: b64uEncode(key), alg: r.getPublicKeyAlgorithm() };
 }
 
-/** This device's answer to the server's "unlock" challenge, with the person verified (biometrics or the passcode). */
-export async function signChallenge(ch: LockChallenge): Promise<LockUnlock> {
+/** This device's answer to the server's "unlock" challenge, with the person verified (biometrics or the passcode), and
+ *  the PRF output when one was asked for (`prfInput`, #357) and the device gave it (else null). */
+export async function signChallenge(ch: LockChallenge, prfInput?: Uint8Array<ArrayBuffer>): Promise<{ answer: LockUnlock; prf: Uint8Array | null }> {
   if (!ch.credential_id) throw new Error("App lock isn’t on for this device.");
   const cred = await navigator.credentials.get({
     publicKey: {
@@ -59,12 +63,17 @@ export async function signChallenge(ch: LockChallenge): Promise<LockUnlock> {
       allowCredentials: [{ type: "public-key", id: b64uDecode(ch.credential_id), transports: ["internal"] }],
       userVerification: "required",
       timeout: TIMEOUT_MS,
+      ...(prfInput ? { extensions: { prf: { eval: { first: prfInput } } } } : {}),
     },
   }) as PublicKeyCredential | null;
   if (!cred) throw new Error("Nothing was signed.");
   const r = cred.response as AuthenticatorAssertionResponse;
-  return { credential_id: b64uEncode(cred.rawId), client_data: b64uEncode(r.clientDataJSON),
-           authenticator_data: b64uEncode(r.authenticatorData), signature: b64uEncode(r.signature) };
+  const out = cred.getClientExtensionResults?.().prf?.results?.first;
+  return {
+    answer: { credential_id: b64uEncode(cred.rawId), client_data: b64uEncode(r.clientDataJSON),
+              authenticator_data: b64uEncode(r.authenticatorData), signature: b64uEncode(r.signature) },
+    prf: out ? new Uint8Array(out instanceof ArrayBuffer ? out : (out as ArrayBufferView).buffer.slice(0)) : null,
+  };
 }
 
 /** What to tell the person when the device said no. The browser's own words name the API, not what happened. */

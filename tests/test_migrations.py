@@ -512,12 +512,15 @@ class MigrationTests(unittest.TestCase):
         with db.session(self.path) as conn:
             self.assertEqual(conn.execute(select(func.count()).select_from(schema.auth_sessions)).scalar(), 2)   # sign-ins stay
             lock = {"credential_id": "Y3JlZA", "public_key": "a2V5", "alg": -7, "idle": 60, "created": 1.0}
-            conn.execute(insert(schema.app_locks).values(session="h1", **lock))
+            conn.execute(insert(schema.app_locks).values(id="dev_1", session="h1", **lock))
             self.assertEqual(conn.execute(select(schema.app_locks.c.sign_count, schema.app_locks.c.unlocked_until)).fetchone()[:],
                              (0, None))   # a new lock: no counter yet, and locked
             with self.assertRaises(sa.exc.IntegrityError):   # a lock belongs to a sign-in that's there
                 with conn.sa.begin_nested():
-                    conn.execute(insert(schema.app_locks).values(session="nobody", **lock))
+                    conn.execute(insert(schema.app_locks).values(id="dev_2", session="nobody", **lock))
+            with self.assertRaises(sa.exc.IntegrityError):   # and a sign-in has one at most
+                with conn.sa.begin_nested():
+                    conn.execute(insert(schema.app_locks).values(id="dev_3", session="h1", **lock))
             conn.execute(sa.delete(schema.auth_sessions).where(schema.auth_sessions.c.token_hash == "h1"))   # and goes with it
             self.assertEqual(conn.execute(select(func.count()).select_from(schema.app_locks)).scalar(), 0)
         with db.engine(self.path).begin() as c:   # and back down

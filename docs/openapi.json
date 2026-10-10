@@ -1182,7 +1182,7 @@
       },
       "LockStatus": {
         "type": "object",
-        "description": "This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked\nnow, how long away locks it (seconds: 0, 60, 300 or 900), and its passkey's id (base64url).",
+        "description": "This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked\nnow, how long away locks it (seconds: 0, 60, 300 or 900), its passkey's id (base64url) and the device's id (dev_...).",
         "properties": {
           "available": {
             "type": "boolean"
@@ -1201,6 +1201,12 @@
               "string",
               "null"
             ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1208,7 +1214,8 @@
           "on",
           "locked",
           "idle",
-          "credential_id"
+          "credential_id",
+          "device_id"
         ],
         "additionalProperties": false
       },

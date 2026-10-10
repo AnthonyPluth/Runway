@@ -183,7 +183,7 @@ export interface LockRegister {
 
 /**
  * This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked
- * now, how long away locks it (seconds: 0, 60, 300 or 900), and its passkey's id (base64url).
+ * now, how long away locks it (seconds: 0, 60, 300 or 900), its passkey's id (base64url) and the device's id (dev_...).
  */
 export interface LockStatus {
   available: boolean;
@@ -191,6 +191,7 @@ export interface LockStatus {
   locked: boolean;
   idle: number;
   credential_id: string | null;
+  device_id: string | null;
 }
 
 /** POST /api/lock/unlock: navigator.credentials.get's answer to the unlock challenge, all base64url. */

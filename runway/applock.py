@@ -19,6 +19,13 @@ seconds (the device's choice, TIMEOUTS) plus GRACE from now. The web app checks 
 marks the calls it makes from the background (X-Runway-Hidden: 1), which don't count, so the server locks at most GRACE
 after the web app would. However much it's used, an unlock ends MAX_UNLOCKED after it was made.
 
+One row per device (app_locks: its id, the passkey's id and public key, created and last used) is what anything kept
+for that device later attaches to (#357's encrypted cache: a key share the server holds for the device, referring to
+app_locks.id with ON DELETE CASCADE). A device ends by its row being removed, never marked: with its sign-in (the
+foreign key: signing out, the session running out or being deleted, someone taken off OIDC_ALLOWED_EMAILS, whose
+sessions oidc.session_user deletes, or, with OIDC_ALLOWED_GROUPS, the session's fixed end, as oidc.access_lapsed
+judges), when it's turned off on the device, and when it's turned on again (a new passkey, a new row).
+
 What it doesn't stop: someone who already has the session cookie elsewhere, while the device is unlocked (they could
 keep it unlocked); a script running in Runway's own pages; data the app already has in memory."""
 from __future__ import annotations
@@ -36,10 +43,9 @@ import urllib.parse
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 
 from . import oidc
-from .storage import db
 from .storage.models import AppLock
 
 TIMEOUTS = (0, 60, 300, 900)   # Immediately, 1, 5 or 15 minutes away
@@ -228,13 +234,14 @@ def _row(conn, key: str):
 
 
 def status(conn, key: str | None, now: float) -> dict:
-    """Whether this session's lock is on, whether it's locked now, how long away locks it, and its passkey's id."""
+    """Whether this session's lock is on, whether it's locked now, how long away locks it, its passkey's id and the
+    device's."""
     r = _row(conn, key) if key else None
     if r is None:
         return {"available": relying_party() is not None and key is not None, "on": False, "locked": False,
-                "idle": DEFAULT_IDLE, "credential_id": None}
+                "idle": DEFAULT_IDLE, "credential_id": None, "device_id": None}
     return {"available": True, "on": True, "locked": not (r["unlocked_until"] and r["unlocked_until"] > now),
-            "idle": r["idle"], "credential_id": r["credential_id"]}
+            "idle": r["idle"], "credential_id": r["credential_id"], "device_id": r["id"]}
 
 
 def idle_seconds(v) -> int:
@@ -248,13 +255,16 @@ def _unlocked(now: float, idle: int) -> dict:
 
 
 def turn_on(conn, key: str, body: dict, now: float) -> None:
-    """Keep the passkey the web app just made (its answer to this session's "register" challenge), unlocked."""
+    """Keep the passkey the web app just made (its answer to this session's "register" challenge), unlocked. A device
+    that turns it on again gets a new row (a new device id): what was kept for the old passkey goes with the old row."""
     rp = relying_party()
     if rp is None:
         raise LockError(NO_SIGN_IN)
     idle = idle_seconds(body.get("idle", DEFAULT_IDLE))
     cols = verify_registration(body, _take_challenge(key, "register", now), *rp)
-    db.upsert(conn, AppLock, {"session": key, **cols, "idle": idle, **_unlocked(now, idle), "created": now}, key=["session"])
+    turn_off(conn, key)
+    conn.execute(insert(AppLock).values(id="dev_" + secrets.token_urlsafe(16), session=key, **cols, idle=idle,
+                                        **_unlocked(now, idle), created=now, last_used=now))
 
 
 def unlock(conn, key: str, body: dict, now: float) -> None:
@@ -263,7 +273,8 @@ def unlock(conn, key: str, body: dict, now: float) -> None:
     if rp is None or r is None:
         raise LockError("App lock isn’t on for this device.")
     count = verify_assertion(body, dict(r), _take_challenge(key, "unlock", now), *rp)
-    conn.execute(update(AppLock).where(AppLock.session == key).values(sign_count=count, **_unlocked(now, r["idle"])))
+    conn.execute(update(AppLock).where(AppLock.session == key)
+                 .values(sign_count=count, last_used=now, **_unlocked(now, r["idle"])))
 
 
 def engage(conn, key: str) -> None:

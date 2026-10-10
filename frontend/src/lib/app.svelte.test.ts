@@ -253,10 +253,10 @@ describe("the app lock", () => {
     expect(api).not.toHaveBeenCalled();
     vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID" };
-      if (path === "/api/lock/unlock") return { available: true, on: true, locked: false, idle: 60, credential_id: "AQID" };
+      if (path === "/api/lock/unlock") return { available: true, on: true, locked: false, idle: 60, credential_id: "AQID", device_id: "dev_1" };
       return state();
     }) as never);
-    vi.mocked(signChallenge).mockResolvedValue({ credential_id: "AQID", client_data: "e30", authenticator_data: "AA", signature: "AA" });
+    vi.mocked(signChallenge).mockResolvedValue({ answer: { credential_id: "AQID", client_data: "e30", authenticator_data: "AA", signature: "AA" }, prf: null });
     lock.launch = false;
     expect(await unlock()).toBe(true);
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/state", { keep: true, background: true }));

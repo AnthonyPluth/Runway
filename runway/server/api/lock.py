@@ -21,7 +21,7 @@ def _key() -> str:
 def _status(conn) -> LockStatus:
     s = applock.status(conn, getattr(_current, "session_key", None), time.time())
     return {"available": s["available"], "on": s["on"], "locked": s["locked"], "idle": s["idle"],
-            "credential_id": s["credential_id"]}
+            "credential_id": s["credential_id"], "device_id": s["device_id"]}
 
 
 def api_lock(conn, _q, _b) -> LockStatus:

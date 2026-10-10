@@ -146,10 +146,12 @@ class ThroughTheServer(ServerCase):
 
     def test_turn_on_lock_unlock_and_turn_off(self):
         self.assertEqual(self.call("GET", "/api/lock")[1], {"available": True, "on": False, "locked": False, "idle": 60,
-                                                             "credential_id": None})
+                                                             "credential_id": None, "device_id": None})
         a = Authenticator()
-        self.assertEqual(self.turn_on(a, idle=300), {"available": True, "on": True, "locked": False, "idle": 300,
-                                                     "credential_id": b64(a.cred)})
+        on = self.turn_on(a, idle=300)
+        self.assertEqual(on, {"available": True, "on": True, "locked": False, "idle": 300, "credential_id": b64(a.cred),
+                              "device_id": self.lock_row()["id"]})
+        self.assertRegex(on["device_id"], r"^dev_[\w-]{22}$")
         self.assertEqual(self.call("GET", "/api/state")[0], 200)              # unlocked: as before
         self.assertEqual(self.call("POST", "/api/lock/engage")[1]["locked"], True)
         status, out = self.call("GET", "/api/state")
@@ -237,6 +239,28 @@ class ThroughTheServer(ServerCase):
         self.assertEqual(self.call("GET", "/api/state")[0], 401)
         self.assertIsNone(self.lock_row())
 
+    def test_the_device_ends_when_its_person_s_access_does(self):
+        # Taken off OIDC_ALLOWED_EMAILS: their sessions end at the next request, and each device's row with them (AGENTS.md,
+        # access that outlives the person), so nothing kept for the device can be used again.
+        self.turn_on(Authenticator())
+        with mock.patch.dict(os.environ, {"OIDC_ALLOWED_EMAILS": "someone-else@example.com"}):
+            self.assertEqual(self.call("GET", "/api/lock")[0], 401)
+        self.assertIsNone(self.lock_row())
+
+    def test_turning_it_on_again_is_a_new_device_row(self):
+        self.turn_on(Authenticator())
+        first = self.lock_row()["id"]
+        a = Authenticator()
+        self.turn_on(a)
+        with db.session() as conn:
+            rows = conn.execute(select(AppLock.id).where(AppLock.session == self.key)).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertNotEqual(rows[0]["id"], first)   # what was kept for the old passkey went with its row
+        self.call("POST", "/api/lock/engage")
+        status, out = self.unlock(a)
+        self.assertEqual(status, 200, out)
+        self.assertGreater(self.lock_row()["last_used"], time.time() - 5)
+
     def test_turning_on_needs_this_session_s_challenge(self):
         a = Authenticator()
         status, out = self.call("POST", "/api/lock/register", a.create(b64(secrets.token_bytes(32))))
@@ -253,7 +277,7 @@ class WithoutSignIn(ServerCase):
 
     def test_there_is_no_lock_without_sign_in(self):
         self.assertEqual(self.req("GET", "/api/lock")[1], {"available": False, "on": False, "locked": False, "idle": 60,
-                                                            "credential_id": None})
+                                                            "credential_id": None, "device_id": None})
         status, out = self.req("POST", "/api/lock/challenge", {"purpose": "register"})
         self.assertEqual((status, out["error"]), (400, applock.NO_SIGN_IN))
         self.assertEqual(self.req("POST", "/api/lock/engage")[0], 400)

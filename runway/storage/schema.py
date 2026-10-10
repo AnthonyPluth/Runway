@@ -461,8 +461,9 @@ auth_sessions = Table(
 
 app_locks = Table(
     'app_locks', metadata,
-    Column('session', Text, refers('app_locks', 'session', 'auth_sessions.token_hash', 'CASCADE'), primary_key=True,
-           doc='the signed-in browser it locks (auth_sessions): it ends with that sign-in'),
+    Column('id', Text, primary_key=True, doc="the device's id (dev_...): what's kept for this device later refers to it"),
+    Column('session', Text, refers('app_locks', 'session', 'auth_sessions.token_hash', 'CASCADE'), nullable=False,
+           doc='the signed-in browser it locks (auth_sessions), one lock each: it ends with that sign-in'),
     Column('credential_id', Text, nullable=False, doc="the device's passkey for it, base64url"),
     Column('public_key', Text, nullable=False, doc="the passkey's public key (SubjectPublicKeyInfo DER), base64url"),
     Column('alg', Integer, nullable=False, doc='COSE algorithm: -7 (ES256) or -257 (RS256)'),
@@ -471,7 +472,9 @@ app_locks = Table(
     Column('unlocked_at', Float, doc='when it was last unlocked'),
     Column('unlocked_until', Float, doc='when that unlock ends (moved on while the app is in use); NULL: locked'),
     Column('created', Float, nullable=False),
-    info={'doc': 'app locks (Face ID / Touch ID) on signed-in browsers: no secrets, only what checks an unlock'},
+    Column('last_used', Float, doc='when it was last unlocked with'),
+    info={'doc': 'app locks (Face ID / Touch ID): one row per signed-in device, removed (not marked) when it ends; '
+                 'no secrets, only what checks an unlock'},
 )
 
 oauth_clients = Table(
@@ -931,6 +934,7 @@ Index('oauth_grants_client', oauth_grants.c.client_id)
 Index('oauth_tokens_grant', oauth_tokens.c.grant_id)
 Index('oauth_codes_grant', oauth_codes.c.grant_id)
 Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a Plaid account is one of your accounts, never two
+Index('app_locks_session', app_locks.c.session, unique=True)   # one lock (one device) per sign-in
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}

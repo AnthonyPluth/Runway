@@ -15,8 +15,8 @@ import { createPasskey, unsupportedReason } from "$lib/webauthn";
 import { toast } from "svelte-sonner";
 import AppLockCard from "./AppLockCard.svelte";
 
-type Status = { available: boolean; on: boolean; locked: boolean; idle: number; credential_id: string | null };
-const OFF: Status = { available: true, on: false, locked: false, idle: 60, credential_id: null };
+type Status = { available: boolean; on: boolean; locked: boolean; idle: number; credential_id: string | null; device_id: string | null };
+const OFF: Status = { available: true, on: false, locked: false, idle: 60, credential_id: null, device_id: null };
 const MADE = { credential_id: "AQID", client_data: "e30", authenticator_data: "AA", public_key: "MAE", alg: -7 };
 
 let sent: { path: string; opts?: { method?: string; body?: unknown } }[] = [];

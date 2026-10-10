@@ -82,9 +82,33 @@ function adopt(s: LockStatus): void {
   save({ on: true, idle: s.idle });
 }
 
-/** Forget the lock on this device (signing out, turning it off, or the server has none). */
+/** Forget the lock on this device (signing out, turning it off, or the server has none), and what an unlock held. */
 export function forget(): void {
+  wipeSecret();
   save(null);
+}
+
+// ------------------------------------------------------------------------------------------ the unlocked secret
+/** What the last unlock proved, for what may later need it: #357's encrypted cache will make its key from the passkey's
+ *  PRF output (`prf`, when the unlock asked for it and the device gave it) and a share the server holds for this device
+ *  (`deviceId`). Held only while unlocked: locking, the re-lock timers, signing out and a 401 zero it and drop it. */
+export interface Unlocked { deviceId: string | null; credentialId: string | null; at: number; prf: Uint8Array | null }
+let secret: Unlocked | null = null;
+/** The unlocked secret, or null whenever Runway isn't unlocked on this device. */
+export const unlockedSecret = (): Unlocked | null => (lock.phase === "unlocked" ? secret : null);
+let maxTimer: ReturnType<typeof setTimeout> | undefined;
+/** An unlock lasts MAX_UNLOCKED_MS however much it's used, as on the server (runway/applock.py MAX_UNLOCKED). */
+export const MAX_UNLOCKED_MS = 12 * 3600 * 1000;
+function hold(s: LockStatus, prf: Uint8Array | null = null): void {
+  wipeSecret();
+  secret = { deviceId: s.device_id, credentialId: s.credential_id, at: Date.now(), prf };
+  maxTimer = setTimeout(() => lockNow(), MAX_UNLOCKED_MS);
+}
+/** Zero and drop what the last unlock held. */
+export function wipeSecret(): void {
+  secret?.prf?.fill(0);
+  secret = null;
+  clearTimeout(maxTimer);
 }
 
 /** Lock now: draw the lock screen (the page goes, and with it what it showed) and tell the server, so the data stays
@@ -94,6 +118,8 @@ export function lockNow(tell = true, offer = true): void {
   if (lock.phase === "off") return;
   lock.offer = offer;
   lock.phase = "locked";
+  wipeSecret();
+  clearTimeout(awayTimer);
   lock.covered = false;
   lock.error = "";
   newPage();          // the page's reads in flight are dropped
@@ -135,15 +161,16 @@ export async function unlock(quiet = false): Promise<boolean> {
   try {
     if (lock.launch && !(await lockScreenShown())) return true;
     const ch = await apiCall<"POST /api/lock/challenge">("/api/lock/challenge", { method: "POST", body: { purpose: "unlock" } });
-    let answer;
-    try { answer = await signChallenge(ch); }
+    let signed;
+    try { signed = await signChallenge(ch); }
     catch (err) {
       if (!quiet) lock.error = webauthnError(err);
       return false;
     }
-    const s = await apiCall<"POST /api/lock/unlock">("/api/lock/unlock", { method: "POST", body: answer });
+    const s = await apiCall<"POST /api/lock/unlock">("/api/lock/unlock", { method: "POST", body: signed.answer });
     adopt(s);
-    if (s.locked) { lock.error = "Runway is still locked. Try again."; return false; }
+    if (s.locked) { signed.prf?.fill(0); lock.error = "Runway is still locked. Try again."; return false; }
+    hold(s, signed.prf);
     opened();
     return true;
   } catch (err) {
@@ -160,6 +187,7 @@ export async function unlock(quiet = false): Promise<boolean> {
 /** The lock was turned on here (Settings → Data): it's unlocked, since you just proved it was you. */
 export function turnedOn(s: LockStatus): void {
   adopt(s);
+  if (lock.phase !== "unlocked" || secret?.deviceId !== s.device_id) hold(s);
   lock.phase = "unlocked";
   started = true;
 }
@@ -185,15 +213,20 @@ export function deviceUserId(): Uint8Array<ArrayBuffer> {
 
 // ------------------------------------------------------------------------------------------ away and back
 let hiddenAt: number | null = null;
-/** The app went to the background (`now`: Date.now(), the wall clock, which keeps going while a phone sleeps). */
+let awayTimer: ReturnType<typeof setTimeout> | undefined;
+/** The app went to the background (`now`: Date.now(), the wall clock, which keeps going while a phone sleeps). It
+ *  locks when `idle` runs out there (a timer, which a phone may hold back while the app sleeps: then on coming back). */
 export function wentAway(now = Date.now()): void {
   hiddenAt = now;
   if (lock.phase !== "unlocked") return;
-  if (lock.idle === 0) lockNow();
-  else lock.covered = true;
+  if (lock.idle === 0) { lockNow(); return; }
+  lock.covered = true;
+  clearTimeout(awayTimer);
+  awayTimer = setTimeout(() => { if (hiddenAt !== null) lockNow(); }, lock.idle * 1000);
 }
 /** The app is back: locked again if it was away `idle` seconds or more, else uncovered. */
 export function cameBack(now = Date.now()): void {
+  clearTimeout(awayTimer);
   const away = hiddenAt === null ? 0 : now - hiddenAt;
   hiddenAt = null;
   if (lock.phase === "unlocked" && away >= lock.idle * 1000) lockNow();
@@ -206,6 +239,8 @@ if (typeof document !== "undefined") {
   window.addEventListener("pageshow", (e) => { if (e.persisted) cameBack(); });
   // The server said this sign-in is locked (its lock ran out, or another tab locked it): it's on, whatever the device
   // remembered (its storage may have been cleared).
+  // Signed out (a 401): the sign-in, and the lock with it, is gone on the server; so is what the device held for it.
+  window.addEventListener("runway:signed-out", () => forget());
   window.addEventListener("runway:locked", () => {
     if (lock.phase === "locked") return;
     save({ on: true, idle: lock.idle });

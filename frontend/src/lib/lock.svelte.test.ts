@@ -13,7 +13,7 @@ import { toast } from "svelte-sonner";
 import { signChallenge } from "$lib/webauthn";
 
 type Lock = typeof import("./lock.svelte");
-const STATUS = { available: true, on: true, locked: true, idle: 60, credential_id: "Y3JlZA" };
+const STATUS = { available: true, on: true, locked: true, idle: 60, credential_id: "Y3JlZA", device_id: "dev_1" };
 const ANSWER = { credential_id: "Y3JlZA", client_data: "e30", authenticator_data: "AA", signature: "AA" };
 
 /** A fresh copy of the module, as a launch would load it, with this saved on the device. */
@@ -47,7 +47,7 @@ describe("launching", () => {
     expect(load).not.toHaveBeenCalled();
     serve({ "/api/lock/engage": STATUS, "/api/lock/challenge": { challenge: "Y2g", rp_id: "runway.example", credential_id: "Y3JlZA" },
             "/api/lock/unlock": { ...STATUS, locked: false } });
-    vi.mocked(signChallenge).mockResolvedValue(ANSWER);
+    vi.mocked(signChallenge).mockResolvedValue({ answer: ANSWER, prf: null });
     expect(await m.unlock()).toBe(true);
     expect(m.lock.phase).toBe("unlocked");
     expect(load).toHaveBeenCalledOnce();
@@ -117,7 +117,7 @@ describe("unlocking", () => {
 
   it("stays locked when the server doesn't accept the answer", async () => {
     const m = await locked();
-    vi.mocked(signChallenge).mockResolvedValue(ANSWER);
+    vi.mocked(signChallenge).mockResolvedValue({ answer: ANSWER, prf: null });
     serve({ "/api/lock/challenge": { challenge: "Y2g", rp_id: "runway.example", credential_id: "Y3JlZA" },
             "/api/lock/unlock": refused("Face ID, Touch ID or the passcode didn’t check out. Try again.", 400) });
     expect(await m.unlock()).toBe(false);
@@ -130,7 +130,7 @@ describe("unlocking", () => {
     const m = await locked();
     const again = vi.fn();
     m.afterUnlock(again);
-    vi.mocked(signChallenge).mockResolvedValue(ANSWER);
+    vi.mocked(signChallenge).mockResolvedValue({ answer: ANSWER, prf: null });
     await m.unlock();
     expect(again).not.toHaveBeenCalled();
     m.lockNow();
@@ -186,6 +186,54 @@ describe("away and back", () => {
     expect(m.lock.phase).toBe("locked");
     expect(JSON.parse(localStorage.getItem("runway.lock")!)).toMatchObject({ on: true });
     expect(api).not.toHaveBeenCalled();          // the server already is locked: nothing to tell it
+  });
+});
+
+describe("the unlocked secret", () => {
+  async function unlockedWith(prf: Uint8Array | null, idle = 60): Promise<Lock> {
+    const m = await launch({ on: true, idle });
+    m.lock.launch = false;
+    serve({ "/api/lock/challenge": { challenge: "Y2g", rp_id: "runway.example", credential_id: "Y3JlZA" },
+            "/api/lock/unlock": { ...STATUS, idle, locked: false }, "/api/lock/engage": STATUS });
+    vi.mocked(signChallenge).mockResolvedValue({ answer: ANSWER, prf });
+    expect(m.unlockedSecret()).toBeNull();
+    await m.unlock();
+    return m;
+  }
+  afterEach(() => vi.useRealTimers());
+
+  it("holds what the unlock proved, PRF output included, and zeroes it on locking", async () => {
+    const prf = new Uint8Array([1, 2, 3]);
+    const m = await unlockedWith(prf);
+    expect(m.unlockedSecret()).toMatchObject({ deviceId: "dev_1", credentialId: "Y3JlZA", prf });
+    m.lockNow();
+    expect(m.unlockedSecret()).toBeNull();
+    expect([...prf]).toEqual([0, 0, 0]);
+  });
+
+  it("is wiped by a 401 (signed out), with the device's note of the lock", async () => {
+    const prf = new Uint8Array([9]);
+    const m = await unlockedWith(prf);
+    window.dispatchEvent(new CustomEvent("runway:signed-out", { cancelable: true, detail: { background: true } }));
+    expect(m.unlockedSecret()).toBeNull();
+    expect([...prf]).toEqual([0]);
+    expect(localStorage.getItem("runway.lock")).toBeNull();
+  });
+
+  it("re-locks on a timer: after `idle` in the background, and twelve hours after an unlock however it's used", async () => {
+    vi.useFakeTimers();
+    let m = await unlockedWith(new Uint8Array([5]), 300);
+    m.wentAway();
+    vi.advanceTimersByTime(299_000);
+    expect(m.lock.phase).toBe("unlocked");
+    vi.advanceTimersByTime(1_000);
+    expect(m.lock.phase).toBe("locked");
+    expect(m.unlockedSecret()).toBeNull();
+    m = await unlockedWith(null, 300);
+    vi.advanceTimersByTime(m.MAX_UNLOCKED_MS - 1);
+    expect(m.lock.phase).toBe("unlocked");
+    vi.advanceTimersByTime(1);
+    expect(m.lock.phase).toBe("locked");
   });
 });
 

@@ -16,7 +16,7 @@ vi.mock("svelte-sonner", async (real) => ({
 import { api } from "$lib/api";
 import App from "./App.svelte";
 
-const STATUS = { available: true, on: true, locked: true, idle: 60, credential_id: "AQID" };
+const STATUS = { available: true, on: true, locked: true, idle: 60, credential_id: "AQID", device_id: "dev_1" };
 
 beforeEach(() => { vi.mocked(api).mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -25,7 +25,7 @@ describe("App with the app lock on", () => {
   it("draws only the lock screen, and asks Runway for nothing but the lock", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/lock/engage") return STATUS;
-      if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID" };
+      if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID", device_id: "dev_1" };
       throw new Error(`asked for ${path} while locked`);
     }) as never);
     render(App);
@@ -44,7 +44,7 @@ describe("App with the app lock on", () => {
   it("is back to the app once unlocked", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/lock/engage") return STATUS;
-      if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID" };
+      if (path === "/api/lock/challenge") return { challenge: "AA", rp_id: "localhost", credential_id: "AQID", device_id: "dev_1" };
       if (path === "/api/lock/unlock") return { ...STATUS, locked: false };
       return new Promise(() => {});   // the app's own loading: left waiting
     }) as never);

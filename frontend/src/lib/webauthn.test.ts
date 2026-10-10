@@ -48,6 +48,7 @@ describe("asking the device", () => {
     expect(pk.rp).toEqual({ id: "runway.example", name: "Runway" });
     expect(pk.authenticatorSelection).toMatchObject({ authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" });
     expect(pk.attestation).toBe("none");
+    expect(pk.extensions).toEqual({ prf: {} });   // PRF-capable from the start (#357), nothing evaluated
     expect(pk.user.name).not.toMatch(/@/);   // nothing about who you are on the device's passkey list
   });
 
@@ -65,11 +66,24 @@ describe("asking the device", () => {
     });
     vi.stubGlobal("navigator", { credentials: { get } });
     expect(await signChallenge({ challenge: "AAEC", rp_id: "runway.example", credential_id: "AQID" }))
-      .toEqual({ credential_id: "AQID", client_data: "e30", authenticator_data: "CQ", signature: "__4" });
+      .toEqual({ answer: { credential_id: "AQID", client_data: "e30", authenticator_data: "CQ", signature: "__4" }, prf: null });
     const pk = get.mock.calls[0][0].publicKey;
     expect(pk.userVerification).toBe("required");
     expect(pk.rpId).toBe("runway.example");
     expect([...pk.allowCredentials[0].id]).toEqual([1, 2, 3]);
+    expect(pk.extensions).toBeUndefined();   // no PRF asked for until something needs it (#357)
+  });
+
+  it("asks for a PRF secret only when given an input, and hands back what the device gave", async () => {
+    const get = vi.fn().mockResolvedValue({
+      rawId: bytes(1), response: { clientDataJSON: bytes(1), authenticatorData: bytes(1), signature: bytes(1) },
+      getClientExtensionResults: () => ({ prf: { results: { first: bytes(7, 8) } } }),
+    });
+    vi.stubGlobal("navigator", { credentials: { get } });
+    const input = new Uint8Array(32);
+    const { prf } = await signChallenge({ challenge: "AA", rp_id: "x", credential_id: "AQ" }, input);
+    expect([...prf!]).toEqual([7, 8]);
+    expect(get.mock.calls[0][0].publicKey.extensions).toEqual({ prf: { eval: { first: input } } });
     await expect(signChallenge({ challenge: "AA", rp_id: "x", credential_id: null })).rejects.toThrow(/isn’t on/);
   });
 

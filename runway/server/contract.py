@@ -300,12 +300,13 @@ class TxCreated(TypedDict):
 
 class LockStatus(TypedDict):
     """This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked
-    now, how long away locks it (seconds: 0, 60, 300 or 900), and its passkey's id (base64url)."""
+    now, how long away locks it (seconds: 0, 60, 300 or 900), its passkey's id (base64url) and the device's id (dev_...)."""
     available: bool
     on: bool
     locked: bool
     idle: int
     credential_id: str | None
+    device_id: str | None
 
 
 class LockChallengeAsk(TypedDict):
