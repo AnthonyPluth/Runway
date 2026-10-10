@@ -111,6 +111,7 @@ jobs:
         # digest `docker buildx imagetools inspect postgres:16` prints (the index's, not one platform's) and check
         # mirror.gcr.io serves it (`docker buildx imagetools inspect mirror.gcr.io/library/postgres@sha256:...`).
         # To go back to Docker Hub, use `postgres:16@sha256:...` (the same digest).
+        # postgres-digest.yml opens an issue each week the pin is behind the tag.
         image: mirror.gcr.io/library/postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d   # 16.15
         env:
           POSTGRES_USER: runway
