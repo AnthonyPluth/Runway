@@ -6,6 +6,7 @@ import { apiCall } from "$lib/contract";
 import { route, setQuery } from "$lib/app.svelte";
 import { debounced } from "$lib/debounce";
 import { clearAll, fromQuery, isFiltered, sameFilters, toQuery, txFilters, txShow, type TxFilters } from "$lib/filters.svelte";
+import { cacheEpoch, recall, remember } from "$lib/swr";
 import { untrack } from "svelte";
 import type { TxList } from "./types";
 
@@ -20,6 +21,9 @@ export class TxListing {
   listError = $state("");
   /** It couldn't be loaded again: the old one stays, marked as not up to date. */
   refreshError = $state("");
+  /** The list on screen is the one remembered from an earlier visit (lib/swr.ts), painted while the fresh one loads: not
+   *  yet known to be current. If the refresh fails it comes down (a list error) instead of staying as if it were current. */
+  stale = $state(false);
   /** The count in the heading (in Review, goes down as you categorize). */
   count = $state(0);
   /** A new search starts the table afresh (no leftover ticks); a reload after a change keeps it. */
@@ -95,22 +99,42 @@ export class TxListing {
     const now = { ...this.f }, ignored = txShow.ignored;
     if (!this.review) setQuery(toQuery(now));
     // After a change with the same filters, load as many as were showing, so the list (and where you are in it) stays.
-    const same = !!this.list && ignored === this.appliedIgnored && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === this.applied[k]);
+    let same = !!this.list && ignored === this.appliedIgnored && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === this.applied[k]);
+    // A search seen before (in this visit to Runway) shows what it found then, at once; the fresh answer replaces it in place.
+    const key = this.#key(now, ignored), at = cacheEpoch();
+    if (!same) {
+      const seen = recall<TxList>(key);
+      if (seen) {
+        this.applied = now; this.appliedIgnored = ignored; this.list = seen; this.count = seen.total; this.listError = ""; this.refreshError = "";
+        this.stale = true; this.loads++; same = true;
+      }
+    }
     const qs = this.#query(0, same ? Math.min(1000, Math.max(PAGE, this.list!.items.length)) : PAGE);
     try {
       const data = await apiCall<"GET /api/transactions">(`/api/transactions?${qs}`);
       if (mine !== this.#seq) return;   // a newer search has been asked for meanwhile
+      remember(key, data, at);
       // The same search again (after a change): the rows are updated where they are, so nothing redraws or jumps. A new
       // search starts the table afresh.
       this.applied = now; this.appliedIgnored = ignored; this.list = data; this.count = data.total; this.listError = ""; this.refreshError = "";
+      this.stale = false;
       if (!same) this.loads++;
       this.#countIgnored(mine, now);
     } catch (err) {
       if (mine !== this.#seq) return;
+      // The remembered rows come down rather than stay as if they were current.
+      if (this.stale) { this.list = null; this.stale = false; this.listError = errMsg(err); return; }
       // With a list on screen it stays (you may be part way down it), under a line saying it isn't up to date.
       if (this.list) this.refreshError = errMsg(err); else this.listError = errMsg(err);
     }
   };
+
+  // What a search is remembered by: its filters and the list's own conditions, not how many rows were asked for.
+  #key(now: TxFilters, ignored: boolean): string {
+    const qs = this.params(now);
+    for (const [k, v] of Object.entries(this.review ? { review: "1" } : ignored ? {} : { ignored: "0" })) qs.set(k, v);
+    return `transactions?${qs}`;
+  }
 
   /** The next page, added to the end (skipping any that shifted in since, e.g. after a sync). A failure is the table's
    * to show (with a Retry). */

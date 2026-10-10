@@ -1,6 +1,8 @@
 // Talking to Runway's server. Reads belong to the page that asked for them: moving to another page cancels them,
 // and a cancelled read never answers, so a slow reply can't draw the old page over the new one. `keep` opts out.
 
+import { clearCache } from "./swr";
+
 let pageLoads = new AbortController();
 let pageNumber = 0;
 
@@ -70,6 +72,8 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     if (page?.signal.aborted) return new Promise(() => {});
     throw new ApiError(LOCKED, 423);
   }
+  // A change (not a read, nor Runway checking in): what lib/swr.ts remembers may no longer be right, whether or not it worked.
+  if (init.method !== "GET" && !opts.background) clearCache();
   const data = await res.json().catch(() => ({}));
   if (page?.signal.aborted) return new Promise(() => {});
   if (!res.ok) {
