@@ -1,0 +1,11 @@
+{
+  "name": "transactions-receipt",
+  "page": "transactions",
+  "steps": [
+    { "goto": "#transactions" },
+    { "click": "button[aria-label='Receipt: Target in store · 7 items']" },
+    { "wait_for": "button[aria-label='Category for Whole milk, 1 gal']" },
+    { "scroll_to": "button[aria-label='Category for Dark chocolate bar']" },
+    { "screenshot": "receipt" }
+  ]
+}

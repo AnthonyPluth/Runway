@@ -156,6 +156,30 @@ def seed_ai_buttons(conn, today: date | None = None) -> None:
     db.set_setting(conn, sk.OPENROUTER_API_KEY, "sk-or-demo-not-a-real-key")
 
 
+def seed_receipt(conn, today: date | None = None) -> None:
+    """Opt-in, on top of `seed` (`run.py demo --receipt`, which `make verify` passes): a store purchase on the card, matched
+    to its receipt, so the Transactions page has a receipt to expand: a few items with categories (one bought twice, one
+    with a long name) and one with none, and the order's subtotal and tax."""
+    today = today or date.today()
+    order, day = "target:900-0000-0000001", today.isoformat()
+    items = [("Whole milk, 1 gal", 1, 3.89, "Groceries"), ("Sparkling water 12-pack, assorted flavors", 2, 11.98, "Groceries"),
+             ("Dark chocolate bar", 3, 8.97, "Coffee & Snacks"), ("Dish soap refill", 1, 4.49, "Shopping"),
+             ("Allergy relief tablets, 24 ct", 1, 9.79, "Pharmacy"), ("LED bulbs, 4 pack", 1, 7.99, "Home Improvement"),
+             ("Reusable shopping bag", 1, 1.99, None)]
+    subtotal = round(sum(amount for _, _, amount, _ in items), 2)
+    tax = round(subtotal * 0.07, 2)
+    total = round(subtotal + tax, 2)
+    conn.execute(insert(Transaction).values(id="demo-card|demo-receipt", account_id="demo-card", amount=-total, posted=day,
+                                            description="TARGET STORE 0000", payee="Target", category="Shopping"))
+    conn.execute(insert(RetailOrder).values(id=order, retailer="target", order_number="900-0000-0000001", channel="store",
+                                            placed=day, total=total, subtotal=subtotal, tax=tax, details=1, payment="Visa 1234"))
+    conn.execute(insert(RetailItem), [{"order_id": order, "position": n, "title": title, "quantity": qty, "amount": amount,
+                                       "category": category, "category_source": "user" if category else None}
+                                      for n, (title, qty, amount, category) in enumerate(items)])
+    conn.execute(insert(RetailCharge).values(id=f"{order}|1", order_id=order, date=day, amount=-total, payment="Visa 1234",
+                                             tx_id="demo-card|demo-receipt", match_source="auto"))
+
+
 def seed_investments(conn, today: date) -> None:
     """A brokerage account with three holdings and a year of closes, so the Investments page has a day's gain, a day's
     loss and a nearly flat day to show."""
