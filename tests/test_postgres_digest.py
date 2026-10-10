@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -32,10 +33,11 @@ def registries(mirror=NEW, hub=NEW):
 
     def get(url, headers, method):
         calls.append((url, method))
-        answer = mirror if "mirror.gcr.io" in url else hub
+        on_mirror = urllib.parse.urlsplit(url).hostname == "mirror.gcr.io"
+        answer = mirror if on_mirror else hub
         if isinstance(answer, Exception):
             raise answer
-        if "mirror.gcr.io" in url:
+        if on_mirror:
             return ({"docker-content-digest": answer} if answer else {}), b""
         return {}, json.dumps({"digest": answer} if answer else {"name": "16"}).encode()
 
