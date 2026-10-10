@@ -1,4 +1,3 @@
-import contextlib
 import os
 import subprocess
 import sys
@@ -87,11 +86,17 @@ class RunTests(unittest.TestCase):
             done = subprocess.run([sys.executable, os.path.join(verify.ROOT, "run.py"), "demo", "--signed-in"], cwd=tmp,
                                   env={**verify.clean_env(tmp), verify.SESSION_ENV: "tok"}, capture_output=True, text=True, timeout=120)
             self.assertEqual(done.returncode, 0, done.stderr)
-            import sqlite3   # (the demo's own SQLite file, whatever database these tests run on)
+            from sqlalchemy import create_engine, select
 
             from runway import oidc
-            with contextlib.closing(sqlite3.connect(os.path.join(tmp, "runway.db"))) as conn:
-                rows = conn.execute("SELECT token_hash, email FROM auth_sessions").fetchall()
+            from runway.storage.models import AuthSession
+            # The demo's own SQLite file (clean_env drops DATABASE_URL), whatever database these tests run on.
+            engine = create_engine(f"sqlite:///{os.path.join(tmp, 'runway.db')}")
+            try:
+                with engine.connect() as conn:
+                    rows = [tuple(r) for r in conn.execute(select(AuthSession.token_hash, AuthSession.email))]
+            finally:
+                engine.dispose()
             self.assertEqual(rows, [(oidc.session_key("tok"), verify.DEMO_EMAIL)])
 
     def test_missing_packages_say_what_to_run(self):
