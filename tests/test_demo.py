@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from runway.storage import db
 from runway.domain import demo, forecast, portfolio
 from runway.domain import retail
-from runway.storage.models import Account, Recurring, RetailItem, Transaction
+from runway.storage.models import Account, Recurring, RetailItem, RetailOrder, Transaction
 from tests.shared import DbCase
 
 
@@ -40,6 +40,19 @@ class DemoTests(DbCase):
         self.assertEqual(waiting(), 3)
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItem).where(RetailItem.category.is_(None))).scalar(), 2)
         self.assertEqual(retail.token_owner(self.c), {"sub": "demo", "email": "demo@example.invalid"})
+
+    def test_the_receipt_is_opt_in(self):
+        demo.seed(self.c, today=date(2026, 10, 9))
+        self.assertIsNone(self.c.execute(select(Transaction.id).where(Transaction.id == "demo-card|demo-receipt")).scalar())
+        demo.seed_receipt(self.c, today=date(2026, 10, 9))
+        items = self.c.execute(select(RetailItem.category, RetailItem.quantity).where(RetailItem.order_id == "target:900-0000-0000001")).fetchall()
+        self.assertGreater(len(items), 5)
+        self.assertEqual(sum(1 for category, _ in items if category is None), 1)
+        self.assertTrue(any(qty > 1 for _, qty in items))
+        tx = self.c.execute(select(Transaction.amount).where(Transaction.id == "demo-card|demo-receipt")).scalar()
+        total, subtotal, tax = self.c.execute(select(RetailOrder.total, RetailOrder.subtotal, RetailOrder.tax)).fetchone()
+        self.assertAlmostEqual(-tx, total, places=2)
+        self.assertAlmostEqual(subtotal + tax, total, places=2)
 
     def test_the_brokerage_has_a_gain_a_loss_and_a_flat_day(self):
         demo.seed(self.c, today=date(2026, 10, 9))
