@@ -5,10 +5,10 @@ import type { Holding } from "$lib/components/investments/types";
 export const category = (name: string, extra: Partial<Category> = {}): Category => ({ name, path: [name], depth: 0, top: name, ...extra });
 
 export const tx = (extra: Partial<Tx> = {}): Tx => ({
-  id: "t1", account_id: "a1", account_name: "Checking", account_kind: "checking", posted: "2026-03-10", amount: -12.5,
+  id: "t1", account_id: "a1", account_name: "Checking", posted: "2026-03-10", amount: -12.5,
   payee: "Blue Bottle", description: "BLUE BOTTLE #123", category: "Coffee", category_source: null, confidence: null,
-  needs_review: 0, pending: 0, created_at: null, recurring_id: null, recurring_name: null, recurring_linked_by: null,
-  is_split: 0, splits: [], merchant_id: null, notes: null, bank_posted: null, bank_amount: null, retail: null, logo: null,
+  needs_review: 0, pending: 0, recurring_id: null, recurring_name: null, recurring_linked_by: null,
+  is_split: 0, splits: [], notes: null, bank_posted: null, bank_amount: null, retail: null, logo: null,
   logo_account: null, brand: null, source: "plaid", ...extra,
 });
 

@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
+vi.mock("$lib/api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock("$lib/webauthn", async (real) => ({ ...(await real<typeof import("$lib/webauthn")>()), unsupportedReason: vi.fn(), createPasskey: vi.fn() }));
 

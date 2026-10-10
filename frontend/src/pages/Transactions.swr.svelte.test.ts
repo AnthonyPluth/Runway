@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
+vi.mock("$lib/api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
 
 import { lock, lockNow } from "$lib/lock.svelte";

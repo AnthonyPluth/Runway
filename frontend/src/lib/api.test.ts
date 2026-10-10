@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, newPage } from "./api";
+import { api, ApiError, forgetReplies, newPage } from "./api";
 
 const reply = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -154,5 +154,79 @@ describe("the app lock", () => {
     Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
     await api("/api/lock/engage", { method: "POST", keepalive: true });
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ keepalive: true, headers: { "X-Runway-Hidden": "1", "X-Runway": "1" } });
+  });
+});
+
+describe("replies kept in memory (ETag)", () => {
+  const tagged = (body: unknown, etag: string) => Promise.resolve(new Response(JSON.stringify(body), { headers: { ETag: etag } }));
+  const unchanged = (etag: string) => Promise.resolve(new Response(null, { status: 304, headers: { ETag: etag } }));
+  const asked = (n: number) => (fetchMock.mock.calls[n][1].headers as Record<string, string>)["If-None-Match"];
+  afterEach(() => forgetReplies());
+
+  it("asks with the last reply's ETag, and uses its copy on a 304, a fresh object each time", async () => {
+    fetchMock.mockReturnValueOnce(tagged({ items: [1] }, '"a"'));
+    const first = await api<{ items: number[] }>("/api/x");
+    expect(asked(0)).toBeUndefined();
+    first.items.push(2);   // a page changing what it was given doesn't change the copy
+    fetchMock.mockReturnValueOnce(unchanged('"a"'));
+    expect(await api("/api/x")).toEqual({ items: [1] });
+    expect(asked(1)).toBe('"a"');
+    fetchMock.mockReturnValueOnce(tagged({ items: [3] }, 'W/"b"'));   // changed: the new reply, and its ETag next time
+    expect(await api("/api/x")).toEqual({ items: [3] });
+    fetchMock.mockReturnValueOnce(unchanged('W/"b"'));
+    expect(await api("/api/x")).toEqual({ items: [3] });
+    expect(asked(3)).toBe('W/"b"');
+  });
+
+  it("keeps a copy per address, of reads only, and none of a reply without an ETag or a refusal", async () => {
+    fetchMock.mockReturnValueOnce(tagged({ a: 1 }, '"a"'));
+    await api("/api/x?q=1");
+    fetchMock.mockReturnValue(reply({ ok: true }));
+    await api("/api/x", { method: "POST" });
+    await api("/api/x?q=2");
+    expect(fetchMock.mock.calls.slice(1).map(([, init]) => init.headers["If-None-Match"])).toEqual([undefined, undefined]);
+    await api("/api/x?q=1");   // its copy is gone: replaced by a reply without one
+    await api("/api/x?q=1");
+    expect(asked(4)).toBeUndefined();
+    fetchMock.mockReturnValueOnce(tagged({ a: 1 }, '"a"')).mockReturnValueOnce(reply({ error: "Nope" }, 500)).mockReturnValueOnce(reply({}));
+    await api("/api/y");
+    await expect(api("/api/y")).rejects.toMatchObject({ status: 500 });
+    await api("/api/y");
+    expect([asked(6), asked(7)]).toEqual(['"a"', undefined]);
+  });
+
+  it("forgets them all on signing out, a 401 and a 423", async () => {
+    vi.stubGlobal("location", { href: "", pathname: "/", hash: "" });
+    const forgets: [string, () => Promise<unknown>][] = [
+      ["signing out", async () => forgetReplies()],
+      ["a 401", () => { fetchMock.mockReturnValueOnce(reply({}, 401)); return api("/api/other").catch(() => { /* the refusal is what this test is after */ }); }],
+      ["a 423", () => { fetchMock.mockReturnValueOnce(reply({}, 423)); return api("/api/other", { keep: true }).catch(() => { /* the refusal is what this test is after */ }); }],
+    ];
+    for (const [what, forget] of forgets) {
+      fetchMock.mockReset();
+      fetchMock.mockReturnValueOnce(tagged({ a: 1 }, '"a"'));
+      await api("/api/x");
+      await forget();
+      fetchMock.mockReturnValueOnce(tagged({ a: 2 }, '"b"'));
+      expect(await api("/api/x"), what).toEqual({ a: 2 });
+      expect(fetchMock.mock.calls.at(-1)![1].headers["If-None-Match"], what).toBeUndefined();
+    }
+  });
+
+  it("asks again for the whole reply when a 304 answers a copy forgotten meanwhile", async () => {
+    fetchMock.mockReturnValueOnce(tagged({ a: 1 }, '"a"'));
+    await api("/api/x");
+    let release!: (r: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { release = r; })).mockReturnValueOnce(tagged({ a: 2 }, '"b"'));
+    const p = api("/api/x");
+    forgetReplies();   // signed out while it was on its way
+    release(new Response(null, { status: 304, headers: { ETag: '"a"' } }));
+    expect(await p).toEqual({ a: 2 });
+    expect([asked(1), asked(2)]).toEqual(['"a"', undefined]);
+  });
+
+  it("treats a 304 it didn't ask for as a failure", async () => {
+    fetchMock.mockReturnValueOnce(unchanged('"a"'));
+    await expect(api("/api/x")).rejects.toMatchObject({ status: 304 });
   });
 });

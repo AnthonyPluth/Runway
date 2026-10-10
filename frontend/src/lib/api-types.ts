@@ -285,16 +285,13 @@ export interface Tx {
   confidence: number | null;
   needs_review: number | null;
   pending: number | null;
-  created_at: string | null;
   recurring_id: number | null;
   is_split: number | null;
-  merchant_id: string | null;
   recurring_linked_by: "you" | "auto" | null;
   notes: string | null;
   bank_posted: string | null;
   bank_amount: number | null;
   account_name: string | null;
-  account_kind: string | null;
   recurring_name: string | null;
   splits: Split[];
   match?: SplitMatch;

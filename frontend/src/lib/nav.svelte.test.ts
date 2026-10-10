@@ -3,10 +3,10 @@ import { toast } from "svelte-sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "./types";
 
-vi.mock("./api", () => ({ api: vi.fn(), newPage: vi.fn(), session: {} }));
+vi.mock("./api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn(), session: {} }));
 vi.mock("svelte-sonner", () => ({ toast: { error: vi.fn() } }));
 
-import { api } from "./api";
+import { api, forgetReplies } from "./api";
 import { route } from "./app.svelte";
 import { balanceAsOf, currentPage, signOut, signedInUser, syncDot, syncStatus } from "./nav.svelte";
 
@@ -145,5 +145,15 @@ describe("signOut", () => {
     vi.mocked(api).mockResolvedValueOnce({});
     await signOut(new Event("click"));
     expect(localStorage.getItem("runway.lock")).toBeNull();
+  });
+
+  it("forgets the replies kept in memory once signed out", async () => {
+    vi.stubGlobal("location", { href: "" });
+    vi.mocked(api).mockRejectedValueOnce(new Error("Server down"));
+    await signOut(new Event("click"));
+    expect(forgetReplies).not.toHaveBeenCalled();
+    vi.mocked(api).mockResolvedValueOnce({});
+    await signOut(new Event("click"));
+    expect(forgetReplies).toHaveBeenCalledOnce();
   });
 });

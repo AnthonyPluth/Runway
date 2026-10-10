@@ -162,6 +162,7 @@
         "tests/test_categorize.py",
         "tests/test_churn_found.py",
         "tests/test_finnhub.py",
+        "tests/test_http_pinned.py",
         "tests/test_http_server.py",
         "tests/test_mcp.py",
         "tests/test_monitoring.py",
@@ -186,6 +187,7 @@
         "tests/test_applock.py",
         "tests/test_categorize.py",
         "tests/test_forecast_cycles.py",
+        "tests/test_http_pinned.py",
         "tests/test_http_server.py"
       ],
       "docs": [
@@ -369,6 +371,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
+        "contributing/development",
         "start/docker"
       ]
     },
@@ -388,6 +391,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
+        "contributing/development",
         "start/docker"
       ]
     },
@@ -870,6 +874,7 @@
       "tests": [
         "tests/test_bulk.py",
         "tests/test_categories_recurring_pinned.py",
+        "tests/test_http_pinned.py",
         "tests/test_security.py",
         "tests/test_server.py",
         "tests/test_server_errors.py"

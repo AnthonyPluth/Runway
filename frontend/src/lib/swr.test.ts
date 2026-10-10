@@ -110,3 +110,38 @@ describe("what empties it", () => {
     expect(staleAccounts()).toBeUndefined();
   });
 });
+
+describe("emptied together with the replies kept for 304s (lib/api.ts)", () => {
+  const tagged = () => Promise.resolve(new Response("[1]", { headers: { ETag: '"a"' } }));
+  // Both kept: a list remembered for instant paint, and a reply with its ETag (the next read asks with it).
+  const fill = async () => { remember("k", [1]); fetchMock.mockReturnValueOnce(tagged()); await api("/api/k", { keep: true }); };
+  const bothGone = async () => {
+    expect(recall("k")).toBeUndefined();
+    fetchMock.mockReturnValueOnce(tagged());
+    await api("/api/k", { keep: true });
+    expect(fetchMock.mock.calls.at(-1)![1].headers).not.toHaveProperty("If-None-Match");
+  };
+
+  it("on locking, signing out (the lock forgotten) and a 401", async () => {
+    await fill(); lock.phase = "unlocked";
+    lockNow(false);
+    await bothGone();
+    await fill();
+    forget();
+    await bothGone();
+    await fill();
+    fetchMock.mockReturnValueOnce(reply({}, 401));
+    await expect(api("/api/x", { background: true })).rejects.toBeInstanceOf(ApiError);
+    await bothGone();
+  });
+
+  it("but a change keeps the ETag replies (the server still checks each one), and a read revalidates with it", async () => {
+    await fill();
+    fetchMock.mockReturnValueOnce(reply({ ok: true }));
+    await api("/api/x", { method: "POST", body: {} });
+    expect(recall("k")).toBeUndefined();
+    fetchMock.mockReturnValueOnce(Promise.resolve(new Response(null, { status: 304, headers: { ETag: '"a"' } })));
+    expect(await api("/api/k", { keep: true })).toEqual([1]);
+    expect(fetchMock.mock.calls.at(-1)![1].headers).toHaveProperty("If-None-Match", '"a"');
+  });
+});

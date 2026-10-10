@@ -3,6 +3,7 @@ that isn't JSON (Response) and how a route takes its body, reading what a reques
 the signed-in person for this request, request references, and which host names Runway answers to."""
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import os
 import re
@@ -58,6 +59,21 @@ def header_value(v: str) -> str:
     if "\r" in v or "\n" in v:
         raise ValueError("A response header can't contain a line break")
     return v
+
+
+def body_etag(body: bytes) -> str:
+    """The ETag of a reply: a hash of its bytes, so any change to what it says (the day rolling over included) is a new
+    one. Says nothing the reply doesn't, and only to whoever was sent the reply."""
+    return '"' + hashlib.sha256(body).hexdigest() + '"'
+
+
+def etag_matches(if_none_match: str | None, etag: str) -> bool:
+    """Whether a request's If-None-Match names this ETag: one of a list, weak (W/"…") or strong alike, since a proxy
+    that compresses a reply (Cloudflare) may weaken its ETag; or `*`. Weak comparison, as RFC 9110 has it for GET."""
+    if not if_none_match:
+        return False
+    want = etag.removeprefix("W/")
+    return any(t == "*" or t.removeprefix("W/") == want for t in (s.strip() for s in if_none_match.split(",")))
 
 
 def download(data: bytes, content_type: str, filename: str, sent: Callable[[], None] | None = None) -> Response:

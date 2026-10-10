@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -101,9 +102,43 @@ class Pinned(unittest.TestCase):
     def test_a_json_answer(self):
         code, heads, data = self.send("GET", "/api/accounts")
         self.assertEqual((code, json.loads(data)), (200, []))
-        self.assertEqual(heads, json_answer(len(data)))
+        self.assertEqual(heads, json_answer(len(data), ("ETag", common.body_etag(data))))
         self.assertJson(self.send("GET", "/api/nothing-here"), 404, {"error": "Not found"})
         self.assertJson(self.api("POST", "/api/nothing-here", b"{}"), 404, {"error": "Not found"})
+
+    def test_a_json_read_not_modified(self):
+        """A read of the API carries its reply's hash as an ETag; asked again with it (weak or strong, alone or in a
+        list), an unchanged reply is a 304 with no body, still no-store. Any change to the reply is a new ETag."""
+        _code, heads, data = self.send("GET", "/api/categories")
+        etag = dict(heads)["ETag"]
+        self.assertRegex(etag, r'^"[0-9a-f]{64}"$')
+        not_modified = [("Server", "Runway "), ("ETag", etag), ("Cache-Control", "no-store"), *security()]
+        for asked in (etag, "W/" + etag, f'"other", {etag}', "*"):
+            with self.subTest(asked=asked):
+                self.assertEqual(self.send("GET", "/api/categories", headers={"If-None-Match": asked}), (304, not_modified, b""))
+        for asked in ('"other"', etag[:-2] + '"', etag.strip('"')):   # not this reply's
+            with self.subTest(asked=asked):
+                self.assertEqual(self.send("GET", "/api/categories", headers={"If-None-Match": asked})[::2], (200, data))
+        _code, heads, before = self.send("GET", "/api/state")
+        with db.session() as c:   # any change: a new reply, and a new ETag
+            db.set_setting(c, sk.HORIZON_DAYS, "120")
+        self.addCleanup(self.forget_horizon)
+        code, heads2, after = self.send("GET", "/api/state", headers={"If-None-Match": dict(heads)["ETag"]})
+        self.assertEqual(code, 200)
+        self.assertNotEqual(after, before)
+        self.assertNotEqual(dict(heads2)["ETag"], dict(heads)["ETag"])
+        self.assertEqual(self.send("GET", "/api/state", headers={"If-None-Match": dict(heads2)["ETag"]})[::2], (304, b""))
+        self.assertEqual(self.api("POST", "/api/nothing-here", b"{}", {"If-None-Match": "*"})[0], 404)   # only reads
+        # The day rolling over, with nothing else changed, is a new reply too.
+        freeze_today(self, date(2026, 9, 30))
+        _code, heads, first = self.send("GET", "/api/overview")
+        frozen = sys.modules["runway.server.api.state"].date   # (freeze_today's date: the next day, from now on)
+        with mock.patch.object(frozen, "today", classmethod(lambda _cls: date(2026, 10, 1))):
+            code, heads2, second = self.send("GET", "/api/overview", headers={"If-None-Match": dict(heads)["ETag"]})
+        self.assertEqual(code, 200)
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(dict(heads2)["ETag"], dict(heads)["ETag"])
+        self.assertEqual(json.loads(second)["today"], "2026-10-01")
 
     def test_a_backup_download(self):
         freeze_today(self)      # the file is named after today
@@ -175,13 +210,18 @@ class Pinned(unittest.TestCase):
                                  ("Content-Security-Policy", "default-src 'none'; sandbox")])
         code, heads, data = self.send("GET", "/api/merchants/pin%3Apng/logo", headers={"If-None-Match": etag})
         self.assertEqual((code, data), (304, b""))
-        self.assertEqual(heads, [("Server", "Runway "), ("ETag", etag), *security()])
+        self.assertEqual(heads, [("Server", "Runway "), ("ETag", etag), ("Cache-Control", "private, no-cache"), *security()])
+        self.assertEqual(self.send("GET", "/api/merchants/pin%3Apng/logo", headers={"If-None-Match": "W/" + etag})[0], 304)
         self.assertEqual(self.send("HEAD", "/api/merchants/pin%3Apng/logo")[2], b"")
         for path in ("/api/merchants/pin%3Asvg/logo", "/api/merchants/nope/logo"):
             code, heads, data = self.send("GET", path)
             self.assertEqual((code, data), (404, b""))
             self.assertEqual(heads, [("Server", "Runway "), ("Content-Type", "text/plain"), ("Content-Length", "0"),
                                      ("Cache-Control", "no-store"), *security()])
+
+    def forget_horizon(self):
+        with db.session() as c:
+            db.set_setting(c, sk.HORIZON_DAYS, None)
 
     def forget_merchants(self):
         with db.session() as c:
