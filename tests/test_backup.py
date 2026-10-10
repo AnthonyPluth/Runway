@@ -17,8 +17,8 @@ from runway.storage import backup, db
 from runway.domain import networth
 from runway import server
 from runway.storage import settings_keys as sk
-from runway.storage.models import (Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken,
-                                   PlaidItem, Rule, Transaction)
+from runway.storage.models import (Account, AuthSession, Budget, Category, MonthBudget, OAuthClient, OAuthGrant,
+                                   OAuthToken, PlaidItem, Rule, Transaction)
 from tests.shared import add_database, fetch, own_database, serve
 
 db_session = db.session
@@ -100,6 +100,25 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(self.rows_of(dst), self.rows_of(src))
         src.close(); dst.close()
 
+    def test_a_budgets_own_months_travel(self):
+        src = db.connect(self.a)
+        src.execute(insert(Budget), [{"category": "Groceries", "amount": 600.0}, {"category": "Shopping", "amount": 300.0}])
+        src.execute(insert(MonthBudget), [{"category": "Shopping", "month": "2026-12", "amount": 450.0},
+                                          {"category": "Shopping", "month": "2026-07", "amount": 0.0},      # budgets nothing that month
+                                          {"category": "Groceries", "month": "2026-12", "amount": 12.34}])  # cents
+        src.commit()
+        mine = sorted(map(tuple, src.execute(select(MonthBudget.category, MonthBudget.month, MonthBudget.amount))))
+        data = backup.load(backup.dump(src))
+        self.assertEqual(sorted(map(tuple, data["tables"]["budget_months"]["rows"])), mine)   # it is in the file
+        dst = db.connect(self.b)
+        dst.execute(insert(Budget).values(category="Old", amount=1.0))   # replaced, not merged
+        dst.execute(insert(MonthBudget).values(category="Old", month="2026-01", amount=5.0))
+        backup.restore(dst, data)
+        dst.commit()
+        self.assertEqual(sorted(map(tuple, dst.execute(select(MonthBudget.category, MonthBudget.month, MonthBudget.amount)))), mine)
+        self.assertEqual(len(mine), 3)
+        src.close(); dst.close()
+
     def test_an_older_backup_round_trips_through_the_migrations(self):
         from alembic import command
         with db.engine(self.a).begin() as c:
@@ -112,7 +131,9 @@ class BackupTests(unittest.TestCase):
         dst = db.connect(self.b)
         backup.restore(dst, data)
         dst.commit()
-        self.assertEqual(self.rows_of(dst), self.rows_of(src))
+        then, now = self.rows_of(src), self.rows_of(dst)
+        self.assertEqual({t: rows for t, rows in now.items() if t in then}, then)
+        self.assertEqual({t: rows for t, rows in now.items() if t not in then}, {"budget_months": []})   # tables added since: empty
         if db.using_postgres():   # the database it was brought up to date in is gone, never committed
             self.assertEqual(dst.sa.exec_driver_sql("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'runway_restore_%%'").scalar(), 0)
         src.close(); dst.close()

@@ -47,6 +47,8 @@ export interface BrandChoice {
 /**
  * A category's month on the Budget page: what's been spent (its subcategories included) against its budget, if it
  * has one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come.
+ * `budget` is the month's: its own amount (`month_budget`, set for that month only) when it has one, else the
+ * budget's usual amount (`usual_budget`, every other month's).
  */
 export interface BudgetCategory {
   name: string;
@@ -56,6 +58,8 @@ export interface BudgetCategory {
   top: string;
   has_children: boolean;
   budget: number | null;
+  usual_budget: number | null;
+  month_budget: number | null;
   pay_with: string | null;
   rollover_from: string | null;
   carried: number;
@@ -87,13 +91,40 @@ export interface BudgetSaved {
 
 /**
  * POST /api/budget: a category's budget (an empty or zero amount removes it), or whether it rolls over, or (kept
- * for a release) the account it's paid with.
+ * for a release) the account it's paid with. With `month` ("YYYY-MM"), the budget's own amount for that month only
+ * (it needs a budget already): an empty amount takes the month back to the usual amount, 0 budgets nothing then.
  */
 export interface BudgetSet {
   category: string;
   amount?: number | string | null;
+  month?: string;
   rollover?: boolean;
   pay_with?: string | null;
+}
+
+/**
+ * A suggested monthly budget for a category (domain/budget_suggest.py): the larger of its typical month and the
+ * recurring payments coming in the budget's month, rounded up. `budget` is the category's budget now, if it has one.
+ */
+export interface BudgetSuggestion {
+  category: string;
+  suggested: number;
+  typical: number;
+  recurring: number;
+  budget: number | null;
+}
+
+/**
+ * GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history
+ * looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the
+ * month asked for when it's still to come, else next month; never past the forecast's reach).
+ */
+export interface BudgetSuggestions {
+  months: number;
+  first: string | null;
+  last: string | null;
+  recurring_month: string;
+  suggestions: BudgetSuggestion[];
 }
 
 /** The latest card statement you entered, whether a newer one should have been by now, and when the next closes. */
@@ -257,4 +288,5 @@ export interface Endpoints {
   "DELETE /api/transactions/{id}": { body: never; reply: Ok };
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
+  "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
 }

@@ -133,6 +133,10 @@ class OIDCTests(unittest.TestCase):
         self.assertEqual((status, loc), (302, "/auth/login?next=%2Fplaid%2Foauth%3Foauth_state_id%3Dabc-123"))
         self.assertEqual(self.req("/page.css")[0], 200)
         self.assertEqual(self.req("/healthz")[0], 200)
+        # Geist is the sign-in pages' font and is public; Inter is the app's and needs a session, like the app's page
+        # (the only page that preloads it, and itself never served signed out).
+        self.assertEqual(self.req("/fonts/Geist-Variable.woff2")[0], 200)
+        self.assertEqual(self.req("/fonts/Inter-latin-Variable.woff2")[:2], (302, "/auth/login?next=%2Ffonts%2FInter-latin-Variable.woff2"))
 
     def test_full_sign_in_and_sign_out(self):
         status, loc, ck, _ = self.sign_in()

@@ -4,14 +4,18 @@
   import { catLook } from "$lib/categories.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
+  import { Button } from "$lib/components/ui/button";
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
   import Repeat from "@lucide/svelte/icons/repeat";
+  import Calendar1 from "@lucide/svelte/icons/calendar-1";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import { cn } from "$lib/utils";
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
   import { act } from "$lib/act";
+  import { undoable } from "$lib/undo";
 
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
   // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
@@ -19,7 +23,8 @@
   // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji. What's still
   // expected this month (recurring payments that haven't come yet, `expected`) is the bar's lighter part after what's spent.
   // `income`: an income category, whose budget is what's expected to come in and `spent` what has. More is good: its
-  // bar is green, going over isn't a warning, and it has no rollover or card.
+  // bar is green, going over isn't a warning, and it has no rollover or card. Whether a budget's left rolls over is
+  // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
   let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; income?: boolean; pace: number; payAccounts: PayAccount[];
     account?: string | null; onsave: (category: string, amount: string) => void; onchanged: () => void;
@@ -44,11 +49,65 @@
   // A subcategory has no bar: its figure turns red when it's over (bold), or will be with what's still coming.
   const subNote = $derived(!sub || income ? "" : over ? `${money(c.spent - avail!)} over` : overSoon ? `${money(c.spent + expected - avail!)} over with what’s coming` : "");
 
+  // Rollover's on/off lives in the row's ⋯ menu; the row itself only says "Rolls over" (blue) when the budget's left
+  // carries into next month. An income category and a subcategory have no rollover.
+  let menu = $state(false);
+  const canRoll = $derived(budgets && c.budget != null && !sub && !income);
+
   // The category name and its spent amount open Transactions showing exactly what adds up to it (and what's still
   // expected, in its Upcoming).
   function open(e: MouseEvent) {
     e.preventDefault();
     showTransactions({ category: c.name, month, scope: "budget" });
+  }
+
+  // A month of its own: a budget's amount for the month on screen only (December's gifts), every other month keeping
+  // the usual one. The calendar button beside the amount switches the box to this month's (or, once the month has its
+  // own, back to the usual amount); while it's on, a change to the box is this month's alone. An empty box takes the
+  // month back to the usual amount.
+  let choosingFor = $state<string | null>(null);   // the month being given its own amount (not another one shown later)
+  const choosing = $derived(choosingFor === month);
+  let box = $state<HTMLInputElement>();
+  const ownMonth = $derived(c.month_budget != null);
+  const monthOnly = $derived(ownMonth || choosing);
+  const usual = $derived(c.usual_budget ?? c.budget);
+  const monthName = $derived(monthShort(month, true));
+  async function saveMonth(amount: string) {
+    if (!amount && ownMonth) { await resetMonth(); return; }
+    await act(async () => {
+      const r = await apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: c.name, month, amount } });
+      const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)} in ${monthName}`);
+      toast.success(amount ? [`${c.name}: ${fmt0(Number(amount))} in ${monthName} only`, ...raised].join(" · ")
+        : `${c.name} is back to ${fmt0(usual)} in ${monthName}`);
+    });
+    choosingFor = null;
+    onchanged();   // the page reloads either way, so a box whose save failed shows what's saved again
+  }
+  // The month goes back to the usual amount (the "Reset to usual" button, the calendar button once the month has its own,
+  // or an empty box). The toast's Undo sets the month's own amount again, exactly as it was (0 included), for the month
+  // and category it was taken from, whatever is on screen by then. A failed reset leaves the month's amount as it is.
+  let resetting = $state(false);
+  async function resetMonth() {
+    const [name, was, at, label, back] = [c.name, c.month_budget, month, monthName, usual];
+    const post = (amount: string) => apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: name, month: at, amount } });
+    const done = await act(async () => {
+      await post("");
+      if (was != null) {
+        undoable(`${name} is back to ${fmt0(back)} in ${label}`, async () => {
+          await post(String(was));
+          onchanged();
+          return `${name}: ${money(was)} in ${label} only`;
+        });
+      }
+    }, { busy: (on) => (resetting = on) });
+    if (done) choosingFor = null;
+    onchanged();   // the page reloads either way, so a failed reset shows what's saved again
+  }
+  function toggleMonth() {
+    if (ownMonth) { resetMonth(); return; }
+    const on = !choosing;
+    choosingFor = on ? month : null;
+    if (on) box?.focus();
   }
 
   // Rolling over: what's left at the end of a month adds to the next, starting this month.
@@ -71,14 +130,11 @@
     </span>
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
-    {#if budgets && c.budget != null && !sub && !income}
-      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
-        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
-          : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-2.5 text-xs sm:py-0.5 whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-          c.rollover_from ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
-        <Repeat class="size-3" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
-      </button>
+    {#if canRoll && c.rollover_from}
+      <span class="inline-flex items-center gap-1 rounded-md px-1.5 text-xs whitespace-nowrap text-primary"
+        title={`What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}); the row's ⋯ menu turns it off`}>
+        <Repeat class="size-3" aria-hidden="true" />Rolls over
+      </span>
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} class={cn("hover:underline", sub && warnOver && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
@@ -88,10 +144,22 @@
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-1.5 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
         <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : income ? "Expected" : "Budget") : ""}
-          aria-label={`Budget for ${c.name}`} onchange={(e) => onsave(c.name, e.currentTarget.value)}
+          bind:this={box} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
+          onchange={(e) => (monthOnly ? saveMonth(e.currentTarget.value) : onsave(c.name, e.currentTarget.value))}
           class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
-            c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]")} />
+            c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]", monthOnly && "text-primary")} />
       </span>
+      {#if budgets && c.budget != null}
+        <button type="button" aria-pressed={monthOnly} onclick={toggleMonth}
+          aria-label={ownMonth ? `Use the usual ${fmt0(usual)} for ${c.name} in ${monthName}` : `A different budget for ${c.name} in ${monthName} only`}
+          title={ownMonth ? `${monthName} has its own amount. Click to use the usual ${fmt0(usual)} again.`
+            : `A different amount for ${monthName} only; other months keep ${fmt0(usual)}`}
+          class={cn("-ml-1 inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted focus-visible:bg-muted focus-visible:outline-none sm:size-7",
+            monthOnly ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
+          <Calendar1 class="size-3.5" aria-hidden="true" />
+        </button>
+      {:else if budgets}<span class="-ml-1 size-9 shrink-0 sm:size-7" aria-hidden="true"></span><!-- keeps the boxes in line -->
+      {/if}
     </span>
   </div>
   {#if c.budget != null && !sub}
@@ -124,9 +192,38 @@
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
         {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
+      {#if canRoll}
+        <Button variant="ghost" size="icon" class={cn("-my-2 -mr-1.5 -ml-1.5 size-8 shrink-0 text-muted-foreground hover:text-foreground focus-visible:opacity-100",
+          menu ? "opacity-100" : "hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}
+          aria-label={`Actions for ${c.name}`} aria-expanded={menu} onclick={() => (menu = !menu)}><Ellipsis /></Button>
+      {/if}
+    </div>
+  {/if}
+  {#if menu && canRoll}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 pt-1 pb-1 sm:pl-[38px]">
+      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
+        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
+          : "Carry what's left at the end of each month into the next"}
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+          c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
+        <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
+      </button>
+      <Button variant="link" size="sm" class="h-auto justify-start p-0" onclick={() => (menu = false)}>Done</Button>
     </div>
   {/if}
   {#if c.budget != null && carried > 0.005}
     <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
+  {/if}
+  {#if budgets && c.budget != null && monthOnly}
+    <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")} data-month-note>
+      {ownMonth ? `${monthName} only` : `Changing ${monthName} only`} · {money(usual)} other months
+      {#if ownMonth}
+        <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
+        <button type="button" onclick={resetMonth} disabled={resetting} data-month-reset
+          aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
+          class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
+          Reset to usual</button>
+      {/if}
+    </p>
   {/if}
 </div>

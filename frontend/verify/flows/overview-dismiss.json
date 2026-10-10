@@ -1,0 +1,17 @@
+{
+  "name": "overview-dismiss",
+  "page": "overview",
+  "steps": [
+    { "wait_for": "[aria-label^='Dismiss ']" },
+    { "press": { "selector": "[aria-label^='Dismiss ']", "key": "Shift" } },
+    { "screenshot": "alert" },
+    { "click": "[aria-label^='Dismiss ']" },
+    { "wait_for": "button:text-is('Show dismissed')" },
+    { "screenshot": "dismissed" },
+    { "click": "button:text-is('Show dismissed')" },
+    { "wait_for": "[aria-label^='Show again ']" },
+    { "screenshot": "shown-again" },
+    { "click": "[aria-label^='Show again ']" },
+    { "wait_for": "[aria-label^='Dismiss ']" }
+  ]
+}

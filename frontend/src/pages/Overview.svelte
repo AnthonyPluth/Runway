@@ -2,12 +2,19 @@
   // Survives redraws (a sync, an edited amount), like the classic app.
   let horizon: number | null = null;
   let comingAll = $state(false);   // Coming up's "Show all"
+  // Alerts put away on Needs attention, by their message: one stays hidden while its message reads the same, so a
+  // warning worded differently (or one you ask to see again) comes back. Saved with the other settings.
+  let dismissed = $state<string[]>([]);
+  let showDismissed = $state(false);
+  const DISMISSED_MAX = 50;   // the most the server keeps
   // The forecast last on screen, drawn at once when the page is drawn afresh (after a change) until the new one arrives.
   let last: { fc: Overview; days: number } | null = null;
 </script>
 
 <script lang="ts">
+  import { act } from "$lib/act";
   import { api } from "$lib/api";
+  import { overviewFor, takeEarlyOverview } from "$lib/prefetch";
   import { app, reload } from "$lib/app.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
@@ -22,6 +29,7 @@
   import { fmt, fmt0, fmt0Down, nb, parseDate, relDay } from "$lib/format";
   import { balanceAsOf } from "$lib/nav.svelte";
   import type { Overview } from "$lib/types";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -40,14 +48,31 @@
   let shown = $state.raw(last);
   let error = $state<Error | null>(null);
   let seq = 0;
+  // The app's first draw may use the forecast main.ts asked for while the state was loading (lib/prefetch.ts).
+  let early = takeEarlyOverview();
   function load(d: number) {
     const n = ++seq;
-    api<Overview>(`/api/overview?days=${d}`).then(
-      (fc) => { if (n === seq) { shown = last = { fc, days: d }; error = null; } },
+    const reply = overviewFor(d, early);
+    early = null;   // only the first request; every later one asks the server
+    reply.then(
+      (fc) => { if (n === seq) { shown = last = { fc, days: d }; dismissed = fc.dismissed_warnings ?? []; showDismissed = false; error = null; } },
       (e: Error) => { if (n !== seq) return; if (shown) toast.error(e.message); else error = e; });
   }
   load(initial);
   function setDays(v: string) { days = horizon = Number(v); load(days); }
+
+  // An alert is put away by its message, so one worded differently later (the same link, a new problem) shows again.
+  const remember = (list: string[]) => api("/api/settings", { method: "POST", body: { overview_warnings_dismissed: list } });
+  async function dismiss(message: string) {
+    const next = [...dismissed, message].slice(-DISMISSED_MAX);   // the oldest go first, so the server's limit never turns Dismiss down
+    if (!(await act(async () => { await remember(next); dismissed = next; }))) return;   // the alert stays up if it didn't save
+    undoable("Alert dismissed", () => restore(message));
+  }
+  async function restore(message: string) {
+    const next = dismissed.filter((m) => m !== message);
+    await remember(next);   // a failure throws, so Undo's toast says what went wrong
+    dismissed = next;
+  }
 
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
@@ -86,6 +111,19 @@
     </a>
 {/snippet}
 
+<!-- One that can be put away, by its message. `held` is one you've put away: shown again so it can be brought back. -->
+{#snippet warn(text: string, href: string, held: boolean)}
+    <div class="cell hover:bg-white/4" class:opacity-60={held}>
+      <a href={`/${href}`} class="flex min-w-0 flex-1 items-center gap-3">
+        <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+        <span class="min-w-0 flex-1 text-sm">{text}</span>
+        <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </a>
+      <Button variant="ghost" size="sm" class="shrink-0 text-muted-foreground" aria-label={`${held ? "Show again" : "Dismiss"} ${text}`}
+        onclick={() => (held ? act(() => restore(text)) : dismiss(text))}>{held ? "Show again" : "Dismiss"}</Button>
+    </div>
+{/snippet}
+
 {#if !connected}
   <SetupChecklist welcome />
 {:else}
@@ -107,7 +145,11 @@
     {@const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date)}
     {@const asOf = balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok)}
     {@const note = balanceNote(asOf?.text, fc.accounts.reduce((s, a) => s + (a.pending ?? 0), 0))}
-    {@const alerts = fc.warning_links.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
+    {@const gone = new Set(dismissed)}
+    {@const open = fc.warning_links.filter((w) => !gone.has(w.text))}
+    {@const held = fc.warning_links.filter((w) => gone.has(w.text))}
+    {@const alerts = open.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
+    {@const rows = showDismissed ? [...open, ...held] : open}
 
     <header class="mb-5">
       <div class="text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
@@ -118,11 +160,22 @@
       </div>
     </header>
 
-    {#if alerts}
+    {#if alerts || held.length}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
-        {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
+        {#snippet action()}
+          {#if held.length && (alerts || showDismissed)}
+            <button type="button" class="text-[13px] text-primary" onclick={() => (showDismissed = !showDismissed)}>
+              {showDismissed ? "Hide dismissed" : "Show dismissed"}
+            </button>
+          {/if}
+        {/snippet}
+        {#each rows as w (w.text)}{@render warn(w.text, w.href, gone.has(w.text))}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} today={fc.today} />{/each}
         {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your forecast account.", "/#overview?forecast")}{/if}
+        {#if held.length && !alerts && !showDismissed}
+          <!-- Every alert here is put away: the way back, so the group isn't left empty. -->
+          <button type="button" class="cell" onclick={() => (showDismissed = true)}>Show dismissed</button>
+        {/if}
       </Group>
     {/if}
     {#if setupLeft}<SetupChecklist />{/if}

@@ -97,6 +97,9 @@ def api_overview(conn, q, _b):
     fc, moving = forecast.project(conn, date.today(), horizon)
     forecast.move_old_keys(conn, moving)   # card payment edits saved under their due date's key, applied already
     fc["missed"] = recurring.missed(conn)
+    # The alerts put away on Overview, by their message: one stays hidden while its message reads the same, so a new
+    # problem worded differently (or at another link) shows again.
+    fc["dismissed_warnings"] = json.loads(db.get_setting(conn, sk.OVERVIEW_WARNINGS_DISMISSED) or "[]")
     # a recurring item wears its logo: the one you chose for it, else its last matched transaction's
     ids = sorted({e["recurring_id"] for e in fc["events"] + fc["charges"] if e.get("recurring_id")})
     if ids:
@@ -157,6 +160,14 @@ def setup_steps(conn, settings: dict | None = None, connected: bool | None = Non
     }
 
 
+def _dismissed_warnings(v) -> list[str]:
+    """The Overview's alerts put away, as a list of their messages: a warning is a sentence or two, and there are never
+    many at once. Each message stays hidden while it reads the same, so a warning worded differently shows again."""
+    if not isinstance(v, list) or len(v) > 50 or any(not isinstance(m, str) or len(m) > 400 for m in v):
+        raise ApiError('Send "overview_warnings_dismissed" as a list of messages')
+    return v
+
+
 def api_settings(conn, _q, body):
     # Checked before anything is saved.
     days = None
@@ -164,6 +175,9 @@ def api_settings(conn, _q, body):
         if body["horizon_days"] in (None, ""):
             raise ApiError("Enter the number of days")
         days = clamped_int(body["horizon_days"], "number of days", 90, 14, 365)
+    dismissed = None
+    if "overview_warnings_dismissed" in body:
+        dismissed = _dismissed_warnings(body.get("overview_warnings_dismissed"))
     if "openrouter_api_key" in body:
         key = text(body.get("openrouter_api_key"), "openrouter_api_key").strip()
         db.set_setting(conn, sk.OPENROUTER_API_KEY, key or None)
@@ -186,6 +200,8 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, sk.CHURN_AI_WEB, str(validate.flag(body.get("churn_ai_web"))))
     if days is not None:
         db.set_setting(conn, sk.HORIZON_DAYS, str(days))
+    if dismissed is not None:
+        db.set_setting(conn, sk.OVERVIEW_WARNINGS_DISMISSED, json.dumps(dismissed) if dismissed else None)
     if "setup_dismissed" in body:
         db.set_setting(conn, sk.SETUP_DISMISSED, "1" if validate.on(body.get("setup_dismissed")) else None)
     return {"ok": True}

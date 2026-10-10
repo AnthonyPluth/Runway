@@ -750,6 +750,19 @@ describe("Recurring page", () => {
       expect(ends).toHaveValue("");
     });
 
+    it("saves the category its linked transactions take when you pick one, and shows the one it has", async () => {
+      serve([item({ category: "Housing" })], [], { "/api/recurring/1": { linked: 0 }, "/api/categories": [
+        { name: "Housing", path: ["Housing"], depth: 0, top: "Housing" }, { name: "Utilities", path: ["Utilities"], depth: 0, top: "Utilities" }] });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      const pick = await screen.findByRole("combobox", { name: "Category" });
+      expect(pick).toHaveTextContent("Housing");
+      await userEvent.click(pick);
+      await userEvent.click(await screen.findByRole("option", { name: "Utilities" }));
+      await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(1));
+      expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { category: "Utilities" } });
+    });
+
     it("can follow the average of the last 3 payments instead of a fixed amount the payments missed", async () => {
       serve([item({ amount: -80, suggested_amount: -87.4 })], [], { "/api/recurring/1": { linked: 0 } });
       render(Recurring);

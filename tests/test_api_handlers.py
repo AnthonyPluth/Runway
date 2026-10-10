@@ -8,8 +8,9 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway.domain import categories, demo, forecast, splits
 from runway.storage import db
+from runway.storage import settings_keys as sk
 from runway.server import sync
-from runway.server.api import accounts, budget, notifications, state, transactions
+from runway.server.api import accounts, budget, connections, notifications, state, transactions
 from runway.server.common import ApiError
 from runway.storage.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction,
                                    LoanTerms, ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring,
@@ -43,11 +44,11 @@ class HandlerTests(DbCase):
                        .values(plaid_account_id="pa1", display_name="Zed Card"))
         self.c.execute(insert(Account).values(id="gone", name="Aardvark", kind="checking", hidden=1))
         out = accounts.api_accounts(self.c, {}, {})
-        self.assertEqual([a["id"] for a in out], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings", "gone"])
+        self.assertEqual([a["id"] for a in out], ["demo-checking", "demo-travel", "demo-card", "demo-mortgage", "demo-savings", "gone"])
         cols = [c.name for c in db.schema.accounts.columns]
         self.assertEqual(list(out[0]), [*cols, "plaid_link"])
         self.assertIsNone(out[0]["plaid_link"])
-        self.assertEqual(out[1]["plaid_link"], {"institution": "Card Bank", "mask": "1234", "transactions": True,
+        self.assertEqual(out[2]["plaid_link"], {"institution": "Card Bank", "mask": "1234", "transactions": True,
                                                 "closed": "2026-09-01", "due": "2026-09-25", "statement_note": None})
 
     def test_account_update(self):
@@ -189,9 +190,9 @@ class HandlerTests(DbCase):
     def test_overview(self):
         self.c.execute(update(Account).where(Account.id == "demo-savings").values(display_name="A Savings"))
         fc = state.api_overview(self.c, q(days=30), {})
-        self.assertEqual([a["id"] for a in fc["all_accounts"]], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings"])
+        self.assertEqual([a["id"] for a in fc["all_accounts"]], ["demo-checking", "demo-card", "demo-travel", "demo-mortgage", "demo-savings"])
         self.assertEqual(list(fc["all_accounts"][0]), ["id", "name", "kind", "balance", "balance_date", "owed_positive", "hidden"])
-        self.assertEqual(fc["all_accounts"][3]["name"], "A Savings")
+        self.assertEqual(fc["all_accounts"][4]["name"], "A Savings")
         rec = [e for e in fc["events"] if e.get("recurring_id")]
         self.assertTrue(rec)
         self.assertTrue(all("logo" in e for e in rec))
@@ -232,6 +233,18 @@ class HandlerTests(DbCase):
         state.api_settings(self.c, {}, {"primary_account": ""})
         self.assertIsNone(db.get_setting(self.c, "primary_account"))
 
+    def test_settings_put_away_alerts(self):
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], [])
+        msgs = [*fc["warnings"][:1], "An alert the sample data doesn’t show"]
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": msgs})
+        fc = state.api_overview(self.c, q(days=30), {})
+        self.assertEqual(fc["dismissed_warnings"], msgs)
+        self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])   # put away, not taken away
+        state.api_settings(self.c, {}, {"overview_warnings_dismissed": []})
+        self.assertEqual(state.api_overview(self.c, q(days=30), {})["dismissed_warnings"], [])
+        self.assertIsNone(db.get_setting(self.c, sk.OVERVIEW_WARNINGS_DISMISSED))   # an empty list puts the key away too
+
 
     def test_budget(self):
         self.c.execute(insert(Account).values(id="c2", name="Zeta", display_name="Alpha Card", kind="credit"))
@@ -240,6 +253,7 @@ class HandlerTests(DbCase):
         b = budget.api_budget(self.c, {}, {})
         self.assertEqual(b["pay_accounts"], [{"id": "c2", "name": "Alpha Card", "kind": "credit"},
                                              {"id": "demo-card", "name": "Rewards Visa", "kind": "credit"},
+                                             {"id": "demo-travel", "name": "Travel Mastercard", "kind": "credit"},
                                              {"id": "demo-checking", "name": "Everyday Checking", "kind": "checking"},
                                              {"id": "demo-savings", "name": "High-Yield Savings", "kind": "savings"}])
         groceries = sum(r[0] for r in self.c.execute(
@@ -530,6 +544,43 @@ class HandlerTests(DbCase):
                 mock.patch.object(sync, "refresh_prices"):
             sync.run_sync()
         self.assertEqual(state.api_state(self.c, {}, {})["sync_warnings"], [])
+
+    def test_simplefin_failing_doesnt_stop_plaid(self):
+        db.set_setting(self.c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
+        db.set_setting(self.c, "last_sync_ok", None)
+        self.c.commit()
+        down = sync.simplefin.SimpleFinError("Couldn't reach SimpleFIN: timed out")
+        quiet = (mock.patch.object(sync.merchants, "fetch_logos"), mock.patch.object(sync.realie, "refresh_due"),
+                 mock.patch.object(sync, "refresh_prices"))
+        with mock.patch.object(sync.simplefin, "sync", side_effect=down), \
+                mock.patch.object(sync, "plaid_banks", return_value=True), \
+                mock.patch.object(sync.plaidbank, "sync_all", return_value={"items": 1, "new": ["t1"], "errors": []}) as pb, \
+                mock.patch.object(sync.categorize, "categorize", return_value={}) as cat, quiet[0], quiet[1], quiet[2]:
+            with self.assertRaises(ApiError) as cm:
+                sync.run_sync()
+            pb.assert_called_once()                       # Plaid was asked, and what it brought in was categorized
+            self.assertEqual(cat.call_args[0][1], ["t1"])
+            self.assertEqual(cm.exception.status, 502)
+            # Plaid has had its turn today: another Sync tries SimpleFIN again, without asking Plaid twice.
+            with self.assertRaises(ApiError):
+                sync.run_sync()
+            pb.assert_called_once()
+            with self.assertRaises(ApiError):   # the Sync button asks Plaid every time
+                sync.run_sync(ask_plaid=True)
+            self.assertEqual(pb.call_count, 2)
+            pb.return_value = {"items": 1, "new": [], "errors": ["Chase: Plaid: the login needs renewing"]}
+            with self.assertRaises(ApiError) as cm:   # what Plaid said goes with the failure, so it isn't lost
+                sync.run_sync(ask_plaid=True)
+            self.assertIn("Chase: Plaid: the login needs renewing", str(cm.exception))
+        log = self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
+        self.assertEqual(tuple(log), (0, "Couldn't reach SimpleFIN: timed out; Chase: Plaid: the login needs renewing"))
+        self.assertIsNone(db.get_setting(self.c, "last_sync_ok"))   # still a failed sync, so SimpleFIN is retried
+        self.assertTrue(db.get_setting(self.c, "last_plaid_bank_sync"))
+
+    def test_the_sync_button_asks_plaid(self):
+        with mock.patch.object(connections, "run_sync", return_value={"new": 0}) as run:
+            connections.api_sync(None, {}, {})
+        run.assert_called_once_with(ask_plaid=True)
 
 
 if __name__ == "__main__":

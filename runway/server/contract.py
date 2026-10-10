@@ -120,7 +120,9 @@ class AccountItem(AccountColumns):
 
 class BudgetCategory(TypedDict):
     """A category's month on the Budget page: what's been spent (its subcategories included) against its budget, if it
-    has one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come."""
+    has one. An income category's row has the same shape: `budget` is what's expected in, `spent` what has come.
+    `budget` is the month's: its own amount (`month_budget`, set for that month only) when it has one, else the
+    budget's usual amount (`usual_budget`, every other month's)."""
     name: str
     parent: str | None
     path: list[str]
@@ -128,6 +130,8 @@ class BudgetCategory(TypedDict):
     top: str
     has_children: bool
     budget: float | None
+    usual_budget: float | None
+    month_budget: float | None
     pay_with: str | None
     rollover_from: str | None
     carried: float
@@ -159,9 +163,11 @@ class BudgetMonth(TypedDict):
 
 class BudgetSet(TypedDict):
     """POST /api/budget: a category's budget (an empty or zero amount removes it), or whether it rolls over, or (kept
-    for a release) the account it's paid with."""
+    for a release) the account it's paid with. With `month` ("YYYY-MM"), the budget's own amount for that month only
+    (it needs a budget already): an empty amount takes the month back to the usual amount, 0 budgets nothing then."""
     category: str
     amount: NotRequired[float | str | None]
+    month: NotRequired[str]
     rollover: NotRequired[bool]
     pay_with: NotRequired[str | None]
 
@@ -175,6 +181,27 @@ class BudgetSaved(TypedDict):
     """POST /api/budget's reply: the parents' budgets raised to cover their subcategories' (after an amount was saved)."""
     ok: bool
     raised: NotRequired[list[RaisedBudget]]
+
+
+class BudgetSuggestion(TypedDict):
+    """A suggested monthly budget for a category (domain/budget_suggest.py): the larger of its typical month and the
+    recurring payments coming in the budget's month, rounded up. `budget` is the category's budget now, if it has one."""
+    category: str
+    suggested: float
+    typical: float
+    recurring: float
+    budget: float | None
+
+
+class BudgetSuggestions(TypedDict):
+    """GET /api/budget/suggestions?month=YYYY-MM: the suggestions, and what they're from: the full months of history
+    looked at (`months`, from `first` to `last`) and the month whose recurring payments count (`recurring_month`: the
+    month asked for when it's still to come, else next month; never past the forecast's reach)."""
+    months: int
+    first: str | None
+    last: str | None
+    recurring_month: str
+    suggestions: list[BudgetSuggestion]
 
 
 # Transactions

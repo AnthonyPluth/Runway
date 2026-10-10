@@ -27,6 +27,9 @@ if __name__ == "__main__":
                    help="don't sync with SimpleFIN in the background")
     p.add_argument("command", nargs="?", choices=["serve", "backup", "restore", "demo", "verify"], default="serve")
     p.add_argument("file", nargs="*", help="backup file (for backup / restore), or the pages to visit (for verify; default all)")
+    p.add_argument("--ai-buttons", action="store_true", help="demo: also add what the AI buttons need to show (make verify's)")
+    p.add_argument("--investments", action="store_true", help="demo: also add a sample brokerage (make verify's)")
+    p.add_argument("--receipt", action="store_true", help="demo: also add a store purchase with its receipt (make verify's)")
     p.add_argument("--yes", action="store_true", help="restore without asking")
     a = p.parse_args()
     if a.command == "verify":
@@ -45,6 +48,12 @@ if __name__ == "__main__":
             from runway.domain import demo
             with db.session() as conn:
                 print(f"Added sample data ({demo.seed(conn)} transactions) to {db.describe()}.")
+                if a.ai_buttons:
+                    demo.seed_ai_buttons(conn)
+                if a.receipt:
+                    demo.seed_receipt(conn, date.today())
+                if a.investments:
+                    demo.seed_investments(conn, date.today())
         elif a.command == "backup":
             # Without a file name: this folder, or the data folder when Runway has one set (in Docker, /data: the code
             # folder there is read-only).

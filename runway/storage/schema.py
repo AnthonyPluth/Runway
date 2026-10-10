@@ -248,6 +248,7 @@ recurring = Table(
     Column('amount_min', Float, doc='only payments of at least this much match on their own (dollars, positive)'),
     Column('amount_max', Float, doc='only payments of at most this much'),
     Column('amount_since', Text, doc='when the amount was last set (YYYY-MM-DD); the "use $X" hint looks at payments since'),
+    Column('category', Text, doc='the category (and so the icon) its transactions get when linked to it; NULL = none'),
     sqlite_autoincrement=True,
 )
 
@@ -262,6 +263,15 @@ budgets = Table(
     Column('category', Text, primary_key=True),
     Column('amount', Float, nullable=False, doc='monthly limit, positive'),
     Column('rollover_from', Text, doc='YYYY-MM: from this month on, what\'s left over carries into the next month; NULL = off'),
+)
+
+budget_months = Table(
+    'budget_months', metadata,
+    Column('category', Text, refers('budget_months', 'category', 'budgets.category', 'CASCADE'), nullable=False),
+    Column('month', Text, nullable=False, doc='YYYY-MM'),
+    Column('amount', Float, nullable=False, doc='that month\'s budget instead of the usual amount (budgets.amount), 0 or more'),
+    PrimaryKeyConstraint('category', 'month'),
+    info={'doc': 'a budget\'s own amount for one month; every other month has the usual amount'},
 )
 
 overrides = Table(

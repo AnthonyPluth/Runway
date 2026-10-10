@@ -38,6 +38,7 @@ DEFAULTS = {
     "churn_plan": True,                             # time to downgrade, close or change a card, as you planned
     "churn_benefit": True,                          # a card credit with money left resets soon
     "churn_apply": True,                            # a planned card or bank bonus can be applied for, or its offer ends soon
+    "ext_signin": True,                             # the browser extension's daily import needs you to sign in to a store
 }
 LOW_BALANCE_DAYS = 30
 
@@ -208,6 +209,62 @@ def send_all(conn, message: dict, only: str | None = None, to: object = EVERYONE
                          .values(last_error=str(e)[:300]))
             failed.append(f"{s['device']}: {e}")
     return {"sent": sent, "failed": failed}
+
+
+# ------------------------------------------------------------------------------------------------ the extension
+
+EXT_SIGNIN_EVERY = 12 * 3600       # seconds: at most one "sign in to the store" per store this often, however often it signs you out
+EXT_SIGNIN_REMIND = 3 * 86400      # while a sign-in is still waiting (no import got through since), said again this often
+
+
+def _ext_keys(retailer: str, owner: str | None) -> tuple[str, str]:
+    """notify_log's keys for a store's sign-in notification: while it waits for you, and once the import has carried on."""
+    return _log_key(owner, f"extsignin:{retailer}"), _log_key(owner, f"extsignin:{retailer}:resumed")
+
+
+def ext_signin(conn, retailer: str, name: str, owner: str | None) -> dict:
+    """The browser extension's import out of sight (the daily one) needs a sign-in to a store: tell the person who made
+    the extension's key (`owner`, their sub; None without sign-in, when every device is theirs) on their devices.
+    While it waits it's said again only every EXT_SIGNIN_REMIND (the daily import asks each day), and once the import
+    has carried on (ext_resumed), a new sign-out is told about once EXT_SIGNIN_EVERY has passed, so a store that keeps
+    signing you out doesn't keep buzzing. The text names only the store (a lock screen shows it).
+
+    Returns {"sent": n, "why": ...}: `why` says why nothing was delivered ("off", "already", "no_devices", "failed").
+    A notification nobody got isn't remembered as said: what was remembered before is put back, and the next import
+    tries again."""
+    if oidc.enabled() and not owner:   # a key made before keys had owners: nobody's devices to tell
+        return {"sent": 0, "why": "no_devices"}
+    if not prefs(conn, owner)["ext_signin"]:
+        return {"sent": 0, "why": "off"}
+    waiting, resumed = _ext_keys(retailer, owner)
+    now = time.time()
+    had = {r["key"]: r for r in db.rows(conn.execute(select(NotifyLog).where(NotifyLog.key.in_((waiting, resumed)))))}
+    if ((waiting in had and now - (had[waiting]["sent"] or 0) < EXT_SIGNIN_REMIND)
+            or (resumed in had and now - (had[resumed]["sent"] or 0) < EXT_SIGNIN_EVERY)):
+        return {"sent": 0, "why": "already"}
+    title = f"Sign in to {name} for Runway"
+    conn.execute(delete(NotifyLog).where(NotifyLog.key.in_((waiting, resumed))))
+    # Saved before sending, as run() does: a second call while this one is sending finds it and says nothing.
+    conn.execute(insert(NotifyLog).values(key=waiting, sent=now, title=title))
+    conn.commit()
+    r = send_all(conn, {"title": title, "body": f"The browser extension's import is waiting for you to sign in to {name} in "
+                                                 "the tab it opened. It carries on once you have.",
+                        "url": "/#setup/connections", "tag": f"extsignin:{retailer}"},
+                 to=owner if oidc.enabled() else EVERYONE)
+    if not r["sent"]:   # nobody got it: not said
+        conn.execute(delete(NotifyLog).where(NotifyLog.key == waiting))
+        for row in had.values():
+            conn.execute(insert(NotifyLog).values(**row))
+        conn.commit()
+        return {"sent": 0, "why": "failed" if r["failed"] else "no_devices"}
+    return {"sent": r["sent"], "why": None}
+
+
+def ext_resumed(conn, retailer: str, owner: str | None) -> None:
+    """A store's import finished: the sign-in notification waiting on it is done with, so the next sign-out is told
+    about again (once EXT_SIGNIN_EVERY has passed since this one was sent)."""
+    waiting, resumed = _ext_keys(retailer, owner)
+    conn.execute(update(NotifyLog).where(NotifyLog.key == waiting).values(key=resumed))
 
 
 # ------------------------------------------------------------------------------------------------ what to say

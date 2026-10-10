@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { loadCategories } from "$lib/categories.svelte";
+  import { catLook, loadCategories } from "$lib/categories.svelte";
+  import { cn } from "$lib/utils";
+  import AiButton from "$lib/components/AiButton.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -103,27 +105,34 @@
     {#if o.items.length}
       {#if o.items.some((x) => !x.category)}
         <div class="flex items-center gap-2">
-          <Button size="sm" variant="outline" disabled={asking} onclick={suggest}
-            title="For the items with no category; it can propose a new one">{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
+          <AiButton busy={asking} busyLabel="Suggesting…" label="Suggest categories" onclick={suggest}
+            title="For the items with no category; it can propose a new one" />
         </div>
       {/if}
       {@const mine = family?.length ? o.items.filter((x) => x.category && family.includes(x.category)) : []}
       {@const items = mine.length && !showAll ? mine : o.items}
       <div class="flex flex-col">
         {#each items as i (i.id)}
-          <!-- The item, its price and its category: the picker takes the rest of the line on a phone (its own line under
-               the item), and a fixed column beside the price on a wider screen. -->
-          <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_16rem]">
-            <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
-            <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
-            <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="col-span-2 w-full sm:col-span-1"
-              onchange={(v) => v && undoablePost(`/api/retail/items/${i.id}`, `/api/retail/items/${i.id}/restore`, { category: v },
-                (r) => `${i.title} → ${v}${(r.orders ?? 0) > 1 ? ` · ${r.orders} orders` : ""}`)} />
-            {#if !i.category && suggestions[i.id]}
-              {@const s = suggestions[i.id]}
-              <Button size="sm" variant="outline" class="col-span-2 h-auto justify-self-start py-1 whitespace-normal sm:col-start-3 sm:col-span-1" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
-                onclick={() => useSuggestion(s)}>{s.new_category ? `New: ${s.new_category.name}` : `Use ${s.category}`}</Button>
-            {/if}
+          <!-- The item and its price are the line; the category is a small chip under the item (icon, then name; it opens the
+               picker), with a suggestion beside it when the AI has one. -->
+          <div class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 border-t border-border/50 py-1.5 first:border-t-0">
+            <span class="truncate font-medium text-foreground" title={i.title}>{#if i.quantity > 1}<span class="mr-0.5 font-normal text-muted-foreground tabular-nums">{i.quantity}×</span> {/if}{i.title}</span>
+            <span class="text-right font-medium tabular-nums">{fmt(i.amount)}</span>
+            <div class="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <CategorySelect value={i.category ?? ""} label={`Category for ${i.title}`}
+                class={cn("inline-flex min-h-6 max-w-full min-w-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring phone:min-h-8",
+                  i.category ? "bg-muted text-muted-foreground hover:bg-muted/70" : "border border-dashed border-warning/60 text-warning hover:bg-warning/10")}
+                onchange={(v) => v && undoablePost(`/api/retail/items/${i.id}`, `/api/retail/items/${i.id}/restore`, { category: v },
+                  (r) => `${i.title} → ${v}${(r.orders ?? 0) > 1 ? ` · ${r.orders} orders` : ""}`)}>
+                {#if i.category}<span aria-hidden="true">{catLook(i.category).icon}</span>{/if}
+                <span class="truncate" title={i.category || undefined}>{i.category || "Choose category"}</span>
+              </CategorySelect>
+              {#if !i.category && suggestions[i.id]}
+                {@const s = suggestions[i.id]}
+                <Button size="sm" variant="outline" class="h-auto py-0.5 text-xs whitespace-normal" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
+                  onclick={() => useSuggestion(s)}>{s.new_category ? `New: ${s.new_category.name}` : `Use ${s.category}`}</Button>
+              {/if}
+            </div>
           </div>
         {/each}
       </div>

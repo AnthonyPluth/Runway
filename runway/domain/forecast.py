@@ -4,7 +4,7 @@ Model, per cash account (checking/savings marked "in forecast"):
   start balance (the bank's posted balance plus what's pending)
   + recurring items (paychecks, mortgage, bills) on their dates
   - the budgets paid from the account, spent day by day on banking days (a weekend's or holiday's on the next one)
-  - each credit card's payment on its due date, sized to the statement balance
+  - each credit card's payment on its due date, sized to what's left of the statement balance (card_cycle)
 
 Nothing is taken out for spending that isn't scheduled or budgeted: there's no average of past spending.
 
@@ -46,12 +46,12 @@ from sqlalchemy.exc import OperationalError
 from . import bankdays, budgets, churning, splits, statements
 from ..storage import db
 from ..providers import plaidapi, plaidbank, simplefin
-from ..dates import days_in_month, month_end, month_start, next_after, parse_day
+from ..dates import days_in_month, month_end, month_key, month_start, next_after, parse_day
 from ..money import CENT, allocate_cents, cents, is_zero, same_amount
 from . import categories as catmod
 from ..storage import settings_keys as sk
 from . import recurring as rec
-from ..storage.models import Account, Budget, Category, ChurnCard, Override, PlaidAccount, Recurring, Transaction
+from ..storage.models import Account, Category, ChurnCard, Override, PlaidAccount, Recurring, Transaction
 
 SPEND_WINDOW_DAYS = 90
 ONE_OFF_LIMIT = 1000.0
@@ -390,7 +390,15 @@ def interest(plan: dict, carried: float, charges: float = 0.0) -> float:
 
 
 def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
-    """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
+    """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement).
+
+    What's left to pay on the statement (`remaining`) is the statement less what's come off it since it closed: the
+    payments (money in that's a transfer, pending ones too, and any still in transit from the paying account) and the
+    posted credits (refunds and other money in that isn't a transfer). A pending credit isn't taken off it until it
+    posts; until then it comes off the new charges, as before. New charges never add to it: they're the next
+    statement's. Never below nothing: what comes off beyond the statement comes off the new charges (or is a credit
+    toward the next statement). The plan's payment (statement_payment) counts the payments toward it, not the credits:
+    an issuer's minimum or your fixed amount is paid as before, but never more than what's left."""
     transfers = _transfer_categories(conn)
     last_close = parse_day(bank["last_statement_date"])
     T = Transaction
@@ -404,12 +412,14 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     statement = known if known is not None else reported
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     paid += in_transit(conn, card, last_close)
-    over = max(0.0, paid - statement)
-    net = -sum(t["amount"] for t in txs if t["category"] not in transfers) - over
+    charges = [t for t in txs if t["category"] not in transfers]
+    credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
+    over = max(0.0, paid + credits - statement)
+    net = -sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
     new_charges = max(0.0, net)
     due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, bank["due_day"])
-    remaining = max(0.0, statement - paid)
+    remaining = max(0.0, statement - paid - credits)
     plan = payment_plan(conn, card["id"], bank.get("purchase_apr"))
     payment = min(remaining, max(0.0, statement_payment(plan, statement, bank["minimum_payment"]) - paid))
     return {
@@ -422,6 +432,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
         "minimum_payment": bank["minimum_payment"],
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "paid_since_close": round(paid, 2),
+        "credits_since_close": round(credits, 2),
         "remaining": round(remaining, 2),
         **plan,
         "payment": round(payment, 2),
@@ -1124,11 +1135,15 @@ def budget_plan(conn, today: date) -> list[dict]:
     A subcategory with a budget and an account of its own is one of its parent's `parts`: its budget is spent on that
     account and only the rest of the parent's on the parent's (budget_days). One without an account of its own goes on
     the parent's, as does a subcategory's spending without a budget. The parent's usual account is then the one used
-    most outside those parts."""
+    most outside those parts.
+
+    `amount` is this month's budget; `every` the usual amount and `months` the months with an amount of their own
+    (budgets.amount_in), for budget_days' later months."""
     cats = catmod.all_categories(conn)
     by_name = {c["name"]: c for c in cats}
     pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
-    budgets = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
+    rows = budgets.load(conn)
+    this_month = month_key(today)
     p = splits.parts()
     spent_by: dict[str | None, float] = dict(conn.execute(
         select(p.c.category, -func.sum(p.c.amount)).select_from(p).join(Account, Account.id == p.c.account_id)
@@ -1142,18 +1157,22 @@ def budget_plan(conn, today: date) -> list[dict]:
     def spent(names: list[str]) -> float:
         return round(max(0.0, sum(spent_by.get(n) or 0.0 for n in names)), 2)
 
+    def amounts(name: str) -> dict:
+        r = rows[name]
+        return {"amount": budgets.amount_in(r, this_month), "every": r["amount"], "months": r["months"]}
+
     out = []
-    for name, b in budgets.items():
+    for name in rows:
         c = by_name.get(name)
-        if not c or c["is_transfer"] or c["is_income"] or any(a in budgets for a in c["path"][:-1]):
+        if not c or c["is_transfer"] or c["is_income"] or any(a in rows for a in c["path"][:-1]):
             continue
         names = subtree(name)
-        own = [k for k in names[1:] if k in budgets and pay_with.get(k)]
+        own = [k for k in names[1:] if k in rows and pay_with.get(k)]
         own = [k for k in own if not any(a in own for a in by_name[k]["path"][:-1])]
-        parts = [{"category": k, "amount": budgets[k]["amount"], "names": subtree(k), "spent": spent(subtree(k)),
+        parts = [{"category": k, **amounts(k), "names": subtree(k), "spent": spent(subtree(k)),
                   "pay_with": pay_with[k], "usual": None} for k in own]
         rest = [n for n in names if not any(n in q["names"] for q in parts)]
-        out.append({"category": name, "amount": b["amount"], "names": names, "spent": spent(names),
+        out.append({"category": name, **amounts(name), "names": names, "spent": spent(names),
                     "pay_with": pay_with.get(name), "usual": usual_account(used, rest), "parts": parts})
     return out
 
@@ -1184,11 +1203,11 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
     """Each budget's spending day by day over the horizon, from tomorrow, by the account it goes on: {category:
     [{"category", "pay_with", "usual", "days": {date: amount}}]}, the budget's own share first, then each of its parts
     (budget_plan). This month it's what's left of the budget (plus what a budget that rolls over carried into it, less
-    what's been spent) over the days left; after that, each month's budget over its days. A budget includes its
-    category's recurring payments: the ones the forecast already takes out of its accounts are subtracted from it each
-    month, so they aren't counted twice, as are the charges in `on_cards` (recurring ones and annual fees on cards, which
-    their statements pay; build passes the ones no budget charged to that card has). A budget they cover entirely is
-    None.
+    what's been spent) over the days left; after that, each month's budget (its own amount, if it has one) over its
+    days. A budget includes its category's recurring payments: the ones the forecast already takes out of its accounts
+    are subtracted from it each month, so they aren't counted twice, as are the charges in `on_cards` (recurring ones
+    and annual fees on cards, which their statements pay; build passes the ones no budget charged to that card has). A
+    budget they cover entirely is None.
 
     A part gets its own budget's worth of each month's (less what it's spent this month, and its own recurring payments),
     as far as the whole budget's month goes; the budget's share is what's left. So the parts never take the budget below
@@ -1199,7 +1218,13 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
             recurring[(e["category"], e["date"][:7])] += -e["amount"]
     this_month = today.isoformat()[:7]
     carried = budgets.budget_carry(conn, [c for c in catmod.all_categories(conn) if not c["is_transfer"] and not c["is_income"]],
-                                   {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}, today.replace(day=1))
+                                   budgets.load(conn), today.replace(day=1))
+
+    def amount(p: dict, month: str) -> float:
+        """The budget's (or part's) amount in the month: this month's is `amount`, a later one its own or the usual."""
+        if month == this_month:
+            return p["amount"]
+        return p.get("months", {}).get(month, p.get("every", p["amount"]))
 
     def covered(p: dict, month: str) -> float:
         return sum(recurring.get((n, month), 0.0) for n in p["names"])
@@ -1209,14 +1234,14 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
         what's been spent)."""
         if month == this_month:
             return max(0.0, p["amount"] + carried.get(p["category"], 0.0) - p["spent"] - covered(p, month))
-        return max(0.0, p["amount"] - covered(p, month))
+        return max(0.0, amount(p, month) - covered(p, month))
 
     def shares(p: dict, month: str) -> list[float]:
         """The month's budget (left) split between the budget's own share and each of its parts, in that order."""
         whole = left(p, month)
         got: list[float] = []
         for q in p.get("parts", []):
-            want = max(0.0, q["amount"] - covered(q, month) - (q["spent"] if month == this_month else 0.0))
+            want = max(0.0, amount(q, month) - covered(q, month) - (q["spent"] if month == this_month else 0.0))
             got.append(min(want, whole - sum(got)))
         return [max(0.0, whole - sum(got)), *got]
 

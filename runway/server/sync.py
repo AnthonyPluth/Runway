@@ -21,8 +21,8 @@ from .common import ApiError
 DAILY_SYNC_HOUR = 7          # banks and cards (SimpleFIN and Plaid) sync once a day, on the first check after this hour
                              # (local time; the image's TZ is America/New_York): late enough for overnight ACH, early
                              # enough to review in the morning. Opening Runway only catches up a missed one.
-PLAID_SYNC_HOUR = DAILY_SYNC_HOUR   # Plaid's quota is small, so opening Runway or pressing Sync doesn't ask it again
-                             # that day; a connection's own Sync button in Settings still does.
+PLAID_SYNC_HOUR = DAILY_SYNC_HOUR   # the syncs Runway starts itself (the daily one, catching up when you open it) ask
+                             # Plaid once a day; the Sync button, and a connection's own in Settings, always do.
 PLAID_REFRESH_AT = (6, 30)   # before that sync, Plaid is told to fetch from the banks (Transactions Refresh), so the
                              # sync gets the banks as of now and not as of Plaid's own last visit. Only before
                              # PLAID_SYNC_HOUR: a refresh after the day's sync would be a call for nothing.
@@ -33,7 +33,9 @@ _inv_lock = threading.Lock()
 AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
 
 
-def run_sync() -> dict:
+def run_sync(ask_plaid: bool = False) -> dict:
+    """The bank sync: SimpleFIN, then Plaid's bank and card connections. Plaid is asked once a day (plaid_due), or
+    every time with ask_plaid (you pressed Sync)."""
     if not _sync_lock.acquire(blocking=False):
         raise ApiError("A sync is already running.", 409)
     check_in = None
@@ -50,11 +52,23 @@ def run_sync() -> dict:
                 # With automatic syncing off (--no-sync), there's no daily schedule to promise: the check-in goes to a
                 # monitor you set up, and doesn't create one that would report every day you don't press Sync as missed.
                 check_in = monitoring.cron_start(CRON_SLUG, f"0 {DAILY_SYNC_HOUR} * * *" if AUTO_SYNC else None)
-                use_plaid = has_plaid and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
+                use_plaid = has_plaid and (ask_plaid or plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC)))
                 if use_plaid:   # counted when asked, so a failing Plaid isn't asked again until tomorrow
                     db.set_setting(conn, sk.LAST_PLAID_BANK_SYNC, datetime.now().isoformat(timespec="seconds"))
                     conn.commit()
-                result = simplefin.sync(conn, access_url) if access_url else {"new": [], "errors": []}
+                result: dict = {"new": [], "errors": []}
+                simplefin_failed: simplefin.SimpleFinError | None = None
+                if access_url:
+                    try:
+                        result = simplefin.sync(conn, access_url)
+                    except simplefin.SimpleFinError as e:
+                        if not use_plaid:
+                            raise
+                        # Plaid was counted as asked today, so it's asked now all the same: SimpleFIN being down
+                        # mustn't leave the accounts set to Plaid without their day's transactions. The sync still
+                        # counts as failed (below), so SimpleFIN is tried again later.
+                        conn.rollback()
+                        simplefin_failed = e
                 if use_plaid:   # accounts set to Plaid, and card statements
                     pb = plaidbank.sync_all(conn)
                     result["new"] += pb["new"]
@@ -87,6 +101,11 @@ def run_sync() -> dict:
                 except Exception:
                     monitoring.report()
                 networth.summary(conn)   # record today's net worth
+                if simplefin_failed is not None:
+                    conn.commit()   # what Plaid brought in is kept; the failure is recorded with SimpleFIN's error
+                    if result["errors"]:   # and Plaid's messages with it: only a sync that worked saves the warnings
+                        raise simplefin.SimpleFinError("; ".join([str(simplefin_failed), *result["errors"]])) from simplefin_failed
+                    raise simplefin_failed
                 conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
                 # The sync worked, but a bank may still need you (an expired login): kept apart, so the sidebar can say so.

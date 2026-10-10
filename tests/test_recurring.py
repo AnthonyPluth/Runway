@@ -7,7 +7,7 @@ from sqlalchemy import insert, select, update
 
 from runway.storage import db
 from runway.domain import forecast, recurring
-from runway.storage.models import Override, Recurring, Transaction
+from runway.storage.models import Category, Override, Recurring, Transaction
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase
 
@@ -628,6 +628,86 @@ class OneTimeTests(LedgerCase):
         self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Water deposit back", "amount": 150,
                                                      "anchor_date": "2027-01-15", "match": "city water"})
         self.assertIn("city water", {s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)})
+
+
+class RecurringCategoryTests(LedgerCase):
+    """An item's category: a transaction linked by hand takes it, one matched automatically takes it when it has none."""
+
+    def setUp(self):
+        super().setUp()
+        from runway.server.api import recurring as api
+        self.api = api
+        self.acct("chk", "checking", 1000.0)
+        self.conn.execute(insert(Category), [{"name": "Water Bills"}, {"name": "Gadgets"}])
+        self.body = {"name": "Water", "account_id": "chk", "amount": -40, "frequency": "monthly",
+                     "anchor_date": "2026-09-05", "match": "city water", "category": "Water Bills"}
+        self.rid = self.api.api_recurring_add(self.conn, None, self.body)["id"]
+
+    def row(self, tx_id):
+        return tuple(self.conn.execute(select(Transaction.recurring_id, Transaction.category, Transaction.category_source)
+                                       .where(Transaction.id == tx_id)).fetchone())
+
+    def test_linking_overwrites_the_transactions_category(self):
+        self.tx("chk", "2026-09-06", -12.0, "SOME OTHER PAYEE", category="Gadgets")
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|0").values(category_source="ai", needs_review=1))
+        recurring.link(self.conn, "chk|0", self.rid)
+        self.assertEqual(self.row("chk|0"), (self.rid, "Water Bills", "manual"))
+        self.assertEqual(self.conn.execute(select(Transaction.needs_review).where(Transaction.id == "chk|0")).scalar(), 0)
+
+    def test_linking_to_an_item_without_a_category_leaves_the_transaction_alone(self):
+        rid = self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Gas", "match": "city gas", "category": ""})["id"]
+        self.tx("chk", "2026-09-06", -12.0, "CITY GAS", category="Gadgets")
+        recurring.link(self.conn, "chk|0", rid)
+        self.assertEqual(self.row("chk|0"), (rid, "Gadgets", None))
+
+    def test_a_split_transaction_keeps_its_parts_categories(self):
+        self.tx("chk", "2026-09-06", -12.0, "SOME OTHER PAYEE")
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|0").values(is_split=1))
+        recurring.link(self.conn, "chk|0", self.rid)
+        self.assertEqual(self.row("chk|0"), (self.rid, None, None))
+
+    def test_unlinking_leaves_the_category(self):
+        self.tx("chk", "2026-09-06", -12.0, "SOME OTHER PAYEE")
+        recurring.link(self.conn, "chk|0", self.rid)
+        recurring.link(self.conn, "chk|0", None)
+        self.assertEqual(self.row("chk|0"), (0, "Water Bills", "manual"))
+
+    def test_auto_match_fills_an_empty_category_and_keeps_its_own(self):
+        self.tx("chk", "2026-09-06", -41.0, "CITY WATER BILL")
+        self.tx("chk", "2026-09-07", -39.0, "CITY WATER BILL", category="Gadgets")
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|1").values(category_source="manual"))
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|0").values(needs_review=1))
+        self.assertEqual(recurring.auto_match(self.conn, [self.rid]), 2)
+        self.assertEqual(self.row("chk|0"), (self.rid, "Water Bills", "recurring"))
+        self.assertEqual(self.row("chk|1"), (self.rid, "Gadgets", "manual"))
+        self.assertEqual(self.conn.execute(select(Transaction.needs_review).where(Transaction.id == "chk|0")).scalar(), 0)
+
+    def test_auto_match_leaves_ones_linked_earlier_alone(self):
+        self.tx("chk", "2026-09-06", -41.0, "CITY WATER BILL")
+        recurring.link(self.conn, "chk|0", None)   # never match
+        self.tx("chk", "2026-09-07", -39.0, "CITY WATER BILL")
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|1").values(recurring_id=self.rid, recurring_linked_by="auto"))
+        recurring.auto_match(self.conn, [self.rid])
+        self.assertEqual(self.row("chk|0"), (0, None, None))
+        self.assertEqual(self.row("chk|1"), (self.rid, None, None))   # linked before this run: not filled
+
+    def test_the_api_checks_and_keeps_the_category(self):
+        with self.assertRaisesRegex(Exception, "Unknown category: Nope"):
+            self.api.api_recurring_add(self.conn, None, {**self.body, "category": "Nope"})
+        without = {k: v for k, v in self.body.items() if k != "category"}
+        self.api.api_recurring_update(self.conn, None, without, self.rid)   # a client that doesn't send it
+        self.assertEqual(self.conn.execute(select(Recurring.category)).scalar(), "Water Bills")
+        self.api.api_recurring_update(self.conn, None, {**self.body, "category": ""}, self.rid)
+        self.assertIsNone(self.conn.execute(select(Recurring.category)).scalar())
+
+    def test_renaming_or_removing_the_category_follows(self):
+        from runway.domain import categories
+        categories.rename(self.conn, "Water Bills", "City Bills")
+        self.assertEqual(self.conn.execute(select(Recurring.category)).scalar(), "City Bills")
+        categories.remove(self.conn, "City Bills", "Gadgets")
+        self.assertEqual(self.conn.execute(select(Recurring.category)).scalar(), "Gadgets")
+        categories.remove(self.conn, "Gadgets")
+        self.assertIsNone(self.conn.execute(select(Recurring.category)).scalar())
 
 
 if __name__ == "__main__":

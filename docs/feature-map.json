@@ -54,6 +54,7 @@
         "frontend/src/lib/components/settings/SimpleFinSetup.svelte"
       ],
       "tests": [
+        "tests/test_api_handlers.py",
         "tests/test_http_pinned.py",
         "tests/test_monitoring.py"
       ],
@@ -174,7 +175,7 @@
       "path": "/api/overview",
       "handler": "runway/server/api/state.py:api_overview",
       "web": [
-        "frontend/src/pages/Overview.svelte",
+        "frontend/src/lib/prefetch.ts",
         "frontend/src/pages/Transactions.svelte"
       ],
       "tests": [
@@ -651,6 +652,7 @@
       "tests": [
         "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
+        "tests/test_budget_months.py",
         "tests/test_categorize.py",
         "tests/test_http_server.py",
         "tests/test_routes.py",
@@ -666,15 +668,32 @@
       "handler": "runway/server/api/budget.py:api_budget_set",
       "web": [
         "frontend/src/lib/components/budget/BudgetRow.svelte",
+        "frontend/src/lib/components/budget/BudgetSuggest.svelte",
         "frontend/src/lib/components/budget/BudgetView.svelte"
       ],
       "tests": [
         "tests/test_api_contract.py",
         "tests/test_api_handlers.py",
         "tests/test_api_validation.py",
+        "tests/test_budget_months.py",
         "tests/test_categorize.py",
         "tests/test_http_server.py",
         "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/budget/suggestions",
+      "handler": "runway/server/api/budget_suggest.py:api_budget_suggestions",
+      "web": [
+        "frontend/src/lib/components/budget/BudgetSuggest.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_budget_suggest.py"
       ],
       "docs": [
         "using/features"
@@ -1649,7 +1668,8 @@
         "frontend/src/lib/components/overview/ForecastSettings.svelte",
         "frontend/src/lib/components/overview/SetupChecklist.svelte",
         "frontend/src/lib/components/settings/AccountRow.svelte",
-        "frontend/src/lib/components/settings/AiCard.svelte"
+        "frontend/src/lib/components/settings/AiCard.svelte",
+        "frontend/src/pages/Overview.svelte"
       ],
       "tests": [
         "tests/test_api_handlers.py",

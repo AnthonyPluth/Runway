@@ -14,7 +14,7 @@ import Budget from "./Budget.svelte";
 
 const cat = (name: string, extra: Partial<BudgetCategory> = {}): BudgetCategory => ({
   name, parent: null, path: [name], depth: 0, top: name, has_children: false, budget: null, pay_with: null, usual_account: null,
-  rollover_from: null, carried: 0, available: null, spent: 0, own_spent: 0, left: null, expected: 0, ...extra,
+  rollover_from: null, carried: 0, available: null, spent: 0, own_spent: 0, left: null, expected: 0, usual_budget: null, month_budget: null, ...extra,
 });
 const month = (extra: Partial<BudgetMonth> = {}): BudgetMonth => ({
   month: "2026-03", days_in_month: 31, day: 10, income: 4000, uncategorized: 0, pay_accounts: [], income_rows: [],
@@ -52,6 +52,14 @@ describe("Budget page", () => {
     expect(screen.getByText("$300 left · ▲ $60 over in 1 budget")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Budget" })).toBeInTheDocument();
     expect(screen.getByText("March 2026")).toBeInTheDocument();
+    expect(screen.getByText("each month")).toBeInTheDocument();
+  });
+
+  it("calls the total the month's when a budget has an amount of its own that month", async () => {
+    serve(month({ categories: [cat("Groceries", { budget: 800, usual_budget: 500, month_budget: 800, spent: 200, left: 600 })] }));
+    render(Budget);
+    expect(await screen.findByText("in Mar")).toBeInTheDocument();
+    expect(screen.getByText("$800")).toBeInTheDocument();
   });
 
   it("puts each row's account on its emoji: its own, else its parent's, else the one used most", async () => {

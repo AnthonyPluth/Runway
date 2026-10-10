@@ -1,14 +1,39 @@
 // Runway's service worker: shows push notifications, and keeps the app's shell around so it opens without a
 // connection (with the last-loaded page). Data always comes fresh from the server; nothing from /api is cached.
-const CACHE = "runway-shell-v5";
+const CACHE = "runway-shell-v6";
 // The app's page and Runway's own files. The app's built files (/assets/…) are kept as the page loads them: their
 // names change with every build, so the list can't name them.
 const SHELL = ["/", "/logo.svg", "/fonts/Inter-latin-Variable.woff2", "/fonts/Inter-latin-ext-Variable.woff2",
   "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
-const isShell = (path) => SHELL.includes(path) || path.startsWith("/assets/");
+// The built files carry their content's hash in their name (and the server sends them `immutable`): a name never
+// holds anything else, so a copy kept under it is always right and is used without asking the server.
+const ASSETS = "/assets/";
+// A build adds a file or two under new names, and the old ones would pile up: keep the most recent this many.
+const MAX_ASSETS = 150;
 // The pages that are the app itself (main.ts picks the screen from the hash, and /plaid/oauth resumes a bank link).
 // Any other page (the OAuth consent screen, Carta's callback) is not the shell, so it never replaces the cached one.
 const APP_PAGES = ["/", "/plaid/oauth"];
+
+/** How the worker answers a request: "asset" (a built file: the kept copy first), "shell" (the network first, the
+ *  kept copy only when offline) or null (not the worker's: the browser goes to the server as usual). */
+function route(request, url, origin) {
+  if (request.method !== "GET" || url.origin !== origin) return null;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return null;
+  if (request.mode === "navigate") return APP_PAGES.includes(url.pathname) ? "shell" : null;
+  if (url.pathname.startsWith(ASSETS)) return request.headers.has("Range") ? null : "asset";
+  return SHELL.includes(url.pathname) ? "shell" : null;
+}
+
+/** Whether an answer may be kept as `kind`'s copy. Never a sign-in redirect that was followed (it's the sign-in page,
+ *  whatever address was asked for), an opaque or partial answer, or, for a built file, a web page: an address the app
+ *  doesn't have gets the app's own page (with a one-time nonce in it), not a 404. */
+function keepable(res, kind, request) {
+  if (res.status !== 200 || res.redirected || res.type !== "basic") return false;
+  const type = res.headers.get("Content-Type") || "";
+  if (kind === "asset") return !type.startsWith("text/html");
+  // Only the app's own page is kept as the page to open offline (not, say, a link straight to a script).
+  return request.mode !== "navigate" || type.startsWith("text/html");
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
@@ -21,20 +46,34 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
-// Network first for the app itself (so updates show up at once); the cached copy only when offline.
+async function keep(key, res) {
+  const cache = await caches.open(CACHE);
+  await cache.put(key, res);
+  const assets = (await cache.keys()).filter((r) => new URL(r.url).pathname.startsWith(ASSETS));
+  for (const old of assets.slice(0, Math.max(0, assets.length - MAX_ASSETS))) await cache.delete(old);   // oldest first
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== "GET" || url.origin !== location.origin) return;
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
-  const navigate = event.request.mode === "navigate";
-  if (navigate ? !APP_PAGES.includes(url.pathname) : !isShell(url.pathname)) return;
-  const key = navigate ? "/" : url.pathname;
+  const kind = route(event.request, url, location.origin);
+  if (!kind) return;
+  const key = event.request.mode === "navigate" ? "/" : url.pathname;
+  if (kind === "asset") {
+    // The kept copy first; a file not kept yet comes from the server (and is kept if it is what it should be).
+    event.respondWith((async () => {
+      const hit = await (await caches.open(CACHE)).match(key);
+      if (hit) return hit;
+      const res = await fetch(event.request);
+      if (keepable(res, kind, event.request)) event.waitUntil(keep(key, res.clone()).catch(() => {}));
+      return res;
+    })());
+    return;
+  }
+  // Network first for the app itself (so updates show up at once); the kept copy only when offline.
   event.respondWith((async () => {
     try {
       const res = await fetch(event.request);
-      // Only the app's own page is kept as the page to open offline (not, say, a link straight to a script).
-      const page = event.request.mode !== "navigate" || (res.headers.get("Content-Type") || "").startsWith("text/html");
-      if (res.ok && !res.redirected && page) (await caches.open(CACHE)).put(key, res.clone());
+      if (keepable(res, kind, event.request)) event.waitUntil(keep(key, res.clone()).catch(() => {}));
       return res;
     } catch (err) {
       const cached = await caches.match(key);

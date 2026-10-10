@@ -412,7 +412,7 @@ _RULE_FIELDS = _fields("The rule: match (text in the payee or description), matc
 _RECURRING_FIELDS = ("name, account_id, amount (signed: income positive), frequency (weekly, biweekly, semimonthly, monthly, "
                      "quarterly, semiannual, yearly, dates or once), anchor_date (YYYY-MM-DD), and optionally end_date, match "
                      "(texts in the transactions' payee), amount_mode (fixed, last or avg3), amount_min, amount_max, dates "
-                     "(for dates/semimonthly: 04-15, 10-15 or 1, 15) and active (1 or 0)")
+                     "(for dates/semimonthly: 04-15, 10-15 or 1, 15), category (an existing one: linking a transaction gives it that) and active (1 or 0)")
 _ACCOUNT_FIELDS = _fields("Any of: display_name, kind (checking, savings, credit, loan, investment), owner, hidden, in_forecast, "
                           "networth_hidden, owed_positive (1 or 0), pay_from (an account id), for a card pay_mode, pay_amount and "
                           "apr, for a loan interest_rate and monthly_payment. Empty clears one.")

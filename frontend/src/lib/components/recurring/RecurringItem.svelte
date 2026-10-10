@@ -34,7 +34,7 @@
   const init = (): RecurringValues => ({
     name: r.name, account_id: r.account_id, amount: r.amount, amount_mode: r.amount_mode || "fixed", frequency: r.frequency,
     dates: r.dates || "", anchor_date: r.anchor_date || "", match: r.match || "", amount_min: r.amount_min ?? "", amount_max: r.amount_max ?? "",
-    end_date: r.end_date || "",
+    end_date: r.end_date || "", category: r.category || "",
   });
   let v: RecurringValues = $state(init());
   // Open or closed is yours to change; `open` only says how it starts.

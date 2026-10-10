@@ -29,17 +29,16 @@ beforeEach(() => {
 });
 
 describe("EventsList", () => {
-  it("leaves a row plain unless `marked`: no label, no italic", () => {
+  it("leaves a row plain unless `marked`: no italic", () => {
     const { container } = show([ev()]);
-    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
     expect(container.querySelector("[data-projected]")).toBeNull();
     expect(screen.getByText("Rent")).not.toHaveClass("italic");
   });
 
-  it("marks a projected row by more than colour: a label (with a screen-reader sentence), and an italic name", () => {
+  it("marks a projected row by more than colour: an italic name, without repeating that it's projected", () => {
     const { container } = show([ev(), ev({ name: "Pay", amount: 2000, key: "k2", recurring_id: 7 })], { marked: true });
-    expect(screen.getAllByText("Projected")).toHaveLength(2);
-    expect(screen.getAllByText("Not posted yet:", { exact: false })).toHaveLength(2);
+    expect(screen.queryByText("Projected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not posted yet:", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByText("Rent")).toHaveClass("italic");
     expect(screen.getByRole("link", { name: "Pay" })).toHaveClass("italic");
     const rows = container.querySelectorAll("[data-projected]");
@@ -159,6 +158,35 @@ describe("EventsList", () => {
       expect(api).not.toHaveBeenCalled();
       await userEvent.click(mark);
       expect(screen.queryByText("Charged so far")).toBeNull();
+    });
+
+    it("opens the breakdown from the row's name too, by click and by keyboard, in step with the asterisk", async () => {
+      show([ev({ kind: "card", estimated: true, name: "Visa statement", key: "cardclose:cc:2026-03-01", amount: -1066.67, estimate: estimate() })]);
+      const mark = screen.getByRole("button", { name: "What this estimate is made of" });
+      const row = screen.getByText("Visa statement").closest("[role=button]") as HTMLElement;
+      expect(row).toHaveAttribute("tabindex", "0");
+      expect(row).toHaveAttribute("aria-expanded", "false");
+      expect(row).toHaveAttribute("aria-controls", mark.getAttribute("aria-controls"));
+      await userEvent.click(screen.getByText("Visa statement"));
+      expect(row).toHaveAttribute("aria-expanded", "true");
+      expect(mark).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("Charged so far")).toBeInTheDocument();
+      row.focus();
+      await userEvent.keyboard("{Enter}");
+      expect(screen.queryByText("Charged so far")).toBeNull();
+      await userEvent.keyboard(" ");
+      expect(row).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(mark);
+      expect(row).toHaveAttribute("aria-expanded", "false");
+      expect(api).not.toHaveBeenCalled();
+    });
+
+    it("leaves a row with no breakdown, an edited one and a recurring item's link as they were", () => {
+      show([ev({ name: "Plain" }), ev({ name: "Edited", key: "k2", kind: "card", estimated: true, overridden: true, original_amount: -1, estimate: estimate() }),
+        ev({ name: "Linked", key: "k3", recurring_id: 4, estimated: true, estimate: estimate() })]);
+      expect(screen.getByText("Plain").closest("[role=button]")).toBeNull();
+      expect(screen.getByText("Edited").closest("[role=button]")).toBeNull();
+      expect(screen.getByText("Linked").closest("[role=button]")).toBeNull();
     });
 
     it("explains a card estimate differently from a recurring one", () => {

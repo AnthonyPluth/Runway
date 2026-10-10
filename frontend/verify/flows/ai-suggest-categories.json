@@ -1,0 +1,9 @@
+{
+  "name": "ai-suggest-categories",
+  "page": "transactions",
+  "steps": [
+    { "goto": "#review" },
+    { "wait_for": "button[aria-label='Suggest categories']" },
+    { "screenshot": "review" }
+  ]
+}

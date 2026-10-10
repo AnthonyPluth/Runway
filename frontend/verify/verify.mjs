@@ -31,9 +31,9 @@ export function findChromium(env = process.env, exists = existsSync, list = read
  *  that fits in a pull request (`make pr-screenshots`). */
 export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
-/** A flow is { name, page?, viewports?, steps: [ { goto | click | fill | press | wait_for | expect_text | screenshot } ] }:
+/** A flow is { name, page?, viewports?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | screenshot } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
-const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", expect_text: "object", screenshot: "string" };
+const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string" };
 export const unknownPages = (names) => names.filter((n) => !PAGES.includes(n));
 
 export function flowProblems(flow) {
@@ -62,6 +62,21 @@ async function runStep(page, step, shot) {
     await page.locator(step.press.selector).first().press(step.press.key, { timeout });
   } else if ("wait_for" in step) {
     await page.locator(step.wait_for).first().waitFor({ timeout });
+  } else if ("scroll_to" in step) {   // so a screenshot of the viewport shows it
+    // It then waits until the element has stopped moving (smooth scrolling and scroll snapping animate), so the screenshot after
+    // it shows where it came to rest.
+    await page.locator(step.scroll_to).first().evaluate((el) => new Promise((done) => {
+      el.scrollIntoView({ block: "center", inline: "start" });
+      let last = "", still = 0, frames = 0;
+      const tick = () => {
+        const r = el.getBoundingClientRect();
+        const at = `${Math.round(r.left)},${Math.round(r.top)}`;
+        still = at === last ? still + 1 : 0;
+        last = at;
+        if (still >= 8 || ++frames > 180) done(undefined); else setTimeout(tick, 16);
+      };
+      setTimeout(tick, 16);
+    }), undefined, { timeout });
   } else if ("expect_text" in step) {
     const el = page.locator(step.expect_text.selector).first();
     await el.waitFor({ timeout });

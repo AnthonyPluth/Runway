@@ -69,7 +69,7 @@
     if (!dismissed.length) showDismissed = false;
   }
   // A new item starts today, monthly, for the primary account.
-  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "", end_date: "" });
+  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "", end_date: "", category: "" });
   let primary = "";
   let adding = $state(false);
   let blank: RecurringValues = $state(fresh());
@@ -109,7 +109,7 @@
     }, { busy: (on) => (busy = on) });
   }
   // "Add" on a suggestion adds it as it is (Undo removes it); "Edit first" fills the form with it to adjust.
-  const values = (s: Suggestion): RecurringValues => ({ name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "", end_date: "" });
+  const values = (s: Suggestion): RecurringValues => ({ name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "", end_date: "", category: "" });
   async function addSuggestion(s: Suggestion) {
     const r = await actGet(() => api<{ id: number; linked: number }>("/api/recurring", { method: "POST", body: { ...values(s), active: 1 } }));
     if (!r) return;

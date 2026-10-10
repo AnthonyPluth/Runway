@@ -135,7 +135,7 @@ function watchSync(sayFailure = false): void {
   }, 3000);
 }
 
-/** The Sync button: sync the banks now (SimpleFIN always; Plaid only if it hasn't been asked today), say how it went,
+/** The Sync button: sync the banks now (SimpleFIN and Plaid), say how it went,
  *  and load the page again. A sync that's already running (the daily one, or another tab's) is watched instead. */
 export async function syncNow(): Promise<void> {
   if (app.state?.syncing) return;
