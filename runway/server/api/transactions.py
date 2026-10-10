@@ -166,16 +166,26 @@ def _net(conn, where: list, family: list[str], kind: str) -> float:
     return round(whole + parts, 2)
 
 
+# At most this many transactions asked for by id (?id=…&id=…): the rows a change touched, loaded again on their own.
+MAX_IDS = 100
+# Columns no one reads from a row of the list (the web app, the extension, the assistants): left out of it.
+_UNREAD = ("created_at", "merchant_id")
+
+
 def api_transactions(conn, q, _b) -> TxList:
     T = Transaction
     where, family = tx_where(conn, q)
     limit = query_int(q, "limit", 200, 1, 1000)
     offset = query_int(q, "offset", 0, 0, 10 ** 9)
+    # `id`: only these of the rows the filters match (the ones a change touched, which the app puts back in its list in
+    # place of loading the whole list again); `total` and `sum` are still the whole list's.
+    ids = [i for i in q.get("id", []) if i]
+    if len(ids) > MAX_IDS:
+        raise ApiError(f"Ask for at most {MAX_IDS} transactions by id")
     items = db.rows(conn.execute(
-        select(T, db.account_label_expr().label("account_name"), Account.kind.label("account_kind"),
-               Recurring.name.label("recurring_name"))
+        select(T, db.account_label_expr().label("account_name"), Recurring.name.label("recurring_name"))
         .join(Account, Account.id == T.account_id).outerjoin(Recurring, Recurring.id == T.recurring_id)
-        .where(*where).order_by(T.posted.desc(), T.id).limit(limit).offset(offset)))
+        .where(*where, *([T.id.in_(ids)] if ids else [])).order_by(T.posted.desc(), T.id).limit(limit).offset(offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
     paid = forecast.paid_cards(conn, items)   # card payments: the card's bank's logo, from the app's brands
@@ -192,6 +202,8 @@ def api_transactions(conn, q, _b) -> TxList:
         t["logo_account"] = paid.get(t["id"])   # whose institution's logo (or letter) stands in for a merchant's
         t["brand"] = categorize.brand_choice(t)
         t["source"] = source_of(t["id"])
+        for k in _UNREAD:
+            del t[k]
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
     # `sum`: what they add up to, as the day totals count them (_net). `family`: the category and its subcategories,
     # so a receipt can show just their items.

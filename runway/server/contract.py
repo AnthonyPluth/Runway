@@ -207,7 +207,8 @@ class BudgetSuggestions(TypedDict):
 # Transactions
 
 class TransactionColumns(TypedDict):
-    """A row of the transactions table (models.Transaction), as `select(Transaction)` gives it."""
+    """A row of the transactions table (models.Transaction), as `select(Transaction)` gives it, less the columns no one
+    reads from the list (transactions._UNREAD)."""
     id: str
     account_id: str
     posted: str
@@ -219,10 +220,8 @@ class TransactionColumns(TypedDict):
     confidence: float | None
     needs_review: int | None
     pending: int | None
-    created_at: str | None
     recurring_id: int | None
     is_split: int | None
-    merchant_id: str | None
     recurring_linked_by: Literal["you", "auto"] | None
     notes: str | None
     bank_posted: str | None
@@ -261,7 +260,6 @@ class BrandChoice(TypedDict):
 class Tx(TransactionColumns):
     """A row of GET /api/transactions."""
     account_name: str | None
-    account_kind: str | None
     recurring_name: str | None
     splits: list[Split]
     match: NotRequired[SplitMatch]

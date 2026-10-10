@@ -391,9 +391,12 @@ class HandlerTests(DbCase):
         self.assertEqual([(t["posted"], t["id"]) for t in items],
                          sorted(((t["posted"], t["id"]) for t in items), key=lambda x: (-date.fromisoformat(x[0]).toordinal(), x[1])))
         t0 = items[0]
-        for k in ("account_name", "account_kind", "recurring_name", "splits", "retail", "logo"):
+        for k in ("account_name", "recurring_name", "splits", "retail", "logo"):
             self.assertIn(k, t0)
-        self.assertEqual(list(t0)[:len(db.schema.transactions.columns)], [c.name for c in db.schema.transactions.columns])
+        columns = [c.name for c in db.schema.transactions.columns if c.name not in ("created_at", "merchant_id")]
+        self.assertEqual(list(t0)[:len(columns)], columns)   # the table's columns, less those no one reads from the list
+        for k in ("created_at", "merchant_id", "account_kind"):
+            self.assertNotIn(k, t0)
         self.c.execute(update(Account).where(Account.id == "demo-card").values(owner="Sam"))
         card = transactions.api_transactions(self.c, q(account="demo-card", limit=3, offset=1), {})
         self.assertEqual(len(card["items"]), 3)
@@ -435,6 +438,25 @@ class HandlerTests(DbCase):
                                       {"amount": round(amount - half, 2), "category": "Ignore"}])
         self.assertEqual(set(self.ids(ignored="only", limit=1000)), {a, b})
         self.assertIn(d, set(self.ids(ignored="0", limit=1000)))
+
+    def test_transactions_by_id(self):
+        """?id=: the rows a change touched, as the whole list now has them (gone when they've left its filters), with the
+        whole list's total and sum: what the app puts back in its list instead of loading it all again."""
+        a, b, c = (r[0] for r in self.c.execute(select(Transaction.id).where(Transaction.amount < 0)
+                                                .order_by(Transaction.id).limit(3)))
+        self.c.execute(update(Transaction).where(Transaction.id == a).values(category="Ignore"))   # leaves ignored=0
+        self.c.execute(update(Transaction).where(Transaction.id == b).values(category="Groceries", notes="note"))
+        whole = transactions.api_transactions(self.c, q(ignored="0", limit=1000), {})
+        some = transactions.api_transactions(self.c, {**q(ignored="0", limit=3), "id": [a, b, c]}, {})
+        self.assertEqual(some["items"], [t for t in whole["items"] if t["id"] in (a, b, c)])
+        self.assertEqual({t["id"] for t in some["items"]}, {b, c})
+        self.assertEqual((some["total"], some["sum"]), (whole["total"], whole["sum"]))
+        groceries = transactions.api_transactions(self.c, {**q(category="Groceries"), "id": [b]}, {})
+        self.assertEqual(([t["id"] for t in groceries["items"]], groceries["family"]), ([b], ["Groceries"]))
+        self.assertEqual(transactions.api_transactions(self.c, {"id": ["nope"]}, {})["items"], [])
+        self.assertEqual(len(transactions.api_transactions(self.c, {"id": [""]}, {})["items"]), 200)   # (no ids: the list)
+        with self.assertRaises(ApiError):
+            transactions.api_transactions(self.c, {"id": [str(i) for i in range(transactions.MAX_IDS + 1)]}, {})
 
     def test_transaction_category_filters(self):
         categories.add(self.c, "Farmers Market", "Groceries")

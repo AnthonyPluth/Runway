@@ -24,7 +24,8 @@ from .. import applock, monitoring, oidc
 from ..domain import retail
 from ..storage import settings_keys as sk
 from . import mcp_http, oauth_http, routes, static, sync
-from .common import NOT_READ, ApiError, BadJson, Response, _current, header_value, host_allowed, server_error
+from .common import (NOT_READ, ApiError, BadJson, Response, _current, body_etag, etag_matches, header_value, host_allowed,
+                     server_error)
 from .oauth_http import OAUTH_METADATA, OAUTH_PUBLIC
 from .sync import background_sync
 from .api.retail import EXT_ROUTES, MAX_EXT_BODY
@@ -178,10 +179,25 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return n
 
-    def _json(self, status: int, obj) -> None:
+    def _json(self, status: int, obj, etag: bool = False) -> None:
         # allow_nan=False: an inf (an overflowed sum) would go out as `Infinity`, which isn't JSON; a ValueError here
         # is a bug, answered as one (_error).
-        self._send(status, json.dumps(obj, allow_nan=False).encode())
+        body = json.dumps(obj, allow_nan=False).encode()
+        if not etag:
+            return self._send(status, body)
+        # A read of the API: its ETag hashes the reply itself, so a 304 means the copy the app kept (in memory) says
+        # exactly what this would. Still no-store: nothing lands in the browser's disk cache.
+        tag = body_etag(body)
+        if etag_matches(self.headers.get("If-None-Match"), tag):
+            return self._not_modified(tag, "no-store")
+        self._send(status, body, extra={"ETag": tag})
+
+    def _not_modified(self, etag: str, cache: str) -> None:
+        self.send_response(304)
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", cache)
+        self._security_headers()
+        self.end_headers()
 
     def _read_json(self, limit: int, empty: Any = BadJson) -> Any:
         """The request's JSON body, of at most `limit` bytes; `empty` when it has none (a BadJson if it must have one).
@@ -206,12 +222,8 @@ class Handler(BaseHTTPRequestHandler):
         etag = header_value(r.etag) if r.etag else None
         csp = header_value(r.csp) if r.csp else None
         headers = {header_value(k): header_value(v) for k, v in r.headers.items()}
-        if etag and self.headers.get("If-None-Match") == etag:
-            self.send_response(304)
-            self.send_header("ETag", etag)
-            self._security_headers()
-            self.end_headers()
-            return
+        if etag and etag_matches(self.headers.get("If-None-Match"), etag):
+            return self._not_modified(etag, cache)
         self.send_response(r.status)
         self.send_header("Content-Type", ctype)
         for k, v in headers.items():
@@ -509,7 +521,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(e.status, {"error": str(e)})
         if isinstance(result, Response):
             return self._respond(result)
-        return self._json(200, result)
+        return self._json(200, result, etag=method == "GET")
 
     def _carta_callback(self, url) -> None:
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""

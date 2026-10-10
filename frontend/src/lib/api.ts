@@ -37,6 +37,15 @@ export function signInUrl(): string {
   return "/auth/login?next=" + encodeURIComponent(location.pathname + location.hash);
 }
 
+// The last reply to each read, by address, with its ETag: asked again, Runway answers 304 when the reply would be the
+// same, and this copy is used (parsed afresh each time, so no page shares an object with another). In memory only:
+// replies are no-store, so nothing goes to the disk cache, and these go with a reload, signing out, a 401 and a 423.
+const replies = new Map<string, { etag: string; text: string }>();
+const MAX_REPLIES = 50;
+let forgotten = 0;   // how many times they've been forgotten: a 304 to a call made before then isn't used
+/** Forget the kept replies (signing out). */
+export function forgetReplies(): void { replies.clear(); forgotten++; }
+
 const OFFLINE = "Can’t reach Runway. Check your connection and try again.";
 const UNREACHABLE = "Runway is restarting or unreachable. Try again in a moment.";   // what a proxy says while it's down
 const LOCKED = "Runway is locked on this device. Unlock it to carry on.";
@@ -50,6 +59,8 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   if (opts.keepalive) init.keepalive = true;
   if (opts.body instanceof Blob) { headers["Content-Type"] = "application/octet-stream"; init.body = opts.body; }
   else if (opts.body !== undefined) { headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const kept = init.method === "GET" ? replies.get(path) : undefined, since = forgotten;
+  if (kept) headers["If-None-Match"] = kept.etag;
   const page = init.method === "GET" && !opts.keep ? pageLoads : null;
   if (page) init.signal = page.signal;
   let res: Response;
@@ -59,6 +70,14 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     // fetch fails with a TypeError when there's no answer at all; each browser words it differently
     throw err instanceof TypeError ? new ApiError(OFFLINE, 0) : err;
   }
+  if (res.status === 304 && kept) {
+    if (page?.signal.aborted) return new Promise(() => {});
+    if (since !== forgotten) return api<T>(path, opts);   // forgotten meanwhile (signed out): ask for the whole reply
+    if (replies.get(path) === kept) { replies.delete(path); replies.set(path, kept); }   // the oldest goes first
+    return JSON.parse(kept.text) as T;
+  }
+  if (init.method === "GET") replies.delete(path);
+  if (res.status === 401 || res.status === 423) forgetReplies();
   if (res.status === 401) {   // signed out (session expired)
     const leave = window.dispatchEvent(new CustomEvent("runway:signed-out", { cancelable: true, detail: { background: !!opts.background } }));
     if (!leave || opts.background) throw new ApiError("Your session expired. Sign in again to keep going.", 401);
@@ -70,7 +89,16 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     if (page?.signal.aborted) return new Promise(() => {});
     throw new ApiError(LOCKED, 423);
   }
-  const data = await res.json().catch(() => ({}));
+  const etag = init.method === "GET" && res.ok ? res.headers?.get("ETag") : null;
+  const text = etag ? await res.text().catch(() => null) : null;
+  let data = text === null ? await res.json().catch(() => ({})) : {};
+  if (text !== null) {
+    try {
+      data = JSON.parse(text);
+      replies.set(path, { etag: etag!, text });
+      if (replies.size > MAX_REPLIES) replies.delete(replies.keys().next().value!);
+    } catch { /* not JSON: answered as {} (as res.json() is above), and not kept */ }
+  }
   if (page?.signal.aborted) return new Promise(() => {});
   if (!res.ok) {
     const said = opts.failed ? `${opts.failed} (${res.status})` : [502, 503, 504].includes(res.status) ? UNREACHABLE : `Request failed (${res.status})`;

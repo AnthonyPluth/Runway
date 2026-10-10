@@ -2,6 +2,7 @@
 // loading it again after a change. The page's All and To review tabs each have one. Modelled on reports/chart.svelte.ts's
 // Report: the last list stays on screen while a new one loads, and a slow old answer never replaces a newer one.
 import { errMsg } from "$lib/act";
+import { categories } from "$lib/categories.svelte";
 import { apiCall } from "$lib/contract";
 import { route, setQuery } from "$lib/app.svelte";
 import { debounced } from "$lib/debounce";
@@ -10,6 +11,8 @@ import { untrack } from "svelte";
 import type { TxList } from "./types";
 
 export const PAGE = 100;
+/** At most this many rows are loaded again on their own after a change (the server's transactions.MAX_IDS). */
+export const MAX_IDS = 100;
 
 export class TxListing {
   readonly review: boolean = false;
@@ -109,6 +112,33 @@ export class TxListing {
       if (mine !== this.#seq) return;
       // With a list on screen it stays (you may be part way down it), under a line saying it isn't up to date.
       if (this.list) this.refreshError = errMsg(err); else this.listError = errMsg(err);
+    }
+  };
+
+  /** After a change to these transactions (the ids in its reply's `was`), only they are loaded again, under the filters
+   * the list was loaded with: each is updated where it is, one that has left the filters leaves the list, and the count
+   * and sum are the whole list's. `cats`: the categories the change was from and to. When a few rows can't show the
+   * change it loads the whole list again instead: filters edited since, too many rows, a row new to the list or with
+   * another date (it would move), or a transfer category (it can change another row: the card a payment's logo shows). */
+  reloadRows = async (ids: string[], cats: (string | null | undefined)[] = []): Promise<void> => {
+    const list = this.list, now = { ...this.f }, ignored = txShow.ignored, want = [...new Set(ids)];
+    const transfer = (c: string | null | undefined) => !!c && !!categories.list.find((x) => x.name === c)?.is_transfer;
+    if (!list || !want.length || want.length > MAX_IDS || ignored !== this.appliedIgnored || !sameFilters(now, this.applied) ||
+        cats.some(transfer)) return this.load();
+    const mine = ++this.#seq;
+    const qs = this.#query(0, want.length);
+    for (const id of want) qs.append("id", id);
+    try {
+      const data = await apiCall<"GET /api/transactions">(`/api/transactions?${qs}`);
+      if (mine !== this.#seq || this.list !== list) return;
+      const at = new Map(list.items.map((t) => [t.id, t.posted]));
+      if (data.items.some((t) => at.get(t.id) !== t.posted)) return this.load();
+      const fresh = new Map(data.items.map((t) => [t.id, t]));
+      list.items = list.items.filter((t) => fresh.has(t.id) || !want.includes(t.id)).map((t) => fresh.get(t.id) ?? t);
+      list.total = data.total; list.sum = data.sum; this.count = data.total; this.listError = ""; this.refreshError = "";
+      this.#countIgnored(mine, now);
+    } catch (err) {
+      if (mine === this.#seq) this.refreshError = errMsg(err);
     }
   };
 

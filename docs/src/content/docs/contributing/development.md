@@ -183,6 +183,12 @@ Some routes have a typed contract with the web app, so a field renamed on one si
 
 To cover another route: add its types to `contract.py`, annotate its handler, run `make api-contract`, switch its callers to `apiCall`, and add a call to `tests/test_api_contract.py` (which fails until every covered route is checked there).
 
+### Reads and 304s
+
+Every JSON reply to a `GET` under `/api/` carries an `ETag`, a SHA-256 of the reply's bytes (`common.body_etag`), and stays `Cache-Control: no-store`. Asked again with `If-None-Match` naming it (weak `W/"…"` or strong, alone or in a list), an unchanged reply is a `304` with no body. Because the ETag is the reply itself, anything that changes what a route says (an edit, a sync, the day rolling over) is a new one: a route needs nothing of its own to get this, and must never send a value that changes on every call (a timestamp of the request) or every read becomes a full reply again. `api()` in `lib/api.ts` keeps the last reply to each address in memory only, never on disk, sends its ETag and uses it on a 304; it forgets them on signing out, a 401 and a 423, and a reload starts empty.
+
+After a change to some transactions, the Transactions page loads only those rows again (`GET /api/transactions?id=…&id=…`, at most 100: each of them as the list now has it, or none when it has left the filters, with the whole list's `total` and `sum`) instead of the whole list (`TxListing.reloadRows`). It falls back to the whole list whenever a few rows can't show the change: a row that's new to the list or has a new date, or a transfer category, which can change another row.
+
 ## Releases
 
 Every push to `main` runs the tests and, at the same time, builds the image for `linux/amd64` and `linux/arm64` with the next version baked in (and checks that it starts). Nothing is published until the tests pass; then GitHub Actions:

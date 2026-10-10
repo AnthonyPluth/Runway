@@ -105,11 +105,16 @@
     }
   }
 
+  /** Loads again only the transactions a change touched (its reply's `was`: the order's other charges too), given the
+   *  categories it was from and to (txList.reloadRows). */
+  const reloadWas = (was: Was[], category?: string) => txs.reloadRows(was.map((w) => w.id),
+    [category, ...was.flatMap((w) => [w.category, ...(w.splits ?? []).map((s) => s.category)])]);
+
   /** Keep the category it has and take it out of Review (whoever set it). */
   function accept(t: Tx): Promise<boolean> {
     const category = t.category ?? "";
     return decide(t, () => api<{ was: Was[] }>(`/api/transactions/${encodeURIComponent(t.id)}/accept`, { method: "POST" }), (r) => {
-      undoBatched(`Accepted ${category}`, async () => { await restoreTx(r.was); await txs.load(); }, { description: t.payee || t.description || undefined });
+      undoBatched(`Accepted ${category}`, async () => { await restoreTx(r.was); await reloadWas(r.was); }, { description: t.payee || t.description || undefined });
       refreshState();
       if (!review) { t.needs_review = 0; t.category_source = "manual"; }
     });
@@ -128,13 +133,13 @@
       `/api/transactions/${encodeURIComponent(t.id)}/category`, { method: "POST", body: { category } }), async (r) => {
       const offer = r.offer_rule ? ruleOffer(t.id, category, r.offer_rule, txs.load) : null;
       undoBatched(offer ? category : prev === category ? `Accepted ${category}` : `${prev || "Uncategorized"} → ${category}`,
-        async () => { await restoreTx(r.was); await txs.load(); },
+        async () => { await restoreTx(r.was); await reloadWas(r.was, category); },
         { description: offer?.description || t.payee || t.description || undefined, also: offer?.also });
       refreshState();
       if (r.also_updated) { await txs.load(); return; }
       if (!review) {
         t.category = category; t.needs_review = 0; t.category_source = "manual";
-        txs.load();   // the sum above the list (and a filter it may have left) follow
+        reloadWas(r.was, category);   // the rows as saved, the sum above the list (and a filter they may have left) follow
       }
     });
   }

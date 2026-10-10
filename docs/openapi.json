@@ -1567,12 +1567,6 @@
               "null"
             ]
           },
-          "created_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "recurring_id": {
             "type": [
               "integer",
@@ -1582,12 +1576,6 @@
           "is_split": {
             "type": [
               "integer",
-              "null"
-            ]
-          },
-          "merchant_id": {
-            "type": [
-              "string",
               "null"
             ]
           },
@@ -1617,12 +1605,6 @@
             ]
           },
           "account_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "account_kind": {
             "type": [
               "string",
               "null"
@@ -1695,16 +1677,13 @@
           "confidence",
           "needs_review",
           "pending",
-          "created_at",
           "recurring_id",
           "is_split",
-          "merchant_id",
           "recurring_linked_by",
           "notes",
           "bank_posted",
           "bank_amount",
           "account_name",
-          "account_kind",
           "recurring_name",
           "splits",
           "retail",
