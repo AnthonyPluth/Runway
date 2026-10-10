@@ -174,7 +174,7 @@ def seed_receipt(conn, today: date | None = None) -> None:
     conn.execute(insert(RetailOrder).values(id=order, retailer="target", order_number="900-0000-0000001", channel="store",
                                             placed=day, total=total, subtotal=subtotal, tax=tax, details=1, payment="Visa 1234"))
     conn.execute(insert(RetailItem), [{"order_id": order, "position": n, "title": title, "quantity": qty, "amount": amount,
-                                       "category": category, "category_source": "user" if category else None}
+                                       "category": category, "category_source": "manual" if category else None}
                                       for n, (title, qty, amount, category) in enumerate(items)])
     conn.execute(insert(RetailCharge).values(id=f"{order}|1", order_id=order, date=day, amount=-total, payment="Visa 1234",
                                              tx_id="demo-card|demo-receipt", match_source="auto"))

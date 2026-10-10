@@ -49,6 +49,8 @@ class DemoTests(DbCase):
         self.assertGreater(len(items), 5)
         self.assertEqual(sum(1 for category, _ in items if category is None), 1)
         self.assertTrue(any(qty > 1 for _, qty in items))
+        sources = self.c.execute(select(RetailItem.category_source).where(RetailItem.order_id == "target:900-0000-0000001", RetailItem.category.is_not(None))).fetchall()
+        self.assertEqual({s for (s,) in sources}, {"manual"})
         tx = self.c.execute(select(Transaction.amount).where(Transaction.id == "demo-card|demo-receipt")).scalar()
         total, subtotal, tax = self.c.execute(select(RetailOrder.total, RetailOrder.subtotal, RetailOrder.tax)).fetchone()
         self.assertAlmostEqual(-tx, total, places=2)
