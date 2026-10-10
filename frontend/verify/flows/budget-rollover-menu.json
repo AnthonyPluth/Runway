@@ -3,6 +3,8 @@
   "page": "budget",
   "steps": [
     { "press": { "selector": "input[aria-label='Budget for Coffee & Snacks']", "key": "Tab" } },
+    { "wait_for": "button[aria-label^='A different budget for Coffee & Snacks']:focus-visible" },
+    { "press": { "selector": "button[aria-label^='A different budget for Coffee & Snacks']", "key": "Tab" } },
     { "wait_for": "button[aria-label='Actions for Coffee & Snacks']:focus-visible" },
     { "screenshot": "button" },
     { "click": "button[aria-label='Actions for Coffee & Snacks']" },
