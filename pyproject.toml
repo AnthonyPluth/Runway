@@ -79,7 +79,7 @@ id = "server-on-top"
 name = "Only the server imports the server (the domain, providers, storage and shared modules don't)"
 type = "forbidden"
 source_modules = ["runway.domain", "runway.providers", "runway.storage", "runway.tls", "runway.validate", "runway.money",
-                  "runway.dates", "runway.monitoring", "runway.oidc"]
+                  "runway.dates", "runway.monitoring", "runway.oidc", "runway.applock"]
 forbidden_modules = ["runway.server"]
 
 [[tool.importlinter.contracts]]

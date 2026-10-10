@@ -459,6 +459,21 @@ auth_sessions = Table(
     info={'doc': 'signed-in browsers (only a hash of each session token is kept)'},
 )
 
+app_locks = Table(
+    'app_locks', metadata,
+    Column('session', Text, refers('app_locks', 'session', 'auth_sessions.token_hash', 'CASCADE'), primary_key=True,
+           doc='the signed-in browser it locks (auth_sessions): it ends with that sign-in'),
+    Column('credential_id', Text, nullable=False, doc="the device's passkey for it, base64url"),
+    Column('public_key', Text, nullable=False, doc="the passkey's public key (SubjectPublicKeyInfo DER), base64url"),
+    Column('alg', Integer, nullable=False, doc='COSE algorithm: -7 (ES256) or -257 (RS256)'),
+    Column('sign_count', Integer, nullable=False, server_default=text('0'), doc="the authenticator's last signature counter"),
+    Column('idle', Integer, nullable=False, doc='seconds away from the app before it locks again'),
+    Column('unlocked_at', Float, doc='when it was last unlocked'),
+    Column('unlocked_until', Float, doc='when that unlock ends (moved on while the app is in use); NULL: locked'),
+    Column('created', Float, nullable=False),
+    info={'doc': 'app locks (Face ID / Touch ID) on signed-in browsers: no secrets, only what checks an unlock'},
+)
+
 oauth_clients = Table(
     'oauth_clients', metadata,
     Column('id', Text, primary_key=True, doc='rwc_...'),

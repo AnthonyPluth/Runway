@@ -29,6 +29,8 @@ if __name__ == "__main__":
     p.add_argument("file", nargs="*", help="backup file (for backup / restore), or the pages to visit (for verify; default all)")
     p.add_argument("--ai-buttons", action="store_true", help="demo: also add what the AI buttons need to show (make verify's)")
     p.add_argument("--investments", action="store_true", help="demo: also add a sample brokerage (make verify's)")
+    p.add_argument("--signed-in", action="store_true",
+                   help="demo: also add a signed-in browser, its token in RUNWAY_VERIFY_SESSION (make verify's)")
     p.add_argument("--yes", action="store_true", help="restore without asking")
     a = p.parse_args()
     if a.command == "verify":
@@ -51,6 +53,9 @@ if __name__ == "__main__":
                     demo.seed_ai_buttons(conn)
                 if a.investments:
                     demo.seed_investments(conn, date.today())
+                if a.signed_in:
+                    from runway import verify
+                    verify.seed_session(conn, os.environ[verify.SESSION_ENV])
         elif a.command == "backup":
             # Without a file name: this folder, or the data folder when Runway has one set (in Docker, /data: the code
             # folder there is read-only).

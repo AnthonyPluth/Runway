@@ -9,7 +9,7 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
   - `domain/`: what Runway works out from your data (`forecast.py`, `recurring.py`, `categorize.py`, `reports.py`, `networth.py`, `churning.py`, `retail/`, and so on).
   - `providers/`: the outside services (`plaid*.py`, `simplefin.py`, `carta.py`, `prices.py`, `finnhub.py`, `realie.py`, `webpush.py`). A provider doesn't import another; what they share has a module of its own (`banktx.py`, `banks.py`).
   - `storage/`: the database (`db.py`, `schema.py`, `models.py`, `settings_keys.py`, `secretbox.py`, `backup.py`) and `migrations/` (Alembic). It imports nothing above it, and only it imports the database drivers and Alembic.
-  - At the top, what everything shares: `tls.py` (the only module that opens outbound connections), `validate.py`, `money.py`, `dates.py`, `monitoring.py`, `oidc.py`.
+  - At the top, what everything shares: `tls.py` (the only module that opens outbound connections), `validate.py`, `money.py`, `dates.py`, `monitoring.py`, `oidc.py`, `applock.py` (the app lock on top of sign-in).
   - `static/`: the served assets.
 
   A broken boundary fails `make lint`: move the code to where its import is allowed rather than adding an exception. A new provider module joins its provider's contract, or gets one of its own.

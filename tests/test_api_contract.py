@@ -5,15 +5,20 @@ types it's given."""
 import ast
 import importlib.util
 import json
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sqlalchemy import insert, select, update
 
 from runway.domain import demo, splits
-from runway.storage.models import Account, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder, Transaction
-from runway.server.api import accounts, budget, budget_suggest, transactions
+from runway.storage.models import (Account, AuthSession, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder,
+                                   Transaction)
+from runway.server.api import accounts, budget, budget_suggest, lock, transactions
+from runway.server.common import _current
 from tests.shared import TODAY, DbCase, freeze_today
+from tests.webauthn_support import ORIGIN, Authenticator
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("api_contract", ROOT / "tools" / "api_contract.py")
@@ -94,6 +99,7 @@ class Replies(DbCase):
         self.test_accounts()
         self.test_budget()
         self.test_transactions()
+        self.test_lock()
         self.assertEqual(self.checked, covered(), "check each route the contract covers here")
 
     def test_accounts(self):
@@ -143,6 +149,24 @@ class Replies(DbCase):
         splits.set_splits(self.c, made["id"], [])
         self.check("DELETE /api/transactions/{id}", transactions.api_tx_delete(self.c, {}, {}, made["id"]))
         self.assertIsNone(self.c.execute(select(Transaction.id).where(Transaction.id == made["id"])).fetchone())
+
+    def test_lock(self):
+        # Without sign-in there's none; with it, this session's, turned on with a software passkey, locked and unlocked.
+        self.check("GET /api/lock", lock.api_lock(self.c, {}, {}))
+        env = {"OIDC_ISSUER": "https://idp.example", "OIDC_CLIENT_ID": "runway", "RUNWAY_PUBLIC_URL": ORIGIN}
+        self.c.execute(insert(AuthSession).values(token_hash="h1", sub="u1", email="me@example.com", created=1.0, expires=2e10))
+        with mock.patch.dict(os.environ, env), mock.patch.object(_current, "session_key", "h1", create=True):
+            a = Authenticator()
+            ch = lock.api_lock_challenge(self.c, {}, {"purpose": "register"})
+            self.check("POST /api/lock/challenge", ch)
+            self.check("POST /api/lock/register", lock.api_lock_register(self.c, {}, a.create(ch["challenge"])))
+            self.check("POST /api/lock/settings", lock.api_lock_settings(self.c, {}, {"idle": 300}))
+            self.check("POST /api/lock/engage", lock.api_lock_engage(self.c, {}, {}))
+            ch = lock.api_lock_challenge(self.c, {}, {"purpose": "unlock"})
+            self.check("POST /api/lock/challenge", ch)
+            self.check("POST /api/lock/unlock", lock.api_lock_unlock(self.c, {}, a.get(ch["challenge"])))
+            self.check("GET /api/lock", lock.api_lock(self.c, {}, {}))
+            self.check("DELETE /api/lock", lock.api_lock_off(self.c, {}, {}))
 
 
 class Mismatches(unittest.TestCase):

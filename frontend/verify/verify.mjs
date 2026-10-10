@@ -31,9 +31,12 @@ export function findChromium(env = process.env, exists = existsSync, list = read
  *  that fits in a pull request (`make pr-screenshots`). */
 export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
-/** A flow is { name, page?, viewports?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | screenshot } ] }:
+/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
-const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string" };
+const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string",
+  reload: "boolean", authenticator: "string" };
+// The virtual authenticator's states an `authenticator` step sets (a signed_in flow's): Face ID that works, or that fails.
+const AUTHENTICATOR = ["verified", "unverified"];
 export const unknownPages = (names) => names.filter((n) => !PAGES.includes(n));
 
 export function flowProblems(flow) {
@@ -44,7 +47,10 @@ export function flowProblems(flow) {
     const keys = Object.keys(s).filter((k) => k !== "timeout");
     if (keys.length !== 1 || !(keys[0] in ACTIONS)) out.push(`step ${i + 1} must have exactly one of ${Object.keys(ACTIONS).join(", ")}`);
     else if (typeof s[keys[0]] !== ACTIONS[keys[0]]) out.push(`step ${i + 1}: ${keys[0]} takes a ${ACTIONS[keys[0]]}`);
+    else if (keys[0] === "authenticator" && !flow.signed_in) out.push(`step ${i + 1}: authenticator needs "signed_in": true`);
+    else if (keys[0] === "authenticator" && !AUTHENTICATOR.includes(s.authenticator)) out.push(`step ${i + 1}: authenticator is ${AUTHENTICATOR.join(" or ")}`);
   }
+  if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
   for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS)) out.push(`unknown viewport ${v}`);
   return out;
@@ -84,7 +90,24 @@ async function runStep(page, step, shot) {
     if (!got.includes(step.expect_text.text)) throw new Error(`expected "${step.expect_text.text}" in ${step.expect_text.selector}, found "${got.slice(0, 80)}"`);
   } else if ("screenshot" in step) {
     await shot(step.screenshot);
+  } else if ("reload" in step) {   // opening the app again (a launch), not just another route
+    await page.reload({ waitUntil: "networkidle", timeout });
+  } else if ("authenticator" in step) {
+    const { cdp, authenticatorId } = page.authenticator;
+    await cdp.send("WebAuthn.setUserVerified", { authenticatorId, isUserVerified: step.authenticator === "verified" });
   }
+}
+
+/** A signed_in flow's browser: the signed-in demo server's session cookie, and a virtual platform authenticator (Chrome's
+ *  DevTools WebAuthn domain) standing in for Face ID or Touch ID, which verifies the person until a step says otherwise. */
+async function signIn(ctx, page, url, token) {
+  await ctx.addCookies([{ name: "runway_session", value: token, url }]);
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true,
+    automaticPresenceSimulation: true } });
+  page.authenticator = { cdp, authenticatorId };
 }
 
 async function main() {
@@ -94,6 +117,9 @@ async function main() {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = opt("--out", join(here, "../../artifacts/verify"));
   const flowsDir = opt("--flows", join(here, "flows"));
+  // The signed-in demo server (runway/verify.py), for flows with "signed_in": true, and its session's token.
+  const signedInUrl = opt("--signed-in-url", process.env.RUNWAY_VERIFY_SIGNED_IN_URL);
+  const session = process.env.RUNWAY_VERIFY_SESSION;
   if (!base) { console.error("verify: no server address (--url or RUNWAY_VERIFY_URL)"); process.exit(2); }
   const unknown = unknownPages(args);
   if (unknown.length) { console.error(`verify: no such page: ${unknown.join(", ")} (pages: ${PAGES.join(", ")})`); process.exit(2); }
@@ -114,9 +140,10 @@ async function main() {
   const notes = [];      // what's only reported
   const results = [];
 
-  async function visit(label, viewport, work) {
+  async function visit(label, viewport, work, signedIn = false) {
     const ctx = await browser.newContext({ viewport: VIEWPORTS[viewport] });
     const page = await ctx.newPage();
+    if (signedIn) await signIn(ctx, page, signedInUrl, session);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
@@ -153,12 +180,13 @@ async function main() {
   }
   for (const flow of flows) {
     if (args.length && !args.includes(flow.page ?? "overview")) continue;
+    if (flow.signed_in && !(signedInUrl && session)) { notes.push(`flow ${flow.name}: skipped (no signed-in server: run it with make verify)`); continue; }
     for (const viewport of flow.viewports ?? Object.keys(VIEWPORTS)) {
       await visit(`flow ${flow.name}`, viewport, async (page, shot) => {
-        await page.goto(`${base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
+        await page.goto(`${flow.signed_in ? signedInUrl : base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
         for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
         await shot(`flow-${flow.name}`);
-      });
+      }, !!flow.signed_in);
     }
   }
   await browser.close();

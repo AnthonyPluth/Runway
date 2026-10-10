@@ -1,0 +1,22 @@
+{
+  "name": "app-lock",
+  "page": "setup",
+  "signed_in": true,
+  "viewports": ["phone", "desktop"],
+  "steps": [
+    { "goto": "#setup/data" },
+    { "click": "button:text-is('Turn on app lock')" },
+    { "wait_for": "text=On for this device" },
+    { "screenshot": "settings" },
+    { "authenticator": "unverified" },
+    { "reload": true },
+    { "wait_for": "button:text-is('Unlock'):not([disabled])" },
+    { "expect_text": { "selector": "body", "text": "Runway is locked" } },
+    { "screenshot": "locked" },
+    { "authenticator": "verified" },
+    { "click": "button:text-is('Unlock')" },
+    { "wait_for": "text=On for this device" },
+    { "click": "button:text-is('Turn off on this device')" },
+    { "wait_for": "button:text-is('Turn on app lock')" }
+  ]
+}

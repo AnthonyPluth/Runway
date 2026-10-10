@@ -61,12 +61,12 @@ SWITCHES = {**{scope: key for scope, (_paths, key) in CHANGES.items()}, ANYTHING
 
 # Never reachable from /mcp, whatever the scope or switch: each blocks its own path and everything under it. The
 # assistant settings (an assistant must never widen its own access or end a connection), API keys and other settings,
-# bank connections and third-party credentials or tokens, notifications and devices, logos (they fetch from Logo.dev
+# bank connections and third-party credentials or tokens, notifications and devices, the app lock, logos (they fetch from Logo.dev
 # with its key), backups and restoring one (a backup holds the bank access and keys), syncing, the live-prices stream
 # and the extension's download.
 BLOCKED = (
     "/api/mcp-settings", "/api/settings", "/api/state", "/api/connect", "/api/plaid", "/api/carta", "/api/finnhub",
-    "/api/logodev", "/api/realie", "/api/retail/token", "/api/retail/settings", "/api/push",
+    "/api/logodev", "/api/realie", "/api/retail/token", "/api/retail/settings", "/api/push", "/api/lock",
     "/api/accounts/{id}/logo", "/api/accounts/{id}/logo-options", "/api/merchants/logo", "/api/merchants/logo-options",
     "/api/investments/logo", "/api/investments/logo-options",
     "/api/backup", "/api/restore", "/api/sync", "/api/investments/sync", "/api/investments/stream", "/api/retail/extension.zip",

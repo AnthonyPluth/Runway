@@ -295,3 +295,51 @@ class TxCreated(TypedDict):
     ok: bool
     id: str
 
+
+# App lock (runway/applock.py)
+
+class LockStatus(TypedDict):
+    """This signed-in device's app lock: whether it can have one (sign-in is on), whether it's on, whether it's locked
+    now, how long away locks it (seconds: 0, 60, 300 or 900), and its passkey's id (base64url)."""
+    available: bool
+    on: bool
+    locked: bool
+    idle: int
+    credential_id: str | None
+
+
+class LockChallengeAsk(TypedDict):
+    """POST /api/lock/challenge: a challenge for turning the lock on (register) or unlocking."""
+    purpose: Literal["register", "unlock"]
+
+
+class LockChallenge(TypedDict):
+    """A single-use challenge (base64url) for this session, the relying party's ID (Runway's host), and for an unlock,
+    the passkey to use."""
+    challenge: str
+    rp_id: str
+    credential_id: str | None
+
+
+class LockRegister(TypedDict):
+    """POST /api/lock/register: the passkey navigator.credentials.create made, all base64url, and when to lock."""
+    credential_id: str
+    client_data: str
+    authenticator_data: str
+    public_key: str
+    alg: int
+    idle: int
+
+
+class LockUnlock(TypedDict):
+    """POST /api/lock/unlock: navigator.credentials.get's answer to the unlock challenge, all base64url."""
+    credential_id: str
+    client_data: str
+    authenticator_data: str
+    signature: str
+
+
+class LockIdle(TypedDict):
+    """POST /api/lock/settings: how long away locks it (seconds: 0, 60, 300 or 900)."""
+    idle: int
+

@@ -11,6 +11,7 @@ import Landmark from "@lucide/svelte/icons/landmark";
 import Repeat from "@lucide/svelte/icons/repeat";
 import List from "@lucide/svelte/icons/list";
 import { act } from "./act";
+import { forget as forgetLock } from "./lock.svelte";
 
 export interface NavItem { page: string; label: string; icon: typeof House }
 
@@ -86,11 +87,13 @@ export function balanceAsOf(dates: (string | null | undefined)[], today: string,
   return { text: `Balance as of ${relDay(d, today)}${at}`, stale: d < isoDay(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1)) };
 }
 
-/** Signing out is a POST (so no other site can sign you out with a link); then on to the provider's sign-out page. */
+/** Signing out is a POST (so no other site can sign you out with a link); then on to the provider's sign-out page. The
+ *  app lock on this device ends with the sign-in (the server's goes with the session; this is the device's note of it). */
 export async function signOut(e: Event): Promise<void> {
   e.preventDefault();
   await act(async () => {
     const r = await api<{ redirect?: string }>("/auth/logout", { method: "POST" });
+    forgetLock();
     location.href = r.redirect || "/auth/signed-out";
   });
 }

@@ -39,7 +39,7 @@ AREA_DOCS = {
     "merchants": "using/features", "networth": "using/features", "assets": "using/features",
     "realie": "using/features", "equity": "using/features", "carta": "using/features",
     "churning": "using/features", "retail": "using/browser-extension", "mcp-settings": "using/mcp",
-    "backup": "start/deployment", "restore": "start/deployment",
+    "backup": "start/deployment", "restore": "start/deployment", "lock": "start/deployment",
 }
 
 CALL = re.compile(r"\b(?:apiCall|api|fetch|EventSource)\s*(?:<[^>(]*>)?\(\s*([`\"'])(/api/[^`\"']*)\1")

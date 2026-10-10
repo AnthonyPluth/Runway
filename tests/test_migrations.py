@@ -497,6 +497,34 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
+    def test_0043_adds_app_locks_that_go_with_their_sign_in(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0042")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("app_locks", sa.inspect(c).get_table_names())
+            c.exec_driver_sql("INSERT INTO auth_sessions(token_hash, sub, email, created, expires) "
+                              "VALUES ('h1', 'u1', 'me@example.com', 1, 2), ('h2', 'u1', 'me@example.com', 1, 2)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            self.assertEqual(conn.execute(select(func.count()).select_from(schema.auth_sessions)).scalar(), 2)   # sign-ins stay
+            lock = {"credential_id": "Y3JlZA", "public_key": "a2V5", "alg": -7, "idle": 60, "created": 1.0}
+            conn.execute(insert(schema.app_locks).values(session="h1", **lock))
+            self.assertEqual(conn.execute(select(schema.app_locks.c.sign_count, schema.app_locks.c.unlocked_until)).fetchone()[:],
+                             (0, None))   # a new lock: no counter yet, and locked
+            with self.assertRaises(sa.exc.IntegrityError):   # a lock belongs to a sign-in that's there
+                with conn.sa.begin_nested():
+                    conn.execute(insert(schema.app_locks).values(session="nobody", **lock))
+            conn.execute(sa.delete(schema.auth_sessions).where(schema.auth_sessions.c.token_hash == "h1"))   # and goes with it
+            self.assertEqual(conn.execute(select(func.count()).select_from(schema.app_locks)).scalar(), 0)
+        with db.engine(self.path).begin() as c:   # and back down
+            command.downgrade(db.alembic_config(c), "0042")
+            self.assertNotIn("app_locks", sa.inspect(c).get_table_names())
+            self.assertEqual(c.exec_driver_sql("SELECT count(*) FROM auth_sessions").scalar(), 1)
+
     def test_0042_adds_budget_months_and_keeps_every_budget_as_it_was(self):
         from alembic import command
         db.init(self.path)

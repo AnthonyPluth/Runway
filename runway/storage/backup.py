@@ -44,8 +44,10 @@ from .models import PlaidItem, Setting
 
 FORMAT = "runway-backup"
 VERSION = 2   # 2: it records its schema (revision); a Runway that reads only 1 refuses it rather than lose what's new
-# Sign-ins, and the assistants connected with OAuth: neither travels (reconnect them after a restore).
-SKIP = {"auth_sessions", "auth_pending", "oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"}
+# Sign-ins (with the app locks on them), and the assistants connected with OAuth: neither travels (reconnect them after
+# a restore).
+SKIP = {"auth_sessions", "auth_pending", "app_locks", "oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens",
+        "oauth_consents"}
 UNVERSIONED = "0036"   # backups made before they recorded their revision were made at this revision or an earlier one...
 UNVERSIONED_PLAID_SIDES = "0037"   # ... or at this one, which gave a Plaid connection's investment sync its own columns
 OLD_BACKUP = ("This backup is from an older version of Runway that didn’t record its database version, so some of "
