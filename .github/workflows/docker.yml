@@ -104,7 +104,14 @@ jobs:
           - {python: "3.14", database: postgres, shard: 3/3}
     services:
       postgres:                # used by the postgres run; the sqlite run ignores it
-        image: postgres:16
+        # The official postgres:16 image, pulled through Google's Docker Hub mirror (mirror.gcr.io) rather than from
+        # Docker Hub: the runners share addresses, so Docker Hub's limit on anonymous pulls failed every test job
+        # before a test ran ("toomanyrequests"). It is pinned by digest, so the mirror can only serve exactly the image
+        # Docker Hub publishes under that digest. Dependabot doesn't read service images, so bump it by hand: take the
+        # digest `docker buildx imagetools inspect postgres:16` prints (the index's, not one platform's) and check
+        # mirror.gcr.io serves it (`docker buildx imagetools inspect mirror.gcr.io/library/postgres@sha256:...`).
+        # To go back to Docker Hub, use `postgres:16@sha256:...` (the same digest).
+        image: mirror.gcr.io/library/postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d   # 16.15
         env:
           POSTGRES_USER: runway
           POSTGRES_PASSWORD: runway
