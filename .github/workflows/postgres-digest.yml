@@ -1,0 +1,67 @@
+name: Postgres digest check
+
+# Weekly: compare the digest docker.yml pins for the test jobs' Postgres service (mirror.gcr.io/library/postgres:16@sha256:...)
+# with the one postgres:16 points to now, and when they differ open one issue saying so, or update the one already open.
+# Dependabot doesn't read a workflow's `services:` images, so without this the pin misses Postgres 16's patch releases
+# until someone remembers to bump it. It changes nothing but that issue: no pull request, no merge.
+# The comparison is .github/scripts/postgres_digest.py (tests/test_postgres_digest.py); the bump itself is by hand,
+# as the comment on the image line in docker.yml describes.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
+# One run at a time (a manual run during the weekly one waits): two at once could each open an issue.
+concurrency:
+  group: postgres-digest
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read           # check out the workflow file and the script
+      issues: write            # open or update the issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/postgres_digest.py
+            .github/workflows/docker.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Compare the pinned digest with postgres:16
+        id: compare
+        run: python3 .github/scripts/postgres_digest.py .github/workflows/docker.yml "$RUNNER_TEMP/issue-body.md"
+
+      - name: Open or update the issue
+        if: steps.compare.outputs.drift == 'true'
+        env:
+          TITLE: "ci: CI's pinned Postgres image is behind postgres:16"   # the script's TITLE
+        run: |
+          body="$RUNNER_TEMP/issue-body.md"
+          # The open issues with this title, newest first (the issues list includes pull requests, which have a pull_request key).
+          numbers=$(gh api --paginate "repos/$GH_REPO/issues?state=open&per_page=100" \
+                      --jq '.[] | select(.pull_request == null and .title == env.TITLE) | .number')
+          number=${numbers%%$'\n'*}
+          if [ -z "$number" ]; then
+            gh issue create --title "$TITLE" --body-file "$body"
+          elif [ "$(gh issue view "$number" --json body --jq .body)" != "$(cat "$body")" ]; then
+            gh issue edit "$number" --body-file "$body"
+            echo "Updated issue #$number"
+          else
+            echo "Issue #$number already says this."
+          fi
