@@ -7,6 +7,11 @@
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="apple-touch-icon" href="/logo-180.png">
 <meta name="theme-color" content="#0a0a0a">
+<!-- The font the first screen is set in (app.css: Inter's Latin set, which the Latin-extended file and Geist only back up),
+     fetched while the script loads rather than after the styles name it. crossorigin is needed even from the same origin
+     (fonts are fetched that way), and it sends the session cookie, which /fonts/Inter-* needs. This page is only ever
+     served to someone signed in, so the preload never meets the sign-in redirect. -->
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/Inter-latin-Variable.woff2">
 </head>
 <body>
 <div id="app"></div>

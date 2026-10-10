@@ -175,7 +175,7 @@
       "path": "/api/overview",
       "handler": "runway/server/api/state.py:api_overview",
       "web": [
-        "frontend/src/pages/Overview.svelte",
+        "frontend/src/lib/prefetch.ts",
         "frontend/src/pages/Transactions.svelte"
       ],
       "tests": [

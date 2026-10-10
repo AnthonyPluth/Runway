@@ -39,8 +39,13 @@
   async function load(period = inv.period) {
     busy = true;
     try {
+      // Both at once: the portfolio doesn't depend on the status to be read (it only reads; with no investment
+      // accounts it is an empty answer from the database, no outside calls), the status only says whether to show it.
+      // So the answer is dropped when there are no accounts, and a failure of it counts only when there are.
+      const portfolio = api<Investments>(`/api/investments?period=${period}`);
+      portfolio.catch(() => { /* handled below, or not needed when there are no investment accounts */ });
       const s = await api<PlaidStatus>("/api/plaid/status");
-      const data = s.inv_accounts ? await api<Investments>(`/api/investments?period=${period}`) : null;
+      const data = s.inv_accounts ? await portfolio : null;
       status = s; d = data; error = null; live = null;
       inv.period = period;
     } catch (err) { error = errMsg(err); }

@@ -14,6 +14,7 @@
 <script lang="ts">
   import { act } from "$lib/act";
   import { api } from "$lib/api";
+  import { overviewFor, takeEarlyOverview } from "$lib/prefetch";
   import { app, reload } from "$lib/app.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
@@ -47,9 +48,13 @@
   let shown = $state.raw(last);
   let error = $state<Error | null>(null);
   let seq = 0;
+  // The app's first draw may use the forecast main.ts asked for while the state was loading (lib/prefetch.ts).
+  let early = takeEarlyOverview();
   function load(d: number) {
     const n = ++seq;
-    api<Overview>(`/api/overview?days=${d}`).then(
+    const reply = overviewFor(d, early);
+    early = null;   // only the first request; every later one asks the server
+    reply.then(
       (fc) => { if (n === seq) { shown = last = { fc, days: d }; dismissed = fc.dismissed_warnings ?? []; showDismissed = false; error = null; } },
       (e: Error) => { if (n !== seq) return; if (shown) toast.error(e.message); else error = e; });
   }

@@ -70,17 +70,37 @@ def serve(h: Handler, path: str) -> None:
         extra = {"Document-Policy": "js-profiling"} if monitoring.browser_profiling() else None
         return send_file(h, data, ctype, "no-store", None, gz_ok, nonce, extra=extra)
     entry = _static_entry(full)
+    cache = cache_control(full)
     if h.headers.get("If-None-Match") == entry["etag"]:
+        # A 304 renews what the browser keeps, headers included, so it says the same as the 200 did.
         h.send_response(304)
         h.send_header("ETag", entry["etag"])
-        h.send_header("Cache-Control", "no-cache")
+        h.send_header("Cache-Control", header_value(cache))
+        h.send_header("Vary", "Accept-Encoding")
         h._security_headers()
         h.end_headers()
         return None
-    # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once. The app's
-    # built files have their content's hash in their name, so they never change and can be kept for good.
-    cache = "public, max-age=31536000, immutable" if full.startswith(APP_DIR + os.sep + "assets" + os.sep) else "no-cache"
     return send_file(h, entry["data"], ctype, cache, entry["etag"], gz_ok, None, entry.get("gz"))
+
+
+# "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once.
+REVALIDATE = "no-cache"
+# The app's built files have their content's hash in their name, so they never change and can be kept for good.
+IMMUTABLE = "public, max-age=31536000, immutable"
+# Fonts are named for the font, not its content (Inter-latin-Variable.woff2), so a changed file would keep its name: not
+# `immutable`. They are kept a month without asking; after that (for up to a year) the kept copy is used at once while
+# the browser checks in the background (the ETag makes that a 304), so a replaced font reaches a browser within about a
+# month and a visit. Rename a font file that changes and it is picked up at once.
+FONT = "public, max-age=2592000, stale-while-revalidate=31536000"
+
+
+def cache_control(full: str) -> str:
+    """How long a browser may keep a file without asking again (the three above)."""
+    if full.startswith(os.path.join(APP_DIR, "assets") + os.sep):
+        return IMMUTABLE
+    if full.startswith(os.path.join(STATIC, "fonts") + os.sep) and full.endswith(".woff2"):
+        return FONT
+    return REVALIDATE
 
 
 def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
