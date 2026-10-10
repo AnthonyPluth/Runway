@@ -46,7 +46,7 @@ NOT_SAME_SITE = ("Blocked a request that didn’t come from Runway’s own addre
                  "RUNWAY_PUBLIC_URL and RUNWAY_ALLOWED_HOSTS.")
 NO_APP_HEADER = ("Blocked a change that didn’t come from Runway’s app (it was missing the X-Runway header). Reload the page "
                  "and try again; if you run Runway behind a proxy, make sure it passes that header on.")
-LOCKED = "Runway is locked on this device. Unlock it to carry on."   # (the app lock: runway/applock.py)
+LOCKED = applock.LOCKED   # (the app lock: runway/applock.py)
 
 # Plaid Link (Settings → Connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
 PLAID_ORIGINS = "https://cdn.plaid.com"
@@ -518,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = routes.dispatch(hit, q, body)
         except ApiError as e:
-            return self._json(e.status, {"error": str(e)})
+            return self._json(e.status, {"error": str(e), **e.extra})
         if isinstance(result, Response):
             return self._respond(result)
         return self._json(200, result, etag=method == "GET")

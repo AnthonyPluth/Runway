@@ -18,6 +18,14 @@ def _key() -> str:
     return key
 
 
+def _refused(e: applock.LockError) -> ApiError:
+    """What the web app is told: a session that locked while this request was on its way gets the 423 a locked
+    session gets (server/handler.py), anything else the lock's own message."""
+    if isinstance(e, applock.Locked):
+        return ApiError(applock.LOCKED, 423, extra={"locked": True})
+    return ApiError(str(e))
+
+
 def _status(conn) -> LockStatus:
     s = applock.status(conn, getattr(_current, "session_key", None), time.time())
     return {"available": s["available"], "on": s["on"], "locked": s["locked"], "idle": s["idle"],
@@ -46,7 +54,7 @@ def api_lock_register(conn, _q, body: LockRegister) -> LockStatus:
     try:
         applock.turn_on(conn, _key(), dict(body), time.time())
     except applock.LockError as e:
-        raise ApiError(str(e)) from None
+        raise _refused(e) from None
     return _status(conn)
 
 
@@ -54,7 +62,7 @@ def api_lock_unlock(conn, _q, body: LockUnlock) -> LockStatus:
     try:
         applock.unlock(conn, _key(), dict(body), time.time())
     except applock.LockError as e:
-        raise ApiError(str(e)) from None
+        raise _refused(e) from None
     return _status(conn)
 
 
@@ -67,7 +75,7 @@ def api_lock_settings(conn, _q, body: LockIdle) -> LockStatus:
     try:
         applock.set_idle(conn, _key(), body.get("idle"), time.time())
     except applock.LockError as e:
-        raise ApiError(str(e)) from None
+        raise _refused(e) from None
     return _status(conn)
 
 

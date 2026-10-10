@@ -2,7 +2,7 @@
 import { toast } from "svelte-sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./api", () => ({ api: vi.fn(), newPage: vi.fn() }));
+vi.mock("./api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn() }));
 vi.mock("./categories.svelte", () => ({ loadCategories: vi.fn().mockResolvedValue([]) }));
 vi.mock("./monitoring", () => ({ startMonitoring: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));

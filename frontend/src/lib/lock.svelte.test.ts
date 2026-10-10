@@ -4,7 +4,7 @@
 // device or the server says no), the server having no lock for this sign-in any more, and forgetting it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
+vi.mock("$lib/api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock("$lib/webauthn", async (real) => ({ ...(await real<typeof import("./webauthn")>()), signChallenge: vi.fn() }));
 

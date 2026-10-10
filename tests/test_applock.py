@@ -17,7 +17,7 @@ from sqlalchemy import insert, select, update
 from runway import applock
 from runway.storage import db
 from runway.storage.models import AppLock, AuthSession
-from tests.shared import ServerCase, fetch
+from tests.shared import ServerCase, fetch, own_database
 from tests.webauthn_support import OIDC_ENV, ORIGIN, RP_ID, Authenticator, b64
 
 
@@ -269,6 +269,108 @@ class ThroughTheServer(ServerCase):
         self.assertEqual(self.call("POST", "/api/lock/challenge", {"purpose": "other"})[0], 400)
         _, ch = self.call("POST", "/api/lock/challenge", {"purpose": "register"})
         self.assertEqual(self.call("POST", "/api/lock/register", a.create(ch["challenge"], idle=42))[0], 400)
+        self.assertIsNone(self.lock_row())
+
+    # A Lock now (another tab, or the app opening) landing after the server let a request through unlocked: whatever
+    # that request writes leaves the lock locked, and it gets the 423 a locked session gets (#363).
+
+    def let_through(self):
+        """The server's check (applock.refuses) passing, as it did just before the lock landed."""
+        return mock.patch.object(applock, "refuses", return_value=False)
+
+    def test_changing_when_it_locks_does_not_unlock_a_lock_that_landed_in_between(self):
+        a = Authenticator()
+        self.turn_on(a, idle=60)
+        self.call("POST", "/api/lock/engage")
+        with self.let_through():
+            status, out = self.call("POST", "/api/lock/settings", {"idle": 900})
+        self.assertEqual((status, out), (423, {"error": applock.LOCKED, "locked": True}))
+        row = self.lock_row()
+        self.assertEqual((row["unlocked_until"], row["idle"]), (None, 60))     # locked, and nothing changed
+        self.assertEqual(self.call("GET", "/api/state")[0], 423)
+        self.assertEqual(self.unlock(a)[0], 200)
+        self.assertEqual(self.call("POST", "/api/lock/settings", {"idle": 900})[1]["idle"], 900)   # unlocked: as before
+
+    def test_turning_it_on_again_does_not_unlock_a_lock_that_landed_in_between(self):
+        a = Authenticator()
+        self.turn_on(a)
+        first = self.lock_row()["id"]
+        self.call("POST", "/api/lock/engage")
+        _, ch = self.call("POST", "/api/lock/challenge", {"purpose": "register"})
+        with self.let_through():
+            status, out = self.call("POST", "/api/lock/register", Authenticator().create(ch["challenge"]))
+        self.assertEqual((status, out), (423, {"error": applock.LOCKED, "locked": True}))
+        row = self.lock_row()
+        self.assertEqual((row["id"], row["credential_id"], row["unlocked_until"]), (first, b64(a.cred), None))
+        self.assertEqual(self.unlock(a)[0], 200)                              # still the first passkey's to unlock
+
+    def test_an_unlock_only_unlocks_the_row_its_passkey_signed_for(self):
+        a = Authenticator()
+        self.turn_on(a)
+        self.call("POST", "/api/lock/engage")
+        verify = applock.verify_assertion
+
+        def replaced_meanwhile(body, lock, *args):   # turned on again, with another passkey, while this one was checked
+            count = verify(body, lock, *args)
+            with db.session() as conn:
+                conn.execute(update(AppLock).where(AppLock.session == self.key).values(id="dev_other", credential_id="x"))
+            return count
+        with mock.patch.object(applock, "verify_assertion", side_effect=replaced_meanwhile):
+            status, out = self.unlock(a)
+        self.assertEqual((status, out["error"]), (400, applock.NOT_CHECKED))
+        self.assertIsNone(self.lock_row()["unlocked_until"])
+        self.assertEqual(self.call("GET", "/api/state")[0], 423)
+
+
+class LockLandsAfterTheRead(unittest.TestCase):
+    """set_idle and refuses read the row, then write it: a Lock now committed between the two stays locked."""
+
+    def setUp(self):
+        own_database(self)
+        self.key = "k" * 64
+        now = time.time()
+        with db.session() as conn:
+            conn.execute(insert(AuthSession).values(token_hash=self.key, sub="u1", email="me@example.com", name="Me",
+                                                    created=now, expires=now + 86400))
+            conn.execute(insert(AppLock).values(id="dev_1", session=self.key, credential_id="c", public_key="p", alg=-7,
+                                                sign_count=0, idle=60, unlocked_at=now - 60, unlocked_until=now + 30,
+                                                created=now, last_used=now))
+
+    def engaging_after_the_read(self, conn, then=applock.engage):
+        """`conn`, with Lock now (or `then`) landing just after the first thing read from it."""
+        key, first = self.key, []
+
+        class Conn:
+            def execute(self, stmt):
+                out = conn.execute(stmt)
+                if first:
+                    return out
+                first.append(True)
+                row = out.fetchone()
+                then(conn, key)
+                return mock.Mock(fetchone=lambda: row)
+        return Conn()
+
+    def lock_row(self):
+        with db.session() as conn:
+            return conn.execute(select(AppLock).where(AppLock.session == self.key)).fetchone()
+
+    def test_set_idle(self):
+        with db.session() as conn, self.assertRaises(applock.Locked):
+            applock.set_idle(self.engaging_after_the_read(conn), self.key, 900, time.time())
+        row = self.lock_row()
+        self.assertEqual((row["unlocked_until"], row["idle"]), (None, 60))
+
+    def test_an_unlock_moved_on_by_a_call(self):
+        with db.session() as conn:
+            refused = applock.refuses(self.engaging_after_the_read(conn), self.key, "GET", "/api/state", False, time.time())
+        self.assertTrue(refused)                     # refused like any call on a locked session
+        self.assertIsNone(self.lock_row()["unlocked_until"])
+
+    def test_an_unlock_moved_on_while_it_is_turned_off(self):
+        with db.session() as conn:               # gone rather than locked: nothing to refuse for
+            c = self.engaging_after_the_read(conn, then=applock.turn_off)
+            self.assertFalse(applock.refuses(c, self.key, "GET", "/api/state", False, time.time()))
         self.assertIsNone(self.lock_row())
 
 

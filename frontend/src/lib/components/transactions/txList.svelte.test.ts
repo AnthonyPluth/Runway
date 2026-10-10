@@ -208,6 +208,26 @@ describe("TxListing", () => {
       expect(paths().at(-1)).not.toContain("id=");
     });
 
+    it("loads the whole list while it's painted from memory, and remembers the patched one as a whole load would", async () => {
+      const first = await listed();
+      set("t1", { category: "Groceries" });
+      await first.reloadRows(["t1"], ["Coffee", "Groceries"]);
+      expect(paths().at(-1)).toContain("&id=t1");
+      cleanup();
+      let release!: (v: TxList) => void;
+      vi.mocked(api).mockImplementationOnce((() => new Promise<TxList>((r) => { release = r; })) as never);
+      const l = make();   // the next visit: painted from memory (the patched list), not yet confirmed
+      expect([l.stale, l.list?.items[1].category]).toEqual([true, "Groceries"]);
+      set("t2", { category: "Groceries" });
+      vi.mocked(api).mockImplementation(serve as never);
+      await l.reloadRows(["t2"], ["Coffee", "Groceries"]);   // a whole load: it confirms every row, not just t2
+      expect(paths().at(-1)).toBe("/api/transactions?ignored=0&limit=100&offset=0");
+      expect([l.stale, l.list?.items[2].category]).toEqual([false, "Groceries"]);
+      release(await serve("/api/transactions?ignored=0&limit=100&offset=0"));   // the first refresh, overtaken: ignored
+      await flush();
+      expect($state.snapshot(l.list)).toEqual(await serve("/api/transactions?ignored=0&limit=1000&offset=0"));
+    });
+
     it("keeps the list, and says it isn't up to date, when loading the rows fails; a newer load wins", async () => {
       const l = await listed();
       vi.mocked(api).mockRejectedValueOnce(new Error("Down"));

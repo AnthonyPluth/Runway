@@ -67,10 +67,19 @@ NOT_CHECKED = "Face ID, Touch ID or the passcode didn’t check out. Try again."
 EXPIRED = "That took too long. Try again."
 OTHER_ADDRESS = "App lock only works at Runway’s own address ({origin}). Open Runway there and try again."
 NO_VERIFICATION = "The device didn’t confirm it was you (Face ID, Touch ID or the passcode). Try again."
+LOCKED = "Runway is locked on this device. Unlock it to carry on."
 
 
 class LockError(Exception):
     """A request the lock refuses, with what to tell the person."""
+
+
+class Locked(LockError):
+    """The session locked after the server let this request through (Lock now in another tab, say, landing in between):
+    it gets the 423 a locked session gets, and nothing it asked for is written."""
+
+    def __init__(self) -> None:
+        super().__init__(LOCKED)
 
 
 _challenges: dict[tuple[str, str], tuple[bytes, float]] = {}
@@ -262,7 +271,11 @@ def turn_on(conn, key: str, body: dict, now: float) -> None:
         raise LockError(NO_SIGN_IN)
     idle = idle_seconds(body.get("idle", DEFAULT_IDLE))
     cols = verify_registration(body, _take_challenge(key, "register", now), *rp)
-    turn_off(conn, key)
+    # Only an unlocked lock is replaced: a new passkey isn't the old one's signature, so a session that locked after
+    # this request was let through stays locked (Locked) rather than coming back unlocked with a passkey of its own.
+    conn.execute(delete(AppLock).where(AppLock.session == key, AppLock.unlocked_until > now))
+    if _row(conn, key) is not None:
+        raise Locked()
     conn.execute(insert(AppLock).values(id="dev_" + secrets.token_urlsafe(16), session=key, **cols, idle=idle,
                                         **_unlocked(now, idle), created=now, last_used=now))
 
@@ -273,8 +286,11 @@ def unlock(conn, key: str, body: dict, now: float) -> None:
     if rp is None or r is None:
         raise LockError("App lock isn’t on for this device.")
     count = verify_assertion(body, dict(r), _take_challenge(key, "unlock", now), *rp)
-    conn.execute(update(AppLock).where(AppLock.session == key)
-                 .values(sign_count=count, last_used=now, **_unlocked(now, r["idle"])))
+    # The row whose passkey signed, only: one that replaced it in between (turned on again) isn't unlocked by the old one.
+    done = conn.execute(update(AppLock).where(AppLock.session == key, AppLock.id == r["id"])
+                        .values(sign_count=count, last_used=now, **_unlocked(now, r["idle"])))
+    if done.rowcount != 1:
+        raise LockError(NOT_CHECKED)
 
 
 def engage(conn, key: str) -> None:
@@ -283,12 +299,17 @@ def engage(conn, key: str) -> None:
 
 
 def set_idle(conn, key: str, idle, now: float) -> None:
+    """Change how long away locks it, and move the unlock's end to match. Only while unlocked: the server let this
+    request through unlocked, but a Lock now landing in between must not be undone without a passkey's signature, so
+    the update is conditional and a lock that locked meanwhile is Locked (423), with nothing changed."""
     idle = idle_seconds(idle)
     r = _row(conn, key)
     if r is None:
         raise LockError("App lock isn’t on for this device.")
-    conn.execute(update(AppLock).where(AppLock.session == key)
-                 .values(idle=idle, unlocked_until=min(now + idle + GRACE, (r["unlocked_at"] or now) + MAX_UNLOCKED)))
+    done = conn.execute(update(AppLock).where(AppLock.session == key, AppLock.unlocked_until > now)
+                        .values(idle=idle, unlocked_until=min(now + idle + GRACE, (r["unlocked_at"] or now) + MAX_UNLOCKED)))
+    if done.rowcount == 0:
+        raise Locked()
 
 
 def turn_off(conn, key: str) -> None:
@@ -308,5 +329,10 @@ def refuses(conn, key: str | None, method: str, path: str, hidden: bool, now: fl
     if not hidden:
         until = min(now + r["idle"] + GRACE, (r["unlocked_at"] or now) + MAX_UNLOCKED)
         if until - r["unlocked_until"] >= SLIDE_EVERY:
-            conn.execute(update(AppLock).where(AppLock.session == key).values(unlocked_until=until))
+            # Only an unlock still running is moved on: a Lock now landing since the read above stays locked, and this
+            # call is refused like any other on a locked session (unless the lock was turned off meanwhile).
+            done = conn.execute(update(AppLock).where(AppLock.session == key, AppLock.unlocked_until > now)
+                                .values(unlocked_until=until))
+            if done.rowcount == 0:
+                return _row(conn, key) is not None
     return False

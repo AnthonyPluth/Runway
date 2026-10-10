@@ -1,6 +1,7 @@
 // Runway's categories, shared by every page that shows or picks one. Load them with loadCategories() before use;
 // they come back in tree order (each category followed by its subcategories).
 import { api } from "./api";
+import { cacheEpoch, recall, remember } from "./swr";
 import type { Category } from "./types";
 
 export const CAT_MAX_DEPTH = 2;   // levels including the top one (matches the server): Parent > Sub
@@ -21,9 +22,19 @@ function withPaths(list: Category[]): Category[] {
 }
 
 export async function loadCategories(): Promise<Category[]> {
-  categories.list = withPaths(await api<Category[]>("/api/categories", { keep: true }));
+  const at = cacheEpoch();
+  const rows = await api<Category[]>("/api/categories", { keep: true });
+  remember("categories", rows, at);
+  categories.list = withPaths(rows);
   return categories.list;
 }
+
+/** The categories as the last loadCategories saw them (in tree order), for painting at once while they load again;
+ *  undefined if there aren't any yet. */
+export const staleCategories = (): Category[] | undefined => {
+  const rows = recall<Category[]>("categories");
+  return rows && withPaths(rows);
+};
 
 export const catLabel = (c: Category) => (c.path && c.path.length > 1 ? c.path.join(" > ") : c.name);
 

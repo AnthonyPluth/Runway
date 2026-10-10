@@ -1,5 +1,5 @@
 // Where you can go (the sidebar on a computer, the tab bar on a phone), and what both say about you and syncing.
-import { api, forgetReplies } from "./api";
+import { api } from "./api";
 import { route } from "./app.svelte";
 import { isoDay, parseDate, relDay } from "./format";
 import type { AppState } from "./types";
@@ -89,12 +89,12 @@ export function balanceAsOf(dates: (string | null | undefined)[], today: string,
 
 /** Signing out is a POST (so no other site can sign you out with a link); then on to the provider's sign-out page. The
  *  app lock on this device ends with the sign-in (the server's goes with the session; this is the device's note of it),
- *  and so do the replies kept in memory (lib/api.ts). */
+ *  and so do the replies kept in memory. */
 export async function signOut(e: Event): Promise<void> {
   e.preventDefault();
   await act(async () => {
     const r = await api<{ redirect?: string }>("/auth/logout", { method: "POST" });
-    forgetLock(); forgetReplies();
+    forgetLock();   // (and with it the replies kept in memory: lib/swr.ts's and lib/api.ts's)
     location.href = r.redirect || "/auth/signed-out";
   });
 }

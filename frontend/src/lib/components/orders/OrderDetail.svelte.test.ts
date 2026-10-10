@@ -114,6 +114,7 @@ describe("undo and failures", () => {
     vi.mocked(api).mockResolvedValue({ ...order, items: [
       { id: 7, title: "Tea", quantity: 2, amount: 10, category: "Groceries", category_source: "manual" },
       { id: 8, title: "Lamp", quantity: 1, amount: 20, category: "Shopping", category_source: "memory" },
+      { id: 9, title: "Mug", quantity: 1, amount: 5, category: "Shopping", category_source: "ai" },
       { id: 10, title: "Bag", quantity: 1, amount: 2, category: null, category_source: null }] } as never);
     render(OrderDetail, { orderId: "x" });
     expect(await screen.findByText("Tea")).toBeInTheDocument();
@@ -128,6 +129,7 @@ describe("undo and failures", () => {
     const name = screen.getByText("Tea");
     expect(name.className).toContain("font-medium");
     expect(name.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Category for Mug" })).toHaveTextContent("Shopping");
     expect(screen.getByRole("combobox", { name: "Category for Bag" })).toHaveTextContent("Choose category");
   });
 

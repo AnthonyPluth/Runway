@@ -11,8 +11,9 @@
 //    ▲                                                                │
 //    └──────────── turn off (unlocked), sign out, or the server has no lock for this sign-in ─────────┘
 import { errMsg } from "./act";
-import { api, newPage } from "./api";
+import { api, forgetReplies, newPage } from "./api";
 import { apiCall } from "./contract";
+import { clearCache } from "./swr";
 import { signChallenge, webauthnError } from "./webauthn";
 import type { LockStatus } from "./api-types";
 import { toast } from "svelte-sonner";
@@ -85,6 +86,7 @@ function adopt(s: LockStatus): void {
 /** Forget the lock on this device (signing out, turning it off, or the server has none), and what an unlock held. */
 export function forget(): void {
   wipeSecret();
+  clearCache(); forgetReplies();   // both kept copies of replies (lib/swr.ts, lib/api.ts's ETag ones)
   save(null);
 }
 
@@ -119,6 +121,8 @@ export function lockNow(tell = true, offer = true): void {
   lock.offer = offer;
   lock.phase = "locked";
   wipeSecret();
+  clearCache(); forgetReplies();   // what the lists remembered for instant paint (lib/swr.ts) and the replies kept
+                                   // for 304s (lib/api.ts) go with the page
   clearTimeout(awayTimer);
   lock.covered = false;
   lock.error = "";

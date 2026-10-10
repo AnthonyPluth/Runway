@@ -2,6 +2,7 @@
 // server accepts (runway/server/api/accounts.py KINDS).
 import { apiCall } from "./contract";
 import type { AccountItem } from "./api-types";
+import { cacheEpoch, recall, remember } from "./swr";
 
 export const ACCOUNT_KINDS = ["checking", "savings", "credit", "loan", "investment"] as const;
 export type AccountKind = (typeof ACCOUNT_KINDS)[number];
@@ -34,6 +35,20 @@ export type LoadedAccount = Omit<AccountItem, "kind" | "hidden"> & { kind: Accou
 /** GET /api/accounts, with `hidden` as the yes/no it means (the server sends 0 or 1), and each account's type one of
  * ACCOUNT_KINDS (the only ones the server keeps: runway/server/api/accounts.py KINDS). */
 export async function loadAccounts(): Promise<LoadedAccount[]> {
+  const at = cacheEpoch();
   const rows = await apiCall<"GET /api/accounts">("/api/accounts");
-  return rows.map((a) => ({ ...a, kind: a.kind as AccountKind, hidden: !!a.hidden }));
+  remember("accounts", rows.map(withoutBalances), at);
+  return rows.map(toLoaded);
+}
+const toLoaded = (a: AccountItem): LoadedAccount => ({ ...a, kind: a.kind as AccountKind, hidden: !!a.hidden });
+
+/** An account as it can be shown before the server has answered: what it's called and how it's set up, without its
+ *  balances or statements (they change with every sync, and mustn't be painted as if current: lib/swr.ts). */
+const withoutBalances = (a: AccountItem): AccountItem =>
+  ({ ...a, balance: null, available: null, balance_date: null, statement: null, statements: [] });
+
+/** The accounts as the last loadAccounts saw them, without their balances, for painting at once while the real ones load;
+ *  undefined if there aren't any yet. */
+export function staleAccounts(): LoadedAccount[] | undefined {
+  return recall<AccountItem[]>("accounts")?.map(toLoaded);
 }

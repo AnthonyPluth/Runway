@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
+import { clearCache } from "../lib/swr";
+
+// What lists remember for instant paint (lib/swr.ts) lasts a visit to Runway, not a test.
+beforeEach(() => clearCache());
 
 if (typeof document !== "undefined") {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };

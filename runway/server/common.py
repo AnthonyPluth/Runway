@@ -19,10 +19,12 @@ from .. import dates, monitoring, validate
 
 class ApiError(Exception):
     """What a handler answers when it can't do what was asked: a message for the person, and the status (400 unless
-    said otherwise). Anything else a handler raises is a bug: a 500 with a reference (server_error)."""
-    def __init__(self, message: str, status: int = 400):
+    said otherwise), with `extra` fields beside the message (a 423's "locked"). Anything else a handler raises is a bug:
+    a 500 with a reference (server_error)."""
+    def __init__(self, message: str, status: int = 400, extra: dict | None = None):
         super().__init__(message)
         self.status = status
+        self.extra = extra or {}
 
 
 def server_error(e: BaseException, method: str, route: str) -> ApiError:
