@@ -90,6 +90,8 @@ export default defineConfig(
     files: ["frontend/*.{js,ts}", "frontend/verify/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
   },
+  // The browser check (make verify) is a module outside FRONTEND's extensions: its swallowed failures say why too.
+  { files: ["frontend/verify/*.mjs"], rules: { "runway/no-silent-catch": "error" }, plugins: { runway } },
   {
     files: ["frontend/**/*.svelte", "frontend/**/*.svelte.ts"],
     languageOptions: { parserOptions: { parser: ts.parser } },

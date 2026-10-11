@@ -45,6 +45,10 @@ describe("no .catch(() => {}) without a reason", () => {
     expect(await flagged("export const p = work().catch(() => {});")).toEqual(["runway/no-silent-catch"]);
     expect(await flagged("export const p = work().catch(function () {});")).toEqual(["runway/no-silent-catch"]);
   });
+  it("flags it in the browser check (make verify) too", async () => {
+    expect(await flagged("export const p = Promise.resolve().catch(() => {});", "frontend/verify/verify.mjs")).toEqual(["runway/no-silent-catch"]);
+    expect(await flagged("export const p = Promise.resolve().catch(() => { /* the page may already have moved on */ });", "frontend/verify/verify.mjs")).toEqual([]);
+  });
   it("leaves a handler that says why, or does something", async () => {
     expect(await flagged("export const p = work().catch(() => { /* a failed preload only costs time */ });")).toEqual([]);
     expect(await flagged("export const p = work().catch(() => {\n  // the next check corrects it\n});")).toEqual([]);

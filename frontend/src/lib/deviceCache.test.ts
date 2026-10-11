@@ -256,6 +256,95 @@ describe("the data version", () => {
     expect(idb.rows().map((r) => r.k)).toEqual(["share"]);
     expect(recall("categories")).toBeUndefined();
   });
+
+  const change = async () => {
+    routes["POST /api/transactions/t1/category"] = () => ({ ok: true });
+    await api("/api/transactions/t1/category", { method: "POST", body: { category: "Food" } });
+  };
+
+  it("doesn't paint the records from before a change made while it was still opening, and deletes them", async () => {
+    noteDataVersion("v1");
+    await unlockWith();
+    remember("categories", [{ name: "Food" }]);
+    await settled();
+    let answer!: (r: Response) => void;
+    routes["POST /api/lock/key-share"] = () => new Promise<Response>((r) => { answer = r; });
+    lockNow(false);
+    clearCache();
+    await settled();
+    lock.phase = "locked"; lock.launch = false;
+    vi.mocked(signChallenge).mockResolvedValue({ answer: ANSWER, prf: new Uint8Array(PRF) });
+    await unlock();
+    while (!answer) await new Promise((r) => setImmediate(r));   // (WebCrypto answers outside the fake timers)
+    expect(isOpen()).toBe(false);   // still opening: the share hasn't come
+    await change();
+    answer(json(shareReply()));
+    await settled();
+    expect(isOpen()).toBe(true);   // it opens, but with nothing from before the change
+    clearCache();
+    expect(recall("categories")).toBeUndefined();
+    expect(records()).toEqual([]);
+    expect(idb.rows().map((r) => r.k)).toEqual(["share"]);
+    remember("categories", [{ name: "New" }]);   // and goes on keeping what comes after it
+    await settled();
+    expect(records()).toEqual(["categories"]);
+  });
+
+  it("deletes the records after a change made while it couldn't open, so the next unlock doesn't paint them", async () => {
+    noteDataVersion("v1");
+    await unlockWith();
+    remember("categories", [{ name: "Food" }]);
+    await settled();
+    routes["POST /api/lock/key-share"] = () => { throw new TypeError("Failed to fetch"); };
+    await relaunch();
+    expect(isOpen()).toBe(false);
+    expect(records()).toEqual(["categories"]);   // kept for the next unlock, unopened
+    await change();
+    await settled();
+    expect(records()).toEqual([]);
+    expect(idb.rows().map((r) => r.k)).toEqual(["share"]);   // the share stays: it's still this device's
+    routes["POST /api/lock/key-share"] = () => shareReply();
+    await relaunch();
+    expect(isOpen()).toBe(true);
+    clearCache();
+    expect(recall("categories")).toBeUndefined();
+  });
+
+  it("takes them all as misses at the next unlock when a change's records couldn't be deleted (a full disk)", async () => {
+    noteDataVersion("v1");
+    await unlockWith();
+    remember("categories", [{ name: "Food" }]);
+    await settled();
+    routes["POST /api/lock/key-share"] = () => { throw new TypeError("Failed to fetch"); };
+    await relaunch();
+    idb.failWrites = true;
+    await change();
+    await settled();
+    idb.failWrites = false;
+    expect(records()).toEqual(["categories"]);   // still there
+    routes["POST /api/lock/key-share"] = () => shareReply();
+    await relaunch();
+    expect(isOpen()).toBe(true);
+    clearCache();
+    expect(recall("categories")).toBeUndefined();
+    expect(records()).toEqual([]);
+    remember("categories", [{ name: "New" }]);   // and only those: what's kept after it opens again
+    await settled();
+    await relaunch();
+    clearCache();
+    expect(recall("categories")).toEqual([{ name: "New" }]);
+  });
+
+  it("doesn't make a store on the device for a change when no cache was ever opened (the lock off, no PRF secret)", async () => {
+    await change();
+    await settled();
+    expect(idb.dbs.has("runway-cache")).toBe(false);
+    noteDataVersion("v1");
+    await unlockWith(null);
+    await change();
+    await settled();
+    expect(idb.dbs.has("runway-cache")).toBe(false);
+  });
 });
 
 describe("the key", () => {
