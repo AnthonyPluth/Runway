@@ -126,7 +126,9 @@
 {/snippet}
 {#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
 
-<div class="grid gap-x-3 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+<!-- Columns follow the room the fields have (a page's width, or the sheet's narrower panel), not the window's. -->
+<div class="@container">
+<div class="grid gap-x-3 gap-y-4 @min-[380px]:grid-cols-2 @min-[640px]:grid-cols-4">
   <div class="flex min-w-0 flex-col gap-1.5">
     <label class={lbl}><span>Name{@render star()}</span>
       <input class={fieldCls} name="name" bind:value={v.name} placeholder="Paycheck" aria-required="true" aria-invalid={bad("name")} aria-describedby={ids("name")} use:saveIf={save} />
@@ -190,7 +192,7 @@
     <span class="shrink-0">More options</span>
     {#if !moreOpen}<span class="min-w-0 truncate text-xs">{moreSummary}</span>{/if}
   </summary>
-  <div class="mt-3 grid gap-x-3 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="mt-3 grid gap-x-3 gap-y-4 @min-[380px]:grid-cols-2 @min-[640px]:grid-cols-3">
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Account
         <select class={selectCls} name="account_id" bind:value={v.account_id} aria-invalid={bad("account_id")} aria-describedby={ids("account_id")} title={hints.account_id} use:saveIf={save}>
@@ -249,3 +251,4 @@
     </div>
   </div>
 </details>
+</div>

@@ -169,7 +169,7 @@
       <Sheet.Title class="truncate">{v.name || r.name}</Sheet.Title>
       <Sheet.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span>{fmtSigned(amt)}</span>
-        <span>· {nb(FREQ[v.frequency] || v.frequency)}{#if due} · {nb(due.text)}{/if}</span>
+        <span>{"· "}{nb(FREQ[v.frequency] || v.frequency)}{#if due}{" · "}{nb(due.text)}{/if}</span>
       </Sheet.Description>
     </Sheet.Header>
     <div class="px-4 pb-5">
@@ -198,8 +198,8 @@
                 {#each matches as t (t.id)}
                   <tr class="border-t [&>td]:py-1.5">
                     <td class="w-20 whitespace-nowrap text-muted-foreground">{fmtDate(t.posted)}</td>
-                    <td class="px-2">{t.description}</td>
-                    <td class="px-2 text-xs whitespace-nowrap text-muted-foreground">{LINKED_BY[t.recurring_linked_by ?? ""] ?? ""}</td>
+                    <td class="px-2 whitespace-nowrap">{t.description}</td>
+                    <td class="px-2 text-xs text-muted-foreground">{LINKED_BY[t.recurring_linked_by ?? ""] ?? ""}</td>
                     <td class="text-right whitespace-nowrap tabular-nums">{fmt(t.amount)}</td>
                   </tr>
                 {/each}
