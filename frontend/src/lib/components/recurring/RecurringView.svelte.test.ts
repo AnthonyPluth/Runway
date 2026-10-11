@@ -31,22 +31,32 @@ const serve = (items: RecurringItem[], suggestions: Suggestion[] = [], more: Rec
   });
 
 beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 2, 20, 12)); });
-afterEach(() => { vi.useRealTimers(); });
+// An item's sheet left open locks the page behind it (pointer-events) until it closes, so close it before the next test.
+afterEach(async () => {
+  vi.useRealTimers(); location.hash = "";
+  if (screen.queryByRole("dialog")) { await userEvent.keyboard("{Escape}"); await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument()); }
+});
+
+// Escape closes the open item's sheet; the page behind it takes clicks again once it has gone.
+const closeSheet = async () => {
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => { expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); expect(document.body.style.pointerEvents).not.toBe("none"); });
+};
 
 const AMOUNT = { selector: 'input[name="amount"]' };
 
 describe("Recurring page", () => {
-  it("opens the item a link names (#recurring?item=2) and brings it into view", async () => {
+  it("opens the sheet of the item a link names (#recurring?item=2) and brings its row into view", async () => {
     const seen = vi.fn();
     Element.prototype.scrollIntoView = seen;
     location.hash = "#recurring?item=2";
     serve([item(), item({ id: 2, name: "Paycheck", amount: 3000 })]);
     render(Recurring);
-    await screen.findByText("Paycheck");
-    expect(document.querySelector("[data-recurring='2']")).toHaveAttribute("open");
-    expect(document.querySelector("[data-recurring='1']")).not.toHaveAttribute("open");
+    expect(await screen.findByRole("dialog", { name: "Paycheck" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Rent" })).not.toBeInTheDocument();
     expect(seen).toHaveBeenCalledTimes(1);
-    location.hash = "";
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("splits items into money in and money out", async () => {
@@ -223,13 +233,12 @@ describe("Recurring page", () => {
 
     it("doesn't open the item when you click its logo", async () => {
       serve([item()], [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: false, configured: false, candidates: [], error: null } });
-      const { container } = render(Recurring);
+      render(Recurring);
       await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
-      expect(container.querySelector("details")).not.toHaveAttribute("open");
       const panel = await screen.findByRole("dialog", { name: "Logo for Rent" });
-      expect(container.querySelector("summary")!.contains(panel)).toBe(false);
+      expect(screen.queryByRole("dialog", { name: "Rent" })).not.toBeInTheDocument();
       await userEvent.click(within(panel).getByText("Logo for Rent"));
-      expect(container.querySelector("details")).not.toHaveAttribute("open");
+      expect(screen.queryByRole("dialog", { name: "Rent" })).not.toBeInTheDocument();
       expect(screen.getByRole("dialog", { name: "Logo for Rent" })).toBeInTheDocument();
     });
   });
@@ -626,6 +635,20 @@ describe("Recurring page", () => {
       expect(post[1]).toMatchObject({ method: "POST", body: { name: "Apartment", account_id: "a1", active: 1 } });
     });
 
+    it("opens in a sheet over the list, not inline, and the sheet closes with Escape", async () => {
+      serve([item()]);
+      render(Recurring);
+      const row = await screen.findByRole("button", { name: /^Rent/ });
+      expect(row).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await userEvent.click(row);
+      const sheet = await screen.findByRole("dialog", { name: "Rent" });
+      expect(within(sheet).getByRole("textbox", { name: /Name/ })).toHaveValue("Rent");
+      expect(within(sheet).getByRole("button", { name: "Pause" })).toBeInTheDocument();
+      expect(row.closest("[data-recurring]")!.contains(sheet)).toBe(false);
+      await closeSheet();
+    });
+
     it("doesn't save a schedule of specific dates until the dates are filled in, and says so rather than flashing Saved", async () => {
       serve([item()]);
       render(Recurring);
@@ -778,14 +801,13 @@ describe("Recurring page", () => {
       serve([item(), item({ id: 2, name: "Paycheck", amount: 3000 })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("1500");
+      expect(screen.getByRole("radio", { name: "Money out" })).toBeChecked();
+      await closeSheet();
       await userEvent.click(screen.getByText("Paycheck"));
-      const [pay, rent] = screen.getAllByLabelText(/Amount/, AMOUNT);
-      expect(rent).toHaveValue("1500");
-      expect(pay).toHaveValue("3000");
-      const [payOut, rentOut] = screen.getAllByRole("radio", { name: "Money out" });
-      expect(rentOut).toBeChecked();
-      expect(payOut).not.toBeChecked();
-      expect(screen.getAllByRole("radio", { name: "Money in" })[0]).toBeChecked();
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("3000");
+      expect(screen.getByRole("radio", { name: "Money out" })).not.toBeChecked();
+      expect(screen.getByRole("radio", { name: "Money in" })).toBeChecked();
     });
 
     it("saves the amount with its sign kept, and flipping money in or out saves the flipped amount", async () => {
@@ -905,6 +927,8 @@ describe("Recurring page", () => {
       serve([item(), item({ id: 2, name: "Electric", amount_mode: "avg3", suggested_amount: -80 })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
+      await closeSheet();
       await userEvent.click(screen.getByText("Electric"));
       expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
     });
@@ -920,6 +944,8 @@ describe("Recurring page", () => {
       await userEvent.click(within(confirm).getByRole("button", { name: "Remove" }));
       await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" }));
       await waitFor(() => expect(toast).toHaveBeenCalledWith("Removed"));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
     });
 
     it("keeps the item when the confirmation is cancelled, and says so when nothing is linked", async () => {
@@ -930,7 +956,7 @@ describe("Recurring page", () => {
       const confirm = await screen.findByRole("dialog", { name: "Remove Rent?" });
       expect(confirm).toHaveTextContent("No transactions are linked to it.");
       await userEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove Rent?" })).not.toBeInTheDocument());
       expect(api).not.toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" });
     });
 

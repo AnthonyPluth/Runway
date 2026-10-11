@@ -6,6 +6,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
+  import * as Sheet from "$lib/components/ui/sheet";
   import { fmt, fmtDate, fmtSigned, isoDay, nb, plural } from "$lib/format";
   import type { Account } from "$lib/types";
   import { undoable } from "$lib/undo";
@@ -21,8 +22,9 @@
   import { FREQ, validate, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
   import { act, errMsg } from "$lib/act";
 
-  // One recurring item, a row of its Money in or Money out group: a summary line that opens into its fields, each saved
-  // as you change it, and Pause, Skip the next one and Remove. After a save, `onsaved` gets the fresh list, so the summary
+  // One recurring item, a row of its Money in or Money out group: a summary line that opens a sheet (a bottom sheet on a
+  // phone, a panel on the right on a wider screen) with its fields, each saved as you change it, and Pause, Skip the
+  // next one and Remove. After a save, `onsaved` gets the fresh list, so the summary
   // (amount, when it's due, matches) and its group catch up. `focus`: opened from a link to this item (an upcoming item's
   // name): it comes into view. `missed`: how many payments it missed that are still listed under Needs attention.
   let { r, accounts, open, focus = false, missed = 0, today = isoDay(), ontoggle, onsaved }: {
@@ -37,8 +39,9 @@
     end_date: r.end_date || "", category: r.category || "",
   });
   let v: RecurringValues = $state(init());
-  // Open or closed is yours to change; `open` only says how it starts.
+  // The sheet's open or closed is yours to change; `open` only says how it starts.
   let isOpen = $state(untrack(() => open));
+  const setOpen = (o: boolean) => { isOpen = o; ontoggle(o); };
   let active = $state(untrack(() => !!r.active));
   let attempted = $state(false);   // once a save was refused, the fields that need fixing say so
   const errors = $derived(attempted ? validate(v) : {});
@@ -77,7 +80,7 @@
   async function save(f: Field) {
     await tick();   // let the field's binding catch up with the change first
     const errs = validate(v);
-    if (errs.dates && f.name === "frequency") f.closest("details")?.querySelector<HTMLInputElement>("input[name=dates]")?.focus();
+    if (errs.dates && f.name === "frequency") f.closest("[data-recurring-sheet]")?.querySelector<HTMLInputElement>("input[name=dates]")?.focus();
     await persist();
   }
 
@@ -117,7 +120,8 @@
   // changes to single dates go.
   let removing = $state(false);
   async function remove(): Promise<boolean> {
-    return act(async () => { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); });
+    // The sheet closes with it, so the page behind takes clicks again and the item isn't remembered as open.
+    return act(async () => { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); setOpen(false); reload(); });
   }
   async function showMatches() {
     if (matches) { matches = null; return; }
@@ -125,23 +129,25 @@
   }
 </script>
 
-<!-- One child of the group's list, so its hairline falls above the row (the dialog renders elsewhere). -->
+<!-- One child of the group's list, so its hairline falls above the row (the sheet and dialog render elsewhere). The logo
+     picker is a button of its own, so it sits beside the row's button, not inside it. Its account's bank is a small badge
+     on the logo, as on Transactions; an item shown by its bank's own mark (no logo or category yet), or without an
+     account, has none. -->
 <div>
-<details class="group/item" data-recurring={r.id} use:intoView bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
-  <summary class="cell cursor-pointer list-none transition-colors hover:bg-white/4 group-open/item:bg-white/3 [&::-webkit-details-marker]:hidden">
-    <!-- A button inside the summary doesn't toggle it. Its account's bank is a small badge on the logo, as on
-         Transactions; an item shown by its bank's own mark (no logo or category yet), or without an account, has none. -->
-    <span class="relative shrink-0">
-      {#if (r.logo || r.last_matched?.category) && r.account_id && app.state?.brands?.[r.account_id]}
-        <span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md" title={r.account_name || undefined}
-          data-account-badge><AcctLabel id={r.account_id} name={r.account_name ?? ""} iconClass="size-4!" labelClass="hidden" /></span>
-      {/if}
-      <LogoPicker name={r.name} onchanged={logoChanged}>
-        {#if r.logo}<Logo src={r.logo} size={28} />
-        {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} />
-        {:else}<RecIcon id={r.account_id} />{/if}
-      </LogoPicker>
-    </span>
+<div class="cell transition-colors hover:bg-white/4" data-recurring={r.id} use:intoView>
+  <span class="relative shrink-0">
+    {#if (r.logo || r.last_matched?.category) && r.account_id && app.state?.brands?.[r.account_id]}
+      <span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md" title={r.account_name || undefined}
+        data-account-badge><AcctLabel id={r.account_id} name={r.account_name ?? ""} iconClass="size-4!" labelClass="hidden" /></span>
+    {/if}
+    <LogoPicker name={r.name} onchanged={logoChanged}>
+      {#if r.logo}<Logo src={r.logo} size={28} />
+      {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} />
+      {:else}<RecIcon id={r.account_id} />{/if}
+    </LogoPicker>
+  </span>
+  <button type="button" class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left" aria-haspopup="dialog" aria-expanded={isOpen}
+    onclick={() => setOpen(true)}>
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[15px] font-medium">
         <span class="min-w-0 truncate">{v.name || r.name}</span>
@@ -153,48 +159,60 @@
       </span>
     </span>
     <span class={["shrink-0 text-[15px] font-medium tabular-nums", amt > 0 && "text-good"]}>{fmtSigned(amt)}</span>
-    <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-open/item:rotate-90" aria-hidden="true" />
-  </summary>
-  <div class="px-4 pt-3 pb-5 sm:pl-[3.75rem]">
-    <RecurringFields bind:v {accounts} {save} {errors} suggested={r.suggested_amount} suggestedFor={r.amount} next={active ? r.next_date : null} />
-    {#each r.skipped ?? [] as d (d)}
-      <p class="mt-3 text-sm text-muted-foreground">Skipping {fmtDate(d)} ·
-        <Button variant="link" size="sm" class="h-auto p-0" onclick={() => unskip(d)}>Put it back</Button></p>
-    {/each}
-    <div class="mt-4 flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" disabled={pausing} onclick={() => setActive(!active)}>{active ? "Pause" : "Resume"}</Button>
-      {#if active && r.next_date && r.frequency !== "once"}
-        <Button variant="outline" size="sm" title={`Leave out ${fmtDate(r.next_date)} only`} onclick={skipNext}>Skip the next one</Button>
+    <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+  </button>
+</div>
+
+<Sheet.Root bind:open={isOpen} onOpenChange={(o) => ontoggle(o)}>
+  <Sheet.Content data-recurring-sheet={r.id}>
+    <Sheet.Header>
+      <Sheet.Title class="truncate">{v.name || r.name}</Sheet.Title>
+      <Sheet.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span>{fmtSigned(amt)}</span>
+        <span>{"· "}{nb(FREQ[v.frequency] || v.frequency)}{#if due}{" · "}{nb(due.text)}{/if}</span>
+      </Sheet.Description>
+    </Sheet.Header>
+    <div class="px-4 pb-5">
+      <RecurringFields bind:v {accounts} {save} {errors} suggested={r.suggested_amount} suggestedFor={r.amount} next={active ? r.next_date : null} />
+      {#each r.skipped ?? [] as d (d)}
+        <p class="mt-3 text-sm text-muted-foreground">Skipping {fmtDate(d)} ·
+          <Button variant="link" size="sm" class="h-auto p-0" onclick={() => unskip(d)}>Put it back</Button></p>
+      {/each}
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" disabled={pausing} onclick={() => setActive(!active)}>{active ? "Pause" : "Resume"}</Button>
+        {#if active && r.next_date && r.frequency !== "once"}
+          <Button variant="outline" size="sm" title={`Leave out ${fmtDate(r.next_date)} only`} onclick={skipNext}>Skip the next one</Button>
+        {/if}
+        {#if r.matched_count}
+          <Button variant="link" size="sm" class="h-auto px-1" aria-expanded={!!matches} onclick={showMatches}>
+            {matches ? "Hide matched transactions" : "Show matched transactions"}
+          </Button>
+        {/if}
+        <Button variant="link" size="sm" class="ml-auto h-auto px-0" onclick={() => (removing = true)}>Remove</Button>
+      </div>
+      {#if matches}
+        {#if matches.length}
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+              <tbody>
+                {#each matches as t (t.id)}
+                  <tr class="border-t [&>td]:py-1.5">
+                    <td class="w-20 whitespace-nowrap text-muted-foreground">{fmtDate(t.posted)}</td>
+                    <td class="px-2 whitespace-nowrap">{t.description}</td>
+                    <td class="px-2 text-xs text-muted-foreground">{LINKED_BY[t.recurring_linked_by ?? ""] ?? ""}</td>
+                    <td class="text-right whitespace-nowrap tabular-nums">{fmt(t.amount)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else}
+          <p class="mt-3 text-sm text-muted-foreground">No matched transactions.</p>
+        {/if}
       {/if}
-      {#if r.matched_count}
-        <Button variant="link" size="sm" class="h-auto px-1" aria-expanded={!!matches} onclick={showMatches}>
-          {matches ? "Hide matched transactions" : "Show matched transactions"}
-        </Button>
-      {/if}
-      <Button variant="link" size="sm" class="ml-auto h-auto px-0" onclick={() => (removing = true)}>Remove</Button>
     </div>
-    {#if matches}
-      {#if matches.length}
-        <div class="mt-3 overflow-x-auto">
-          <table class="w-full text-sm">
-            <tbody>
-              {#each matches as t (t.id)}
-                <tr class="border-t [&>td]:py-1.5">
-                  <td class="w-20 whitespace-nowrap text-muted-foreground">{fmtDate(t.posted)}</td>
-                  <td class="px-2">{t.description}</td>
-                  <td class="px-2 text-xs whitespace-nowrap text-muted-foreground">{LINKED_BY[t.recurring_linked_by ?? ""] ?? ""}</td>
-                  <td class="text-right whitespace-nowrap tabular-nums">{fmt(t.amount)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {:else}
-        <p class="mt-3 text-sm text-muted-foreground">No matched transactions.</p>
-      {/if}
-    {/if}
-  </div>
-</details>
+  </Sheet.Content>
+</Sheet.Root>
 
 <ConfirmDialog bind:open={removing} destructive title={`Remove ${r.name}?`} confirmLabel="Remove" busyLabel="Removing…" onconfirm={remove}
   description={`${r.matched_count ? `This unlinks ${plural(r.matched_count, "matched transaction")}; they stay in your history.` : "No transactions are linked to it."} Any one-off changes you made to its dates are cleared too.`} />
