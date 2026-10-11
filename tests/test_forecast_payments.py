@@ -1,11 +1,13 @@
 """The forecast's card payment modes."""
 
+from datetime import date
+
 from sqlalchemy import delete, insert, update
 
 from runway.domain import forecast
-from runway.storage.models import Budget, CardStatement, Category, Override, Recurring, Transaction
+from runway.storage.models import Account, Budget, CardStatement, Category, Override, Recurring, Transaction
 from tests import forecast_support as fs
-from tests.shared import TODAY, LedgerCase
+from tests.shared import TODAY, LedgerCase, add_tx
 
 
 class PaymentModeTests(LedgerCase):
@@ -345,3 +347,141 @@ class RemainingDueTests(LedgerCase):
         self.tx("cc", "2026-09-18", 250.0, "STORE REFUND", "Refunds")
         c = self.card(forecast.build(self.conn, TODAY, 90))
         self.assertEqual((c["statement_balance"], c["remaining"], c["payment"]), (700.0, 250.0, 250.0))
+
+
+class PendingAtCloseTests(LedgerCase):
+    """A charge still pending when its card's statement closed, dated on or before the close: the issuer's statement has
+    only what had posted, so it isn't on it; it posts after the close, onto the next statement. The card's statement
+    closed Oct 9 at $1,000, paid Nov 6; the next one closes Nov 9, paid Dec 7 (Dec 6 is a Sunday). A $2,500 charge dated
+    Oct 8 and a $40 one dated Oct 9 are pending (through Plaid, which drops a hold the bank drops)."""
+    pay = fs.pay
+    TODAY = date(2026, 10, 11)
+
+    def setUp(self):
+        super().setUp()
+        self.acct("chk", "checking", 10000.0)
+        self.acct("cc", "credit", -1000.0, pay_from="chk")
+        self.stmt("cc", 1000.0, "2026-10-09", "2026-11-06", minimum=40.0)
+        self.tx("cc", "2026-10-02", -1000.0, "FURNITURE", "Shopping")
+        self.hotel = add_tx(self.conn, "cc", "2026-10-08", -2500.0, id="cc|pl:hold-1", description="SEASIDE RESORT",
+                            category="Travel", pending=1)
+        self.diner = add_tx(self.conn, "cc", "2026-10-09", -40.0, id="cc|pl:hold-2", description="CORNER DINER",
+                            category="Restaurants", pending=1)
+
+    def build(self, today=None):
+        return forecast.build(self.conn, today or self.TODAY, 90)
+
+    def card(self, fc):
+        return next(c for c in fc["cards"] if c["id"] == "cc")
+
+    def payments(self, fc):
+        return {e["date"]: -e["amount"] for e in fc["events"] if e["kind"] == "card"}
+
+    def estimate(self, fc, day):
+        return next(e["estimate"] for e in fc["events"] if e["kind"] == "card" and e["date"] == day)
+
+    def post(self, tid, posted, amount, desc, category):
+        """The bank posts a pending charge: Plaid sends the posted one, which replaces it."""
+        self.conn.execute(delete(Transaction).where(Transaction.id == tid))
+        self.tx("cc", posted, amount, desc, category)
+
+    def test_a_charge_pending_at_the_close_is_on_the_next_statement(self):
+        fc = self.build()
+        c = self.card(fc)
+        self.assertEqual((c["statement_balance"], c["payment"], c["new_charges"], c["pending_before_close"]),
+                         (1000.0, 1000.0, 2540.0, 2540.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 2540.0})
+        est = self.estimate(fc, "2026-12-07")
+        self.assertEqual((est["close"], est["charged_so_far"], est["pending_before_close"], est["statement"], est["total"]),
+                         ("2026-11-09", 0.0, 2540.0, 2540.0, 2540.0))
+
+    def test_it_counts_once_with_whats_charged_since(self):
+        self.tx("cc", "2026-10-10", -60.0, "GROCER", "Groceries")
+        fc = self.build()
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 2600.0})
+        est = self.estimate(fc, "2026-12-07")
+        self.assertEqual((est["charged_so_far"], est["pending_before_close"], est["statement"]), (60.0, 2540.0, 2600.0))
+
+    def test_once_it_posts_its_a_charge_since_the_close(self):
+        self.post(self.hotel, "2026-10-12", -2500.0, "SEASIDE RESORT", "Travel")
+        fc = self.build(date(2026, 10, 13))
+        c = self.card(fc)
+        self.assertEqual((c["new_charges"], c["pending_before_close"]), (2540.0, 40.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 2540.0})
+        est = self.estimate(fc, "2026-12-07")
+        self.assertEqual((est["charged_so_far"], est["pending_before_close"]), (2500.0, 40.0))
+        self.post(self.diner, "2026-10-12", -40.0, "CORNER DINER", "Restaurants")
+        fc = self.build(date(2026, 10, 13))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 2540.0})
+        self.assertNotIn("pending_before_close", self.estimate(fc, "2026-12-07"))
+
+    def test_not_again_once_the_issuers_next_statement_has_it(self):
+        self.post(self.hotel, "2026-10-12", -2500.0, "SEASIDE RESORT", "Travel")
+        self.post(self.diner, "2026-10-12", -40.0, "CORNER DINER", "Restaurants")
+        self.tx("cc", "2026-11-05", 1000.0, "PAYMENT THANK YOU", "Credit Card Payment")
+        self.stmt("cc", 2540.0, "2026-11-09", "2026-12-06", minimum=50.0)
+        fc = self.build(date(2026, 11, 10))
+        c = self.card(fc)
+        self.assertEqual((c["statement_balance"], c["payment"], c["new_charges"], c["pending_before_close"]),
+                         (2540.0, 2540.0, 0.0, 0.0))
+        self.assertEqual(self.payments(fc), {"2026-12-07": 2540.0})
+
+    def test_a_charge_posted_by_the_close_is_in_the_statement_already(self):
+        for tid in (self.hotel, self.diner):
+            self.conn.execute(update(Transaction).where(Transaction.id == tid).values(pending=0))
+        self.stmt("cc", 3540.0, "2026-10-09", "2026-11-06", minimum=70.0)
+        fc = self.build()
+        c = self.card(fc)
+        self.assertEqual((c["payment"], c["new_charges"], c["pending_before_close"]), (3540.0, 0.0, 0.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 3540.0})
+
+    def test_a_hold_the_bank_drops_drops_out(self):
+        self.conn.execute(delete(Transaction).where(Transaction.id == self.hotel))
+        fc = self.build()
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 40.0})
+        self.conn.execute(delete(Transaction).where(Transaction.id == self.diner))
+        fc = self.build()
+        self.assertEqual((self.card(fc)["new_charges"], self.card(fc)["pending_before_close"]), (0.0, 0.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0})
+
+    def test_an_old_simplefin_hold_isnt_believed(self):
+        # SimpleFIN doesn't re-read a pending row older than its refresh window: one that dropped off would linger.
+        add_tx(self.conn, "cc", "2026-09-20", -700.0, description="OLD HOLD", category="Shopping", pending=1)
+        self.assertEqual(self.card(self.build())["pending_before_close"], 2540.0)
+
+    def test_a_pending_credit_at_the_close_isnt_taken_off(self):
+        add_tx(self.conn, "cc", "2026-10-09", 300.0, id="cc|pl:refund-1", description="STORE REFUND", category="Refunds", pending=1)
+        add_tx(self.conn, "cc", "2026-10-09", 500.0, id="cc|pl:pay-1", description="PAYMENT THANK YOU",
+               category="Credit Card Payment", pending=1)
+        fc = self.build()
+        c = self.card(fc)
+        self.assertEqual((c["remaining"], c["new_charges"], c["pending_before_close"]), (1000.0, 2540.0, 2540.0))
+
+    def test_a_card_with_only_posted_charges_is_as_before(self):
+        for tid in (self.hotel, self.diner):
+            self.conn.execute(delete(Transaction).where(Transaction.id == tid))
+        self.tx("cc", "2026-10-10", -75.0, "GROCER", "Groceries")
+        fc = self.build()
+        self.assertEqual((self.card(fc)["new_charges"], self.card(fc)["pending_before_close"]), (75.0, 0.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 75.0})
+        self.assertNotIn("pending_before_close", self.estimate(fc, "2026-12-07"))
+
+    def test_a_statement_you_entered_the_same_way(self):
+        self.conn.execute(delete(CardStatement))
+        self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))
+        self.manual("cc", 1000.0, "2026-10-09", "2026-11-06")
+        fc = self.build()
+        c = self.card(fc)
+        self.assertEqual((c["statement_source"], c["payment"], c["pending_before_close"]), ("manual", 1000.0, 2540.0))
+        self.assertEqual(self.payments(fc), {"2026-11-06": 1000.0, "2026-12-07": 2540.0})
+
+    def test_paid_the_minimum_its_in_the_next_statement(self):
+        self.pay("minimum", apr="24")
+        fc = self.build()
+        carried = 1000.0 - 40.0
+        interest = (carried + 2540.0 / 2) * 0.02
+        statement = carried + interest + 2540.0
+        est = self.estimate(fc, "2026-12-07")
+        self.assertEqual((est["pending_before_close"], est["carried"]), (2540.0, carried))
+        self.assertAlmostEqual(est["statement"], statement, delta=0.01)
+        self.assertEqual(self.payments(fc)["2026-12-07"], fs.minimum(statement, interest))

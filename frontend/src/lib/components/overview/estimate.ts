@@ -34,6 +34,9 @@ export const estimateHeading = (est: StatementEstimate) => est.assumed_cycle
 export function estimateLines(est: StatementEstimate): EstimateLine[] {
   const out: EstimateLine[] = [];
   if (est.charged_so_far != null) out.push({ label: "Charged so far", value: fmt(est.charged_so_far) });
+  if (est.pending_before_close != null) {
+    out.push({ label: "Pending from before the last close", value: fmt(est.pending_before_close), detail: "not on that statement" });
+  }
   if (est.owed_now != null) out.push({ label: est.owed_now < 0 ? "Credit on the card now" : "Owed on the card now", value: money(est.owed_now) });
   if (est.budgets?.length && est.budgets_total != null) {
     const label = `Budgets on this card to ${fmtDate(est.close)}`;
