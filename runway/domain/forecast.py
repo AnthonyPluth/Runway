@@ -9,10 +9,11 @@ Model, per cash account (checking/savings marked "in forecast"):
 Nothing is taken out for spending that isn't scheduled or budgeted: there's no average of past spending.
 
 A card's statement balance comes from the issuer (or it's the amount you entered, if you know it). Statements that
-haven't closed yet are estimated, and flagged as estimates: what's been charged since the last one closed, plus the
-budgets paid with the card (spent on it day by day), its recurring charges and any annual fee. A charge on the card in
-the category of a budget charged to it is in that budget already; any other is on the statement, and comes off its
-category's budget wherever that's paid from, so it counts once. A card with no statement yet that has budgets, recurring
+haven't closed yet are estimated, and flagged as estimates: what's been charged since the last one closed (and what was
+still pending at that close, which isn't on it: card_cycle), plus the budgets paid with the card (spent on it day by
+day), its recurring charges and any annual fee. A charge on the card in the category of a budget charged to it is in
+that budget already; any other is on the statement, and comes off its category's budget wherever that's paid from, so
+it counts once. A card with no statement yet that has budgets, recurring
 charges or a fee charged to it is taken to close at each month's end (NO_STATEMENT_DUE_DAYS). Each estimated statement
 says what it's made of (estimate_parts). An amount you've changed is yours, not an estimate.
 
@@ -398,7 +399,14 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     posts; until then it comes off the new charges, as before. New charges never add to it: they're the next
     statement's. Never below nothing: what comes off beyond the statement comes off the new charges (or is a credit
     toward the next statement). The plan's payment (statement_payment) counts the payments toward it, not the credits:
-    an issuer's minimum or your fixed amount is paid as before, but never more than what's left."""
+    an issuer's minimum or your fixed amount is paid as before, but never more than what's left.
+
+    The new charges are the ones since the close and the ones still pending from on or before it
+    (`pending_before_close`, as much of them as isn't taken up by a credit): a statement has only what had posted by
+    its close, so a charge pending then posts after it, onto the next statement. Once it posts it's a charge since the
+    close like any other, and one the bank drops is gone. Only charges: a pending payment or credit from before the
+    close may be on the statement already (an issuer can credit a payment on the day it's made), so it isn't taken off
+    anything until it's dated after the close."""
     transfers = _transfer_categories(conn)
     last_close = parse_day(bank["last_statement_date"])
     T = Transaction
@@ -407,6 +415,10 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
         select(T.posted, T.amount, T.category, T.pending)
         .where(T.account_id == card["id"], T.posted > last_close.isoformat(), current).order_by(T.posted)
     ))
+    held = max(0.0, -(conn.execute(
+        select(func.coalesce(func.sum(T.amount), 0.0))
+        .where(T.account_id == card["id"], T.posted <= last_close.isoformat(), T.pending == 1, T.amount < 0,
+               _pending_counted(today), or_(T.category.is_(None), T.category.not_in(sorted(transfers))))).scalar() or 0.0))
     reported = max(0.0, bank["last_statement_balance"] or 0.0)
     known = statement_override(conn, card["id"], last_close)
     statement = known if known is not None else reported
@@ -415,7 +427,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     charges = [t for t in txs if t["category"] not in transfers]
     credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
     over = max(0.0, paid + credits - statement)
-    net = -sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
+    net = held - sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
     new_charges = max(0.0, net)
     due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, bank["due_day"])
@@ -440,6 +452,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
         "minimum_estimated": plan["pay_mode"] == "minimum" and bank["minimum_payment"] is None,
         "due_date": due.isoformat(),
         "new_charges": round(new_charges, 2),
+        "pending_before_close": round(min(held, new_charges), 2),
         "credit": round(max(0.0, -net), 2),
     }
 
@@ -516,11 +529,13 @@ def to_cents(values: list[float], total: float) -> list[float]:
 
 def estimate_parts(*, close: date, due: date, budgets: dict[str, dict[str, float]], start: date, recurring: list[dict],
                    fees: list[dict], carried: float, interest: float, statement: float, payment: float, plan: dict,
-                   charged_so_far: float | None = None, owed_now: float | None = None, assumed: bool = False) -> dict:
+                   charged_so_far: float | None = None, pending_before_close: float = 0.0, owed_now: float | None = None,
+                   assumed: bool = False) -> dict:
     """What an estimated statement (build) is made of, for the Overview to show: only what went into it, each part
     rounded so that they add up to the statement to the cent (to_cents), as the event's amount is rounded.
 
-    Its parts: what's been charged since the last statement closed (`charged_so_far`, the cycle in progress) or, on a
+    Its parts: what's been charged since the last statement closed (`charged_so_far`, the cycle in progress, with the
+    charges still pending from before that close, `pending_before_close`, which are on their own line) or, on a
     card with no statement yet (`assumed`: its cycle taken to end with the month), what it owes today (`owed_now`); the
     budgets paid with the card, each one's spending after `start` to the close (`budgets`: {category: {date: amount}});
     its `recurring` charges (events) and annual `fees`, as many as aren't in a budget charged to the card; what the
@@ -529,7 +544,9 @@ def estimate_parts(*, close: date, due: date, budgets: dict[str, dict[str, float
     lines: dict[str, float] = {}
     named: list[tuple[str, str, list[tuple[str, float]]]] = []
     if charged_so_far is not None:
-        lines["charged_so_far"] = charged_so_far
+        lines["charged_so_far"] = charged_so_far - (pending_before_close if pending_before_close >= CENT else 0.0)
+        if pending_before_close >= CENT:
+            lines["pending_before_close"] = pending_before_close
     if owed_now is not None:
         lines["owed_now"] = owed_now
     spent = {c: sum(v for d, v in days.items() if start.isoformat() < d <= close.isoformat()) for c, days in budgets.items()}
@@ -866,7 +883,8 @@ def month_end_cycles(today: date, end: date) -> Iterator[tuple[date, date]]:
 def simulate_statements(cycles: Iterable[tuple[date, date]], *, card_id: str, start: date, owing: float, plan: dict,
                         today: date, budgets: dict[str, float], charges: list[dict], fees: list[dict], covers: set[str],
                         spent_on: dict[str, dict[str, float]], charged_so_far: float | None = None,
-                        owed_now: bool = False, edits: dict[str, float] | None = None) -> list[dict]:
+                        pending_before_close: float = 0.0, owed_now: bool = False,
+                        edits: dict[str, float] | None = None) -> list[dict]:
     """A card's statements, cycle by cycle (`cycles`: (close, due) each, from statement_cycles or month_end_cycles),
     from `start`, the day the one before closed: each the charges on it plus what the one before it left (`owing`,
     below zero for a credit) and a month's interest on that, paid as `plan` (payment_plan) says; what isn't paid
@@ -875,9 +893,9 @@ def simulate_statements(cycles: Iterable[tuple[date, date]], *, card_id: str, st
     A statement's charges: the budgets paid with the card (`budgets`: {date: amount}), its recurring charges (`charges`,
     events) and annual fees (`fees`, by their `_on` day), each in the cycle it lands in, as many as aren't in a budget
     charged to the card (`covers`), and in the first cycle, what's been charged since the last statement closed
-    (`charged_so_far`). With `owed_now`, what it owes in the first cycle is this cycle's charges (a card with no
-    statement yet, whose cycle is taken to end with the month), not a balance carried from a statement: no interest on
-    it. With `edits` (your edits on the Overview, for a card whose statements have keys), an edit of a statement's
+    (`charged_so_far`, which has the charges still pending from before that close, `pending_before_close`, in it). With
+    `owed_now`, what it owes in the first cycle is this cycle's charges (a card with no statement yet, whose cycle is
+    taken to end with the month), not a balance carried from a statement: no interest on it. With `edits` (your edits on the Overview, for a card whose statements have keys), an edit of a statement's
     payment is what's paid toward it (paid_toward).
 
     Each cycle: close, due, pays (the business day it's paid on), key and old_key (its payment's, by closing and by due
@@ -906,8 +924,9 @@ def simulate_statements(cycles: Iterable[tuple[date, date]], *, card_id: str, st
             cycle["estimate"] = estimate_parts(
                 close=close, due=due, start=prev, budgets=spent_on, recurring=on_top, fees=fees_on_top,
                 carried=0.0 if first and owed_now else owing, interest=owed_interest, statement=statement, payment=planned,
-                plan=plan, charged_so_far=charged_so_far if first else None, owed_now=owing if first and owed_now else None,
-                assumed=owed_now)
+                plan=plan, charged_so_far=charged_so_far if first else None,
+                pending_before_close=pending_before_close if first else 0.0,
+                owed_now=owing if first and owed_now else None, assumed=owed_now)
         out.append(cycle)
         owing = statement - pay
         prev, first = close, False
@@ -920,9 +939,10 @@ def card_payments(conn, cards: list[dict], banks: dict[str, dict | None], on_car
     """The cards with a statement (`banks`, from bank_statement): where each stands (card_cycle), its closed statement's
     payment and the estimated statements after it, paid from its paying account when that's in the forecast (`cash`).
 
-    Future statements: what's been charged since the last one closed (the statement in progress), the budgets charged
-    to the card, its recurring charges and any annual fee, each in the cycle it lands in (simulate_statements). A
-    statement that isn't paid in full carries the rest into the next one, with a month's interest on it.
+    Future statements: what's been charged since the last one closed (the statement in progress, with what was still
+    pending at that close: card_cycle), the budgets charged to the card, its recurring charges and any annual fee, each
+    in the cycle it lands in (simulate_statements). A statement that isn't paid in full carries the rest into the next
+    one, with a month's interest on it.
 
     Returns {"card_status": each card's cycle, "events": the payments, "warnings", "old_keys": {payment key: the key it
     had before keys followed the closing date}, "no_statement": {card id: its annual fees} for the cards without one,
@@ -981,7 +1001,7 @@ def card_payments(conn, cards: list[dict], banks: dict[str, dict | None], on_car
             owing=info["carried"] - info["credit"], plan=info, today=today, budgets=spend.get(card["id"], {}),
             charges=[e for e in events if e["account_id"] == card["id"] and e["kind"] == "recurring"], fees=on_card,
             covers=covers[card["id"]], spent_on=spend_of.get(card["id"], {}), charged_so_far=info["new_charges"],
-            edits=overrides)
+            pending_before_close=info["pending_before_close"], edits=overrides)
         for c in cycles:
             old_keys[c["key"]] = c["old_key"]
             if "estimate" in c:

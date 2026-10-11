@@ -59,6 +59,11 @@ describe("estimate breakdown", () => {
     expect(text({ ...base, charged_so_far: 100, statement: 100, total: 50, pay_mode: "fixed" }).at(-1)).toBe("Paying your fixed amount · $50.00 (the rest carries over)");
   });
 
+  it("charges still pending from before the last close: their own line, after what's charged since", () => {
+    expect(text({ ...base, charged_so_far: 60, pending_before_close: 2540, statement: 2600, total: 2600 }))
+      .toEqual(["Charged so far · $60.00", "Pending from before the last close · $2,540.00 (not on that statement)", "= $2,600.00"]);
+  });
+
   it("a credit, with a real minus", () => {
     expect(text({ ...base, charged_so_far: 100, carried: -50, statement: 50, total: 50 })).toContain("Credit from the last statement · −$50.00");
   });

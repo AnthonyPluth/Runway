@@ -125,7 +125,7 @@ export interface ForecastEvent {
 }
 
 /** What an estimated card statement is made of (forecast.estimate_parts). Only what went into it is there; the parts
- *  (charged_so_far or owed_now, budgets_total, recurring_total, fees_total, carried, interest) add up to `statement` to
+ *  (charged_so_far, pending_before_close or owed_now, budgets_total, recurring_total, fees_total, carried, interest) add up to `statement` to
  *  the cent, and each list adds up to its total. */
 export interface StatementEstimate {
   close: string;
@@ -134,6 +134,8 @@ export interface StatementEstimate {
   assumed_cycle?: boolean;
   /** On the card since the last statement closed (the cycle in progress). */
   charged_so_far?: number;
+  /** Charges still pending from on or before the last close: not on that statement, so on this one. */
+  pending_before_close?: number;
   /** A card with no statement yet: what it owes today, in its first statement (below zero: a credit). */
   owed_now?: number;
   /** The budgets paid with the card, each one's spending to the close. */

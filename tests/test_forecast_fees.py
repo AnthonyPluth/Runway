@@ -26,7 +26,7 @@ class EstimatePartsTests(LedgerCase):
                 continue
             est = e["estimate"]
             cents = lambda v: round(v * 100)
-            parts = [est.get(k, 0.0) for k in ("charged_so_far", "owed_now", "budgets_total", "recurring_total", "fees_total",
+            parts = [est.get(k, 0.0) for k in ("charged_so_far", "pending_before_close", "owed_now", "budgets_total", "recurring_total", "fees_total",
                                                 "carried", "interest")]
             self.assertEqual(sum(map(cents, parts)), cents(est["statement"]), est)
             for name in ("budgets", "recurring", "fees"):
