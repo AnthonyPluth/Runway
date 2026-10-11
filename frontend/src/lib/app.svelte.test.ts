@@ -6,11 +6,13 @@ vi.mock("./api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn()
 vi.mock("./categories.svelte", () => ({ loadCategories: vi.fn().mockResolvedValue([]) }));
 vi.mock("./monitoring", () => ({ startMonitoring: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
+vi.mock("./deviceCache", async (real) => ({ ...(await real<typeof import("./deviceCache")>()), noteDataVersion: vi.fn() }));
 vi.mock("./webauthn", async (real) => ({ ...(await real<typeof import("./webauthn")>()), signChallenge: vi.fn() }));
 
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
 import { startMonitoring } from "./monitoring";
+import { dataVersionOf, noteDataVersion } from "./deviceCache";
 import { app, boot, checkIn, editing, refreshState, reload, route, syncOnVisit, whenBooted } from "./app.svelte";
 import { lock, unlock } from "./lock.svelte";
 import { signChallenge } from "./webauthn";
@@ -127,6 +129,13 @@ describe("state and reload", () => {
     expect(api).toHaveBeenCalledWith("/api/state", { keep: true });
     await refreshState(true);
     expect(api).toHaveBeenLastCalledWith("/api/state", { keep: true, background: true });
+  });
+
+  it("refreshState tells the device's encrypted cache which data version this is", async () => {
+    const s = state({ version: "1", last_sync_ok: "2026-10-11T07:00:00-04:00" });
+    vi.mocked(api).mockResolvedValue(s);
+    await refreshState();
+    expect(noteDataVersion).toHaveBeenLastCalledWith(dataVersionOf(s));
   });
 
   it("reload cancels in-flight reads and bumps the version so the page loads again", () => {

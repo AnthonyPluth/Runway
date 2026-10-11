@@ -57,4 +57,22 @@ describe("App with the app lock on", () => {
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Runway is locked" })).not.toBeInTheDocument());
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
   });
+
+  it("holds the page back, with the loading placeholder, while the device's encrypted cache opens after an unlock", async () => {
+    vi.mocked(api).mockImplementation((() => new Promise(() => {})) as never);   // the page's own loading: left waiting
+    const { lock } = await import("$lib/lock.svelte");
+    const { app, route } = await import("$lib/app.svelte");
+    route.page = "setup";
+    app.state = { connected: true } as never;
+    lock.phase = "unlocked";
+    render(App);
+    // (the page's code compiles on first use under Vitest, which takes a while)
+    expect(await screen.findByRole("heading", { name: "Settings" }, { timeout: 25000 })).toBeInTheDocument();
+    lock.opening = true;
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    lock.opening = false;
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading")).not.toBeInTheDocument();
+  }, 30000);
 });

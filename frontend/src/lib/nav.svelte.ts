@@ -94,7 +94,9 @@ export async function signOut(e: Event): Promise<void> {
   e.preventDefault();
   await act(async () => {
     const r = await api<{ redirect?: string }>("/auth/logout", { method: "POST" });
-    forgetLock();   // (and with it the replies kept in memory: lib/swr.ts's and lib/api.ts's)
+    // (and with it the replies kept in memory, lib/swr.ts's and lib/api.ts's, and the device's encrypted cache: deleted
+    // before leaving the page, or at most a second's wait, since leaving can cut it short)
+    await Promise.race([forgetLock(), new Promise((done) => setTimeout(done, 1000))]);
     location.href = r.redirect || "/auth/signed-out";
   });
 }

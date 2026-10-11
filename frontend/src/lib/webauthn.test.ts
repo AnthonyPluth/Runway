@@ -87,6 +87,25 @@ describe("asking the device", () => {
     await expect(signChallenge({ challenge: "AA", rp_id: "x", credential_id: null })).rejects.toThrow(/isn’t on/);
   });
 
+  it("copies just the PRF output when the browser gives a view of part of a buffer, and nothing when it gives none", async () => {
+    const answer = (results: unknown) => vi.fn().mockResolvedValue({
+      rawId: bytes(1), response: { clientDataJSON: bytes(1), authenticatorData: bytes(1), signature: bytes(1) },
+      getClientExtensionResults: () => results,
+    });
+    const whole = Uint8Array.from([0, 0, 5, 6, 7, 0]);
+    for (const [results, want] of [
+      [{ prf: { results: { first: new Uint8Array(whole.buffer, 2, 3) } } }, [5, 6, 7]],
+      [{ prf: { results: { first: new DataView(whole.buffer, 3, 2) } } }, [6, 7]],
+      [{ prf: { enabled: true } }, null],   // the passkey has PRF but gave nothing back
+      [{}, null],                           // a browser or passkey without PRF
+    ] as const) {
+      vi.stubGlobal("navigator", { credentials: { get: answer(results) } });
+      const { prf } = await signChallenge({ challenge: "AA", rp_id: "x", credential_id: "AQ" }, new Uint8Array(32));
+      expect(prf && [...prf]).toEqual(want);
+      if (prf) { prf.fill(0); expect([...whole]).toEqual([0, 0, 5, 6, 7, 0]); }   // a copy: zeroing it leaves the browser's alone
+    }
+  });
+
   it("says what the device saying no means", () => {
     const named = (name: string) => Object.assign(new Error("browser words"), { name });
     expect(webauthnError(named("NotAllowedError"))).toMatch(/Cancelled/);
