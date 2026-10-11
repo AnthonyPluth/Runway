@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from runway.storage import db
 from runway.domain import demo, forecast, portfolio
 from runway.domain import retail
-from runway.storage.models import Account, Recurring, RetailItem, RetailOrder, Transaction
+from runway.storage.models import Account, Category, Recurring, RetailItem, RetailOrder, Transaction
 from tests.shared import DbCase
 
 
@@ -55,6 +55,19 @@ class DemoTests(DbCase):
         total, subtotal, tax = self.c.execute(select(RetailOrder.total, RetailOrder.subtotal, RetailOrder.tax)).fetchone()
         self.assertAlmostEqual(-tx, total, places=2)
         self.assertAlmostEqual(subtotal + tax, total, places=2)
+
+    def test_the_subcategories_are_opt_in_and_hold_transactions_and_receipt_items(self):
+        from runway.domain import categories
+        demo.seed(self.c, today=date(2026, 10, 9))
+        demo.seed_receipt(self.c, today=date(2026, 10, 9))
+        self.assertEqual(self.c.execute(select(func.count()).select_from(Category).where(Category.parent.is_not(None))).scalar(), 0)
+        demo.seed_subcategories(self.c)
+        kids = {c["name"]: c["parent"] for c in categories.all_categories(self.c) if c["parent"]}
+        self.assertEqual(kids, {"Pantry": "Groceries", "Snacks & Sweets": "Groceries", "Takeout": "Restaurants"})
+        for name in kids:
+            self.assertGreater(self.c.execute(select(func.count()).select_from(Transaction).where(Transaction.category == name)).scalar()
+                               + self.c.execute(select(func.count()).select_from(RetailItem).where(RetailItem.category == name)).scalar(), 0, name)
+        self.assertEqual(self.c.execute(select(RetailItem.category).where(RetailItem.title == "Dark chocolate bar")).scalar(), "Snacks & Sweets")
 
     def test_the_brokerage_has_a_gain_a_loss_and_a_flat_day(self):
         demo.seed(self.c, today=date(2026, 10, 9))

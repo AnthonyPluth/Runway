@@ -26,6 +26,24 @@ beforeEach(() => {
 });
 
 describe("TxRow", () => {
+  it("shows a subcategory as a pill of its emoji and own name, no chevron, the whole path as the tooltip, and names it with its parent", () => {
+    categories.list = [...categories.list, category("Dining", { icon: "🍽️" }),
+      category("Takeout", { icon: "🥡", parent: "Dining", path: ["Dining", "Takeout"], depth: 1, top: "Dining" })];
+    render(TxRow, props(tx({ category: "Takeout" })));
+    const button = screen.getByRole("combobox", { name: "Category for Blue Bottle: Takeout, in Dining" });
+    expect(button).toHaveTextContent(/^🥡 Takeout$/);
+    expect(within(button).getByText("Takeout")).toHaveAttribute("title", "Dining > Takeout");
+    expect(button.querySelector("svg")).toBeNull();
+    expect(button.className).toContain("phone:before:-inset-y-2");
+  });
+
+  it("keeps the dashed amber 'Choose category' pill for an uncategorized row", () => {
+    render(TxRow, props(tx({ category: null })));
+    const button = screen.getByRole("combobox", { name: "Category for Blue Bottle" });
+    expect(button.firstElementChild).toHaveClass("border-dashed", "text-warning");
+    expect(button.querySelector("svg")).toBeNull();
+  });
+
   it("shows the merchant, the formatted amount and the category", () => {
     render(TxRow, props(tx()));
     expect(within(row()).getByText("Blue Bottle")).toBeInTheDocument();
@@ -40,7 +58,7 @@ describe("TxRow", () => {
     expect(within(row()).getByText("−$60.00")).toBeInTheDocument();
     expect(within(row()).getByText("of $100.00")).toBeInTheDocument();
     expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();
-    await pickCategory(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for the Groceries part of Blue Bottle(:|$)/ }), "Coffee");
     expect(p.onsave).toHaveBeenCalledWith("Coffee");
   });
 
@@ -105,9 +123,18 @@ describe("TxRow", () => {
     expect(within(row()).queryByLabelText("Transfer")).not.toBeInTheDocument();
   });
 
+  it("keeps the transfer cue in the button's accessible name, which hides the ⇄ icon's own label", () => {
+    categories.list.push(category("Transfer", { is_transfer: 1 }), category("Ignore", { is_transfer: 1 }));
+    const { unmount } = render(TxRow, props(tx({ category: "Transfer" })));
+    expect(screen.getByRole("combobox", { name: "Category for Blue Bottle, a transfer: Transfer" })).toBeInTheDocument();
+    unmount();
+    render(TxRow, props(tx({ category: "Ignore" })));
+    expect(screen.getByRole("combobox", { name: "Category for Blue Bottle: Ignore" })).toBeInTheDocument();
+  });
+
   it("shows the saved category again when a pick couldn't be saved", async () => {
     render(TxRow, props(tx(), { onsave: vi.fn().mockResolvedValue(false) }));
-    const select = screen.getByRole("combobox", { name: "Category for Blue Bottle" });
+    const select = screen.getByRole("combobox", { name: /^Category for Blue Bottle(:|$)/ });
     await pickCategory(select, "Groceries");
     await vi.waitFor(() => expect(pickedValue(select)).toBe("Coffee"));
   });
@@ -172,14 +199,14 @@ describe("TxRow", () => {
     it("saves as soon as you pick another", async () => {
       const p = props(tx());
       render(TxRow, p);
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Blue Bottle(:|$)/ }), "Groceries");
       expect(p.onsave).toHaveBeenCalledWith("Groceries");
     });
 
     it("doesn't save when the blank option is picked", async () => {
       const p = props(tx());
       render(TxRow, p);
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Blue Bottle(:|$)/ }), "");
       expect(p.onsave).not.toHaveBeenCalled();
     });
 
@@ -217,7 +244,7 @@ describe("TxRow", () => {
     it("keeps a category picked again on a row waiting for review (that accepts it)", async () => {
       const p = props(tx({ needs_review: 1, category_source: "ai" }));
       render(TxRow, p);
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "Coffee");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Blue Bottle(:|$)/ }), "Coffee");
       expect(p.onsave).toHaveBeenCalledWith("Coffee");
     });
 
@@ -374,9 +401,9 @@ describe("TxRow", () => {
       expect(row().querySelector("[data-account-badge]")).toBeNull();
     });
 
-    it("shows the category as words, without its emoji", () => {
+    it("shows the category as a pill: its emoji (hidden from screen readers), then its name", () => {
       render(TxRow, props(tx()));
-      expect(within(row()).queryByText("☕")).not.toBeInTheDocument();
+      expect(within(row()).getByText("☕")).toHaveAttribute("aria-hidden", "true");
       expect(within(row()).getByText("Coffee")).toBeInTheDocument();
     });
 

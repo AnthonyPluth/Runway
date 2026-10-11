@@ -1,0 +1,11 @@
+{
+  "name": "transactions-detail-subcategory",
+  "page": "transactions",
+  "steps": [
+    { "goto": "#transactions" },
+    { "wait_for": "button[aria-label^='Category for Green Grocer Market']" },
+    { "click": "[role=listitem] button[aria-haspopup=dialog]:has-text('Green Grocer Market')" },
+    { "wait_for": "[role=dialog] button[aria-label^='Category: ']" },
+    { "screenshot": "detail" }
+  ]
+}

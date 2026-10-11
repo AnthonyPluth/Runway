@@ -2,6 +2,7 @@
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
+  import CategoryChip, { chipButton } from "$lib/components/CategoryChip.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
   import { orderLabel } from "$lib/components/orders/retail";
@@ -10,7 +11,6 @@
   import { fmt, fmtSigned } from "$lib/format";
   import { categories } from "$lib/categories.svelte";
   import { cn } from "$lib/utils";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
   import SplitIcon from "@lucide/svelte/icons/split";
@@ -87,8 +87,6 @@
   // Shown on hover (and always on touch screens, which can't hover, and while the row has focus).
   const onHover = "hoverable:opacity-0 hoverable:group-hover:opacity-100 hoverable:group-focus-within:opacity-100";
   // Shown on hover only: a touch screen leaves them out (fewer icons on a phone), and has them in the details instead.
-  // The category chip (it opens the picker).
-  const chip = "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring";
   const hoverOnly = "hoverable:opacity-0 hoverable:group-hover:opacity-100 hoverable:group-focus-within:opacity-100 [@media(hover:none)]:hidden";
 
   // Select mode: a tap anywhere on the row ticks it (the checkbox handles its own), and does nothing else.
@@ -109,7 +107,7 @@
 
 <!-- The columns give way before the amount does: below lg the merchant and category shrink to fit, and the amount and
      the chevron always keep their width. -->
-<div role="listitem" data-tx={t.id} data-focused={focused || undefined} onclickcapture={tapToSelect} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-y-1 py-2.5 pr-1 pl-4 md:grid-cols-[auto_auto_minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] md:gap-y-0 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(3rem,auto)] lg:py-1 lg:pr-4",
+<div role="listitem" data-tx={t.id} data-focused={focused || undefined} onclickcapture={tapToSelect} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-y-1 py-2.5 pr-1 pl-4 md:grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:gap-y-0 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(3rem,auto)] lg:py-1 lg:pr-4",
   review && "md:grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto] lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_10rem_2.5rem]",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]", selecting && "cursor-pointer select-none", focused && "relative z-[1] rounded-md ring-2 ring-ring ring-inset")}>
   <!-- On a phone (Select mode) a 20px box with padding round it; the whole row ticks it too. -->
@@ -179,13 +177,12 @@
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
-  <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
+  <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:pr-1 lg:pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
     {#if part}
       <!-- Only the part in the filter's category: picking another changes just that part. -->
       <CategorySelect bind:value={pickedPart} disabled={saving} label={`Category for the ${part.categories.join(", ")} part of ${name}`} onchange={save}
-        class={cn(chip, "hover:bg-muted", saving && "opacity-60")}>
-        <span class="truncate" title={part.categories.join(", ")}>{part.categories.join(", ")}</span>
-        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
+        class={chipButton("row", saving && "opacity-60")}>
+        <CategoryChip category={pickedPart} text={pickedPart ? undefined : part.categories.join(", ")} />
       </CategorySelect>
       <Button variant="link" size="sm" class="h-auto shrink-0 px-1 text-xs text-muted-foreground" title="Edit the whole split" data-split onclick={(e) => openSplit(e)}>split</Button>
     {:else if split}
@@ -201,11 +198,11 @@
       </button>
     {:else}
       <!-- The chip shows the category and opens the picker. Picking the one it has keeps it (and takes it out of Review). -->
-      <CategorySelect bind:value={picked} disabled={saving} label={`Category for ${name}`} repick={!!t.needs_review} onchange={save}
-        class={cn(chip, t.category ? "hover:bg-muted" : "border border-dashed border-warning/60 text-warning hover:bg-warning/10", saving && "opacity-60")}>
-        {#if transfer}<ArrowLeftRight class="size-3.5 shrink-0 text-muted-foreground" aria-label="Transfer" />{/if}
-        <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
-        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
+      <CategorySelect bind:value={picked} disabled={saving} label={`Category for ${name}${transfer ? ", a transfer" : ""}`} repick={!!t.needs_review} onchange={save}
+        class={chipButton("row", saving && "opacity-60")}>
+        <CategoryChip category={picked} compactEmpty="Category">
+          {#snippet lead()}{#if transfer}<ArrowLeftRight class="size-3.5 shrink-0 text-muted-foreground" aria-label="Transfer" />{/if}{/snippet}
+        </CategoryChip>
       </CategorySelect>
     {/if}
     {#if suggestion}

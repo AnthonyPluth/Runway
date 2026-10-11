@@ -100,7 +100,7 @@ def run(pages: list[str]) -> int:
     token = secrets.token_urlsafe(32)
     servers: list[subprocess.Popen] = []
     try:
-        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt",
+        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt", "--subcategories",
                                  "--signed-in"], env={**env, SESSION_ENV: token}, cwd=ROOT, capture_output=True, text=True)
         if seeded.returncode:
             print(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", file=sys.stderr)

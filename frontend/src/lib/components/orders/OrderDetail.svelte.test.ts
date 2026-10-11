@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -122,15 +122,18 @@ describe("undo and failures", () => {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     expect(screen.getByText("2×")).toBeInTheDocument();
     expect(screen.getByText("$10.00")).toBeInTheDocument();
-    const chip = screen.getByRole("combobox", { name: "Category for Tea" });
+    const chip = screen.getByRole("combobox", { name: /^Category for Tea(:|$)/ });
     expect(chip).toHaveTextContent("🛒 Groceries");
+    expect(within(chip).getByText("🛒")).toHaveAttribute("aria-hidden", "true");
     expect(chip.querySelector("svg")).toBeNull();
-    expect(chip.className).toContain("text-xs");
+    // The pill is 24px in a receipt (28px on a row), with a hit area that grows to 44px on a phone.
+    expect(chip.firstElementChild).toHaveClass("h-6");
+    expect(chip.className).toContain("phone:before:-inset-y-2.5");
     const name = screen.getByText("Tea");
     expect(name.className).toContain("font-medium");
     expect(name.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Category for Mug" })).toHaveTextContent("Shopping");
-    expect(screen.getByRole("combobox", { name: "Category for Bag" })).toHaveTextContent("Choose category");
+    expect(screen.getByRole("combobox", { name: /^Category for Mug(:|$)/ })).toHaveTextContent("Shopping");
+    expect(screen.getByRole("combobox", { name: /^Category for Bag(:|$)/ })).toHaveTextContent("Choose category");
   });
 
   it("says a picked category applies to the item in every order", async () => {

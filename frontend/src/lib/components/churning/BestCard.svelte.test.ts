@@ -29,7 +29,7 @@ describe("best card", () => {
     vi.mocked(api).mockImplementation((async (path: string) => ({ cards: [path.includes("portal=1") ? row : { ...row, multiplier: 2, needs_portal: false, note: null }] })) as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     await screen.findByText("Venture X");
-    await pickCategory(screen.getByLabelText("Category of the purchase"), "Hotels");
+    await pickCategory(screen.getByLabelText(/^Category of the purchase(:|$)/), "Hotels");
     expect(calls(/best\?/).at(-1)![0]).not.toContain("portal=1");
     await userEvent.click(screen.getByLabelText("I'll book through the issuer's travel portal"));
     expect(await screen.findByText("Only when booked through Capital One Travel")).toBeInTheDocument();
@@ -42,10 +42,10 @@ describe("best card", () => {
     render(BestCard, { person: "", version: 0, showOwner: false });
     await screen.findByText("No open cards yet.");
     expect(screen.queryByLabelText("I'll book through the issuer's travel portal")).not.toBeInTheDocument();
-    await pickCategory(screen.getByLabelText("Category of the purchase"), "Travel");
+    await pickCategory(screen.getByLabelText(/^Category of the purchase(:|$)/), "Travel");
     await userEvent.click(screen.getByLabelText("I'll book through the issuer's travel portal"));
     await waitFor(() => expect(calls(/best\?/).at(-1)![0]).toContain("portal=1"));
-    await pickCategory(screen.getByLabelText("Category of the purchase"), "Groceries");
+    await pickCategory(screen.getByLabelText(/^Category of the purchase(:|$)/), "Groceries");
     expect(screen.queryByLabelText("I'll book through the issuer's travel portal")).not.toBeInTheDocument();
     await waitFor(() => expect(calls(/best\?/).at(-1)![0]).toContain("category=Groceries"));
     expect(calls(/best\?/).at(-1)![0]).not.toContain("portal=1");
@@ -58,7 +58,7 @@ describe("best card", () => {
     vi.mocked(api).mockImplementation((async (path: string) => ({ cards: [path.includes("category=Trips") ? row : { ...row, portal_option: null }] })) as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     await screen.findByText("Venture X");
-    await pickCategory(screen.getByLabelText("Category of the purchase"), "Trips");
+    await pickCategory(screen.getByLabelText(/^Category of the purchase(:|$)/), "Trips");
     expect(await screen.findByLabelText("I'll book through the issuer's travel portal")).toBeInTheDocument();
   });
 

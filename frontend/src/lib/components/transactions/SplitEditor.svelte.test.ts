@@ -32,7 +32,7 @@ describe("SplitEditor", () => {
   it("starts with the whole amount on the current category and an empty second part", () => {
     setup();
     expect(screen.getByText("Split $30.00")).toBeInTheDocument();
-    expect(pickedValue(screen.getByRole("combobox", { name: "Category of part 1" }))).toBe("Coffee");
+    expect(pickedValue(screen.getByRole("combobox", { name: /^Category of part 1(:|$)/ }))).toBe("Coffee");
     expect(amount(1)).toHaveValue("30.00");
     expect(amount(2)).toHaveValue("");
     expect(screen.getByText("adds up")).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("SplitEditor", () => {
   it("loads an existing split and can remove it", async () => {
     const { onsaved } = setup(tx({ amount: -30, is_split: 1, splits: [txSplit("Coffee", -10, { note: "x" }), txSplit("Groceries", -20)] }));
     expect(amount(1)).toHaveValue("10.00");
-    expect(pickedValue(screen.getByRole("combobox", { name: "Category of part 2" }))).toBe("Groceries");
+    expect(pickedValue(screen.getByRole("combobox", { name: /^Category of part 2(:|$)/ }))).toBe("Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Remove split" }));
     expect(api).toHaveBeenCalledWith("/api/transactions/t1/split", { method: "POST", body: { splits: [] } });
     expect(onsaved).toHaveBeenCalled();

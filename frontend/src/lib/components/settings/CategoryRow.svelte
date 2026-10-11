@@ -192,7 +192,7 @@
         <select class={cn(selectCls, "w-full border-input")} bind:value={sendTo}>
           <option value="">Go to Review, uncategorized</option>
           <optgroup label="Or move them to">
-            {#each others as o (o.name)}<option value={o.name} disabled={o.name === name}>{catLabel(o)}</option>{/each}
+            {#each others as o (o.name)}<option value={o.name} disabled={o.name === name}>{catLabel(o, " · ")}</option>{/each}
           </optgroup>
         </select>
       </label>

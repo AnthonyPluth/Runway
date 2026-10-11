@@ -120,7 +120,7 @@ describe("TxTable", () => {
       const p = setup();
       await userEvent.click(tick("Alpha"));
       await userEvent.click(tick("Bravo"));
-      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a", "b"], category: "Groceries" } });
       expect(undoToast()[0]).toBe("Set to Groceries · 2 transactions");
       expect(undoToast()[1].action.label).toBe("Undo");
@@ -131,7 +131,7 @@ describe("TxTable", () => {
       vi.mocked(api).mockResolvedValue({ updated: 2, was, offer_rule: { merchant: "Alpha", match: "alpha", also_updated: 3 } });
       setup();
       await userEvent.click(tick("Alpha"));
-      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
       const [msg, opts] = vi.mocked(toast).mock.calls.at(-1) as unknown as [string, { description: string; action: { label: string }; cancel: { label: string } }];
       expect(msg).toBe("Set to Groceries · 2 transactions");
       expect(opts.action.label).toBe("Always for Alpha");
@@ -142,7 +142,7 @@ describe("TxTable", () => {
     it("under a category filter, sends it along so a split one changes only that part", async () => {
       setup({ only: "Coffee" });
       await userEvent.click(tick("Alpha"));
-      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], category: "Groceries", only: "Coffee" } });
     });
 
@@ -150,11 +150,11 @@ describe("TxTable", () => {
       setup();
       await userEvent.click(tick("Alpha"));
       await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "Acme");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
       expect(screen.queryByRole("region", { name: "Change the selected transactions" })).not.toBeInTheDocument();
       await userEvent.click(tick("Bravo"));
       expect(screen.getByRole("textbox", { name: "New merchant name" })).toHaveValue("");
-      expect(pickedValue(screen.getByRole("combobox", { name: "Category for the selected transactions" }))).toBe("");
+      expect(pickedValue(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }))).toBe("");
     });
 
     it("undoes with what each transaction was, which the server sent back", async () => {
@@ -192,7 +192,7 @@ describe("TxTable", () => {
 
       it("asks with the count at ten or more, and only then changes them", async () => {
         await pickAll(10);
-        await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
         const dialog = await screen.findByRole("dialog", { name: "Set Groceries on 10 transactions?" });
         expect(api).not.toHaveBeenCalled();
         await userEvent.click(within(dialog).getByRole("button", { name: "Set category" }));
@@ -203,11 +203,11 @@ describe("TxTable", () => {
 
       it("leaves everything as it was when you cancel", async () => {
         await pickAll(11);
-        await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        await pickCategory(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }), "Groceries");
         await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
         expect(api).not.toHaveBeenCalled();
         expect(screen.getByText("11 selected")).toBeInTheDocument();
-        expect(pickedValue(screen.getByRole("combobox", { name: "Category for the selected transactions" }))).toBe("");
+        expect(pickedValue(screen.getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ }))).toBe("");
       });
 
       it("asks before a rename and before accepting", async () => {
@@ -330,7 +330,7 @@ describe("TxTable", () => {
       await userEvent.click(tick("Alpha"));
       const bar = screen.getByRole("region", { name: "Change the selected transactions" });
       expect(bar).toHaveTextContent("1 selected");
-      expect(within(bar).getByRole("combobox", { name: "Category for the selected transactions" })).toHaveTextContent("Categorize");
+      expect(within(bar).getByRole("combobox", { name: /^Category for the selected transactions(:|$)/ })).toHaveTextContent("Categorize");
       expect(within(bar).queryByRole("textbox")).not.toBeInTheDocument();
       await userEvent.click(within(bar).getByRole("button", { name: "More actions" }));
       await fireEvent.click(screen.getByText("Accept", { selector: "[data-popover-content] button" }));
