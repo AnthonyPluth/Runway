@@ -473,8 +473,10 @@ app_locks = Table(
     Column('unlocked_until', Float, doc='when that unlock ends (moved on while the app is in use); NULL: locked'),
     Column('created', Float, nullable=False),
     Column('last_used', Float, doc='when it was last unlocked with'),
+    Column('key_share', Text, doc="the server's share of this device's cache key (secretbox-encrypted); NULL until asked "
+                                  'for, and gone with the row'),
     info={'doc': 'app locks (Face ID / Touch ID): one row per signed-in device, removed (not marked) when it ends; '
-                 'no secrets, only what checks an unlock'},
+                 'what checks an unlock, and the one secret kept for the device (key_share)'},
 )
 
 oauth_clients = Table(

@@ -165,6 +165,7 @@ class Replies(DbCase):
             ch = lock.api_lock_challenge(self.c, {}, {"purpose": "unlock"})
             self.check("POST /api/lock/challenge", ch)
             self.check("POST /api/lock/unlock", lock.api_lock_unlock(self.c, {}, a.get(ch["challenge"])))
+            self.check("POST /api/lock/key-share", lock.api_lock_key_share(self.c, {}, {}))
             self.check("GET /api/lock", lock.api_lock(self.c, {}, {}))
             self.check("DELETE /api/lock", lock.api_lock_off(self.c, {}, {}))
 

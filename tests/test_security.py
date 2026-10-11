@@ -8,13 +8,13 @@ import threading
 import unittest
 from unittest import mock
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 
 from runway.storage import backup, db, secretbox
 from runway.domain import categories
 from runway import oidc, server
 from runway.providers import simplefin
-from runway.storage.models import PlaidItem, Setting, SyncLog
+from runway.storage.models import AppLock, AuthSession, PlaidItem, Setting, SyncLog
 from tests.shared import ServerCase, add_database, database_path, fetch, own_database
 from tests.test_web_app import built_app, serving
 
@@ -118,6 +118,19 @@ class SecretsTests(unittest.TestCase):
             self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")
         # the original key alone can't read it any more: treated as not entered, never a crash
         self.assertIsNone(db.get_setting(self.c, "openrouter_api_key"))
+
+    def test_devices_cache_key_shares_move_to_a_new_key(self):
+        self.c.execute(insert(AuthSession).values(token_hash="h1", sub="u1", created=0, expires=9e9))
+        self.c.execute(insert(AppLock).values(id="dev_1", session="h1", credential_id="c", public_key="p", alg=-7,
+                                              idle=60, created=0, key_share=secretbox.encrypt("the-share")))
+        old = os.environ["RUNWAY_SECRET_KEY"]
+        new = "a-brand-new-key-abcdefghijklmnopqrstuvwxyz"
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new, "RUNWAY_SECRET_KEY_OLD": old}):
+            self.assertEqual(secretbox.encrypt_stored(self.c), 1)
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new}):
+            self.assertEqual(secretbox.decrypt(self.c.execute(select(AppLock.key_share)).scalar()), "the-share")
+            self.c.execute(update(AppLock).values(key_share=secretbox.PREFIX + "gAAAAAunreadable"))
+            self.assertEqual(secretbox.encrypt_stored(self.c), 0)      # one it can't read is left (replaced when asked)
 
     def test_short_keys_are_refused(self):
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "short"}):

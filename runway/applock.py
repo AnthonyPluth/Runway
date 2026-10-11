@@ -27,7 +27,18 @@ sessions oidc.session_user deletes, or, with OIDC_ALLOWED_GROUPS, the session's 
 judges), when it's turned off on the device, and when it's turned on again (a new passkey, a new row).
 
 What it doesn't stop: someone who already has the session cookie elsewhere, while the device is unlocked (they could
-keep it unlocked); a script running in Runway's own pages; data the app already has in memory."""
+keep it unlocked); a script running in Runway's own pages; data the app already has in memory.
+
+The cache key share (#357): the device's encrypted on-device cache is opened with a key the web app derives from its
+passkey's PRF output and a random share (SHARE_BYTES) this server keeps for the device, encrypted (secretbox), in its
+app_locks row (key_share). Neither half alone opens the cache, so the device's row ending (each way above) ends the
+cache too, at the latest SHARE_WINDOW later (how long the device may keep its own copy of the share, offline). The share
+is made the first time it's asked for and stays the same until the row ends: a new one would make the whole cache
+unreadable. It's handed out (key_share) only to this session, unlocked, once per passkey check: an unlock or turning the
+lock on lets the session have it once within SHARE_FRESH seconds, and nothing else does. At most SHARE_LIMIT asks per
+SHARE_LIMIT_WINDOW per session. It's never logged or reported, doesn't travel in backups (app_locks doesn't), and is
+refused to the assistants (mcp_access blocks /api/lock and below) and the browser extension (its key reaches /api/ext/
+only)."""
 from __future__ import annotations
 
 import base64
@@ -46,6 +57,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from sqlalchemy import delete, insert, select, update
 
 from . import oidc
+from .storage import secretbox
 from .storage.models import AppLock
 
 TIMEOUTS = (0, 60, 300, 900)   # Immediately, 1, 5 or 15 minutes away
@@ -57,6 +69,11 @@ CHALLENGE_TTL = 120
 MAX_CHALLENGES = 1000          # challenges handed out and not yet used, kept at once
 ES256, RS256 = -7, -257
 UP, UV, AT = 0x01, 0x04, 0x40  # authenticator data flags: user present, user verified, attested credential data
+SHARE_BYTES = 32
+SHARE_WINDOW = 72 * 3600       # how long a device may go on using its own copy of the share without asking again
+SHARE_FRESH = 60               # the share is handed out once, this soon after a passkey check (unlock or turning on)
+SHARE_LIMIT = 30               # asks for the share per session...
+SHARE_LIMIT_WINDOW = 3600      # ... in this many seconds
 
 # What a locked session may still call: the lock screen's own calls. Anything else is refused with 423.
 LOCKED_OK = frozenset({("GET", "/api/lock"), ("POST", "/api/lock/challenge"), ("POST", "/api/lock/unlock"),
@@ -68,6 +85,10 @@ EXPIRED = "That took too long. Try again."
 OTHER_ADDRESS = "App lock only works at Runway’s own address ({origin}). Open Runway there and try again."
 NO_VERIFICATION = "The device didn’t confirm it was you (Face ID, Touch ID or the passcode). Try again."
 LOCKED = "Runway is locked on this device. Unlock it to carry on."
+NOT_ON = "App lock isn’t on for this device."
+NOT_FRESH = "Unlock Runway on this device again first."
+TOO_MANY = "Runway was asked for this device’s cache key too often. Try again later."
+LAPSED = "Your access to Runway has ended."
 
 
 class LockError(Exception):
@@ -82,8 +103,21 @@ class Locked(LockError):
         super().__init__(LOCKED)
 
 
-_challenges: dict[tuple[str, str], tuple[bytes, float]] = {}
+class NotFresh(LockError):
+    """The cache key share was asked for without a passkey check just before it (or a second time for one check)."""
+
+
+class Lapsed(LockError):
+    """The session's person can no longer sign in (oidc.access_lapsed), though the session hasn't ended yet."""
+
+
+class TooMany(LockError):
+    """The cache key share was asked for more than SHARE_LIMIT times in SHARE_LIMIT_WINDOW by this session."""
+
+
+_challenges: dict[tuple[str, str], tuple[bytes, float]] = {}   # (session, purpose) -> (what it is, until when)
 _challenges_lock = threading.Lock()
+_asked: dict[str, list[float]] = {}   # session -> when it asked for the cache key share, within SHARE_LIMIT_WINDOW
 _B64URL = re.compile(r"[A-Za-z0-9_-]*")
 
 
@@ -120,15 +154,19 @@ def relying_party() -> tuple[str, str] | None:
 
 # ------------------------------------------------------------------------------------------------ challenges
 
-def challenge(key: str, purpose: str, now: float) -> str:
-    """A new challenge for this session and purpose ("register" or "unlock"), replacing any earlier one."""
-    c = secrets.token_bytes(32)
+def _keep(key: str, purpose: str, value: bytes, now: float, ttl: float) -> None:
     with _challenges_lock:
         for k in [k for k, (_c, until) in _challenges.items() if until < now]:
             del _challenges[k]
         while len(_challenges) >= MAX_CHALLENGES:   # bounded: the oldest go first
             del _challenges[min(_challenges, key=lambda k: _challenges[k][1])]
-        _challenges[(key, purpose)] = (c, now + CHALLENGE_TTL)
+        _challenges[(key, purpose)] = (value, now + ttl)
+
+
+def challenge(key: str, purpose: str, now: float) -> str:
+    """A new challenge for this session and purpose ("register" or "unlock"), replacing any earlier one."""
+    c = secrets.token_bytes(32)
+    _keep(key, purpose, c, now, CHALLENGE_TTL)
     return _b64e(c)
 
 
@@ -276,21 +314,24 @@ def turn_on(conn, key: str, body: dict, now: float) -> None:
     conn.execute(delete(AppLock).where(AppLock.session == key, AppLock.unlocked_until > now))
     if _row(conn, key) is not None:
         raise Locked()
-    conn.execute(insert(AppLock).values(id="dev_" + secrets.token_urlsafe(16), session=key, **cols, idle=idle,
-                                        **_unlocked(now, idle), created=now, last_used=now))
+    device = "dev_" + secrets.token_urlsafe(16)
+    conn.execute(insert(AppLock).values(id=device, session=key, **cols, idle=idle, **_unlocked(now, idle), created=now,
+                                        last_used=now))
+    _checked(key, device, now)
 
 
 def unlock(conn, key: str, body: dict, now: float) -> None:
     rp = relying_party()
     r = _row(conn, key)
     if rp is None or r is None:
-        raise LockError("App lock isn’t on for this device.")
+        raise LockError(NOT_ON)
     count = verify_assertion(body, dict(r), _take_challenge(key, "unlock", now), *rp)
     # The row whose passkey signed, only: one that replaced it in between (turned on again) isn't unlocked by the old one.
     done = conn.execute(update(AppLock).where(AppLock.session == key, AppLock.id == r["id"])
                         .values(sign_count=count, last_used=now, **_unlocked(now, r["idle"])))
     if done.rowcount != 1:
         raise LockError(NOT_CHECKED)
+    _checked(key, r["id"], now)
 
 
 def engage(conn, key: str) -> None:
@@ -305,7 +346,7 @@ def set_idle(conn, key: str, idle, now: float) -> None:
     idle = idle_seconds(idle)
     r = _row(conn, key)
     if r is None:
-        raise LockError("App lock isn’t on for this device.")
+        raise LockError(NOT_ON)
     done = conn.execute(update(AppLock).where(AppLock.session == key, AppLock.unlocked_until > now)
                         .values(idle=idle, unlocked_until=min(now + idle + GRACE, (r["unlocked_at"] or now) + MAX_UNLOCKED)))
     if done.rowcount == 0:
@@ -336,3 +377,86 @@ def refuses(conn, key: str | None, method: str, path: str, hidden: bool, now: fl
             if done.rowcount == 0:
                 return _row(conn, key) is not None
     return False
+
+
+# ------------------------------------------------------------------------------------------------ the cache key share
+
+def _checked(key: str, device: str, now: float) -> None:
+    """This session's passkey was just checked for `device` (an unlock, or turning the lock on): it may have the cache
+    key share once, within SHARE_FRESH seconds."""
+    _keep(key, "share", device.encode(), now, SHARE_FRESH)
+
+
+def _within_limit(key: str, now: float) -> bool:
+    """Counts this ask; False once the session has asked SHARE_LIMIT times within SHARE_LIMIT_WINDOW."""
+    since = now - SHARE_LIMIT_WINDOW
+    with _challenges_lock:
+        for k in [k for k, asked in _asked.items() if not asked or asked[-1] <= since]:
+            del _asked[k]
+        while len(_asked) >= MAX_CHALLENGES and key not in _asked:   # bounded: the longest quiet go first
+            del _asked[min(_asked, key=lambda k: _asked[k][-1])]
+        asked = [t for t in _asked.get(key, ()) if t > since]
+        if len(asked) >= SHARE_LIMIT:
+            _asked[key] = asked
+            return False
+        _asked[key] = [*asked, now]
+        return True
+
+
+def _readable(stored: str | None) -> bytes | None:
+    """The share a row keeps, or None when it has none, or none this server can read (Runway's key changed and the
+    old one is gone): then it's replaced, which leaves the device's cache unreadable, as a new device's would be."""
+    if not secretbox.is_encrypted(stored):
+        return None
+    try:
+        plain = secretbox.decrypt(stored) or ""
+    except secretbox.SecretError:
+        return None
+    if not _B64URL.fullmatch(plain) or len(plain) != len(_b64e(bytes(SHARE_BYTES))):
+        return None
+    share = base64.urlsafe_b64decode(plain + "=" * (-len(plain) % 4))
+    return share if len(share) == SHARE_BYTES else None
+
+
+def key_share(conn, key: str, owner: dict | None, now: float) -> tuple[str, int]:
+    """This device's cache key share (base64url) and until when the device may keep using it without asking again
+    (whole seconds since the epoch, server time: now + SHARE_WINDOW). Only for this session, with its lock on and
+    unlocked, and only once per passkey check (see _checked); made the first time. A lock that locked, or was turned off or on again, since the check gets nothing, and
+    nothing is written for it: every write here is conditional on this row, still unlocked."""
+    if relying_party() is None:
+        raise LockError(NO_SIGN_IN)
+    if not _within_limit(key, now):
+        raise TooMany(TOO_MANY)
+    with _challenges_lock:
+        fresh = _challenges.pop((key, "share"), None)   # used up whatever follows: one share per check
+    r = _row(conn, key)
+    if r is None:
+        raise LockError(NOT_ON)
+    if not (r["unlocked_until"] and r["unlocked_until"] > now):
+        raise Locked()
+    if not fresh or fresh[1] < now or not hmac.compare_digest(fresh[0], r["id"].encode()):
+        raise NotFresh(NOT_FRESH)
+    if owner and oidc.access_lapsed(conn, owner.get("sub"), owner.get("email"), now):
+        raise Lapsed(LAPSED)
+    this = (AppLock.session == key, AppLock.id == r["id"], AppLock.unlocked_until > now)
+    if _readable(r["key_share"]) is None:
+        same = AppLock.key_share.is_(None) if r["key_share"] is None else AppLock.key_share == r["key_share"]
+        conn.execute(update(AppLock).where(*this, same)
+                     .values(key_share=secretbox.encrypt(_b64e(secrets.token_bytes(SHARE_BYTES)))))
+    # Read back (a request alongside may have made it first: there's one share per device), from the row only while
+    # it's still this one and unlocked.
+    now_kept = conn.execute(select(AppLock.key_share).where(*this)).fetchone()
+    if now_kept is None:
+        if _row(conn, key) is None:
+            raise LockError(NOT_ON)
+        raise Locked()
+    share = _readable(now_kept["key_share"])
+    if share is None:   # (just written with this server's key: can't happen)
+        raise RuntimeError("The cache key share just kept can't be read back")
+    return _b64e(share), int(now) + SHARE_WINDOW
+
+
+def drop_share(conn, key: str) -> None:
+    """Forget this session's device's share (its person's access ended): its cache can't be opened once the device's
+    own copy runs out."""
+    conn.execute(update(AppLock).where(AppLock.session == key).values(key_share=None))

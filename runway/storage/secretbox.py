@@ -1,5 +1,5 @@
-"""Encrypting the secrets Runway keeps: bank access (SimpleFIN access URL, Plaid access tokens), API keys and the
-push-notification signing key. A copy of the database on its own (a Postgres dump, a stolen disk image of just the
+"""Encrypting the secrets Runway keeps: bank access (SimpleFIN access URL, Plaid access tokens), API keys, the
+push-notification signing key and devices' cache key shares (runway/applock.py). A copy of the database on its own (a Postgres dump, a stolen disk image of just the
 database, a misplaced file) doesn't give those away.
 
 The key comes from RUNWAY_SECRET_KEY (a long random string; best, since it lives apart from the data), or else from
@@ -28,7 +28,7 @@ from sqlalchemy import select, update
 
 from .. import monitoring
 from . import settings_keys
-from .models import PlaidItem, Setting
+from .models import AppLock, PlaidItem, Setting
 
 PREFIX = "enc:v1:"
 KEY_FILE = "secret.key"
@@ -183,5 +183,14 @@ def encrypt_stored(conn) -> int:
             continue
         if new != r["access_token"]:
             conn.execute(update(PlaidItem).where(PlaidItem.item_id == r["item_id"]).values(access_token=new))
+            changed += 1
+    # Devices' cache key shares (runway/applock.py): one this key can't read is replaced when the device next asks.
+    for r in conn.execute(select(AppLock.id, AppLock.key_share).where(AppLock.key_share.is_not(None))).fetchall():
+        try:
+            new = reencrypt(r["key_share"])
+        except InvalidToken:
+            continue
+        if new != r["key_share"]:   # only that value, on that row: never a share for a row that's gone
+            conn.execute(update(AppLock).where(AppLock.id == r["id"], AppLock.key_share == r["key_share"]).values(key_share=new))
             changed += 1
     return changed

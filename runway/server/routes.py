@@ -44,7 +44,8 @@ from .api.investments import (
     api_quote_stream, api_tracked_get, api_tracked_save
 )
 from .api.lock import (
-    api_lock, api_lock_challenge, api_lock_engage, api_lock_off, api_lock_register, api_lock_settings, api_lock_unlock
+    api_lock, api_lock_challenge, api_lock_engage, api_lock_key_share, api_lock_off, api_lock_register, api_lock_settings,
+    api_lock_unlock
 )
 from .api.mcp import api_mcp_all, api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
@@ -125,6 +126,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/lock/unlock", api_lock_unlock),
     ("POST", "/api/lock/engage", api_lock_engage),
     ("POST", "/api/lock/settings", api_lock_settings),
+    ("POST", "/api/lock/key-share", api_lock_key_share),
     ("DELETE", "/api/lock", api_lock_off),
     ("GET", "/api/budget", api_budget),
     ("POST", "/api/budget", api_budget_set),

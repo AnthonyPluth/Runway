@@ -342,3 +342,11 @@ class LockIdle(TypedDict):
     """POST /api/lock/settings: how long away locks it (seconds: 0, 60, 300 or 900)."""
     idle: int
 
+
+class LockKeyShare(TypedDict):
+    """POST /api/lock/key-share (no body), right after an unlock or turning the lock on: this device's share of its
+    on-device cache's key, 32 random bytes as base64url (no padding), the same each time until the device's lock ends,
+    and until when the device may keep using its own copy of it without asking again (whole seconds since the epoch,
+    by the server's clock: the time of this reply plus applock.SHARE_WINDOW, 72 hours)."""
+    share: str
+    expires: int
