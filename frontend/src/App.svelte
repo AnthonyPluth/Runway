@@ -74,13 +74,14 @@
           <Card.Header><Card.Title>Couldn't open this page</Card.Title><Card.Description>{loadError}</Card.Description></Card.Header>
           <Card.Content><Button variant="outline" onclick={() => location.reload()}>Try again</Button></Card.Content>
         </Card.Root>
-      {:else if app.state && loaded[current]}
+      {:else if app.state && loaded[current] && !lock.opening}
         <!-- Churning's tabs (cards, benefits, bank bonuses) are one page's views of the same data, so they aren't redrawn. -->
         {#key `${route.page}/${route.page === "churning" ? "" : route.sub}/${app.version}`}
           {@const Page = loaded[current]}
           <Page page={route.page} sub={route.sub} />
         {/key}
       {:else}
+        <!-- (also while the device's encrypted cache opens after an unlock, a moment at most: lib/lock.svelte.ts) -->
         <div class="space-y-4" aria-busy="true" aria-label="Loading">
           <div class="h-9 w-48 animate-pulse motion-reduce:animate-none rounded-md bg-muted"></div>
           <div class="grid gap-4 md:grid-cols-3">{#each [0, 1, 2] as i (i)}<div class="h-28 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>{/each}</div>

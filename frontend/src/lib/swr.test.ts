@@ -8,7 +8,7 @@ import { staleAccounts, loadAccounts } from "./accounts";
 import { api, ApiError } from "./api";
 import { loadRecurring, staleRecurring } from "./components/recurring/load";
 import { forget, lock, lockNow } from "./lock.svelte";
-import { cacheEpoch, clearCache, recall, remember } from "./swr";
+import { cacheEpoch, clearCache, dataChanged, persistWith, recall, remember } from "./swr";
 
 const reply = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -143,5 +143,44 @@ describe("emptied together with the replies kept for 304s (lib/api.ts)", () => {
     fetchMock.mockReturnValueOnce(Promise.resolve(new Response(null, { status: 304, headers: { ETag: '"a"' } })));
     expect(await api("/api/k", { keep: true })).toEqual([1]);
     expect(fetchMock.mock.calls.at(-1)![1].headers).toHaveProperty("If-None-Match", '"a"');
+  });
+});
+
+describe("the device's copy (lib/deviceCache.ts)", () => {
+  afterEach(() => persistWith(null));
+  const device = () => ({ write: vi.fn(), read: vi.fn(), changed: vi.fn() });
+
+  it("gets what's remembered, and is read only when memory has nothing", () => {
+    const d = device();
+    persistWith(d);
+    remember("k", [1]);
+    expect(d.write).toHaveBeenCalledWith("k", [1]);
+    expect(recall("k")).toEqual([1]);
+    expect(d.read).not.toHaveBeenCalled();
+    d.read.mockReturnValue([2]);
+    clearCache();   // (locking: memory goes, the device's copy is its own to close)
+    expect(d.changed).not.toHaveBeenCalled();
+    expect(recall("k")).toEqual([2]);
+    remember("old", [1], cacheEpoch() - 1);   // a read from before it was emptied isn't kept, here or there
+    expect(d.write).toHaveBeenCalledTimes(1);
+    remember("fn", [() => 1]);                // nor what can't be copied
+    expect(d.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("is told when a change goes through, with memory emptied", () => {
+    const d = device();
+    persistWith(d);
+    remember("k", [1]);
+    dataChanged();
+    expect(d.changed).toHaveBeenCalledOnce();
+    expect(recall("k")).toBeUndefined();
+  });
+
+  it("can't make remembering, reading or a change fail", () => {
+    persistWith({ write: () => { throw new Error("x"); }, read: () => { throw new Error("x"); }, changed: () => { throw new Error("x"); } });
+    expect(() => remember("k", [1])).not.toThrow();
+    expect(recall("k")).toEqual([1]);
+    expect(recall("other")).toBeUndefined();
+    expect(() => dataChanged()).not.toThrow();
   });
 });

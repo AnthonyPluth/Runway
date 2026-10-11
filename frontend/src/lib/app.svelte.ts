@@ -6,6 +6,7 @@ import { toast } from "svelte-sonner";
 import type { AppState } from "./types";
 import { errMsg } from "./act";
 import { afterUnlock, isLocked } from "./lock.svelte";
+import { dataVersionOf, noteDataVersion } from "./deviceCache";
 
 export const app = $state({
   state: null as AppState | null,
@@ -19,6 +20,7 @@ export const app = $state({
 /** background: Runway checking in on its own (see api's `background`), rather than for something you did. */
 export async function refreshState(background = false): Promise<void> {
   app.state = await api<AppState>("/api/state", background ? { keep: true, background } : { keep: true });
+  noteDataVersion(dataVersionOf(app.state));   // what the device's encrypted cache kept under another one goes
 }
 
 /** Load the page's data again (after a change, or when a sync brings new data). The page is drawn afresh, so this
