@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { refreshState } from "$lib/app.svelte";
+  import CategoryChip, { chipButton } from "$lib/components/CategoryChip.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { fmtSigned, plural } from "$lib/format";
   import { undoBatched } from "$lib/undoBatch";
@@ -50,7 +51,9 @@
         <div class="text-xs text-muted-foreground tabular-nums">{plural(g.txs.length, "transaction")} · {fmtSigned(g.sum)}</div>
       </div>
       <CategorySelect value={shared(g.txs)} repick blank="Choose…" label={`Category for ${plural(g.txs.length, "transaction")} from ${g.name}`}
-        disabled={busy[g.key]} class="w-56 max-sm:w-full" onchange={(c) => apply(g, c)} />
+        disabled={busy[g.key]} class={chipButton("row", busy[g.key] && "opacity-60")} onchange={(c) => apply(g, c)}>
+        <CategoryChip category={shared(g.txs)} empty="Choose…" />
+      </CategorySelect>
     </div>
   {/each}
 </div>

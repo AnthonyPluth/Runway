@@ -35,7 +35,7 @@ describe("Transactions page", () => {
       serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 0, offer_rule: null } : undefined));
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
       await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
       expect(screen.getByText("1 to go")).toBeInTheDocument();
     });
@@ -60,7 +60,7 @@ describe("Transactions page", () => {
       queue(rows());
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
       await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
       expect(toast).toHaveBeenLastCalledWith("Coffee → Groceries", expect.objectContaining({ description: "Alpha" }));
       await undo();
@@ -74,17 +74,17 @@ describe("Transactions page", () => {
       queue(rows());
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Category for Bravo" })).toHaveFocus());
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /^Category for Bravo(:|$)/ })).toHaveFocus());
     });
 
     it("moves focus to the row before when the last one is done, and to 'All caught up' when none are left", async () => {
       queue(rows());
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Bravo" }), "Coffee");
-      await waitFor(() => expect(screen.getByRole("combobox", { name: "Category for Alpha" })).toHaveFocus());
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Bravo(:|$)/ }), "Coffee");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ })).toHaveFocus());
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
       await waitFor(() => expect(screen.getByText(/All caught up/)).toHaveFocus());
     });
 
@@ -132,7 +132,7 @@ describe("Transactions page", () => {
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
       expect(screen.getByRole("button", { name: "Suggest categories" })).toBeEnabled();
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
       await waitFor(() => expect(screen.queryByRole("button", { name: "Suggest categories" })).not.toBeInTheDocument());
     });
 
@@ -146,7 +146,7 @@ describe("Transactions page", () => {
       serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? new Promise((_, no) => { fail = no; }) : undefined));
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
-      await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
       expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
       expect(screen.getByText("1 to go")).toBeInTheDocument();
       fail(new Error("Locked"));
@@ -276,7 +276,7 @@ describe("Transactions page", () => {
         const list = screen.getByRole("list", { name: "Merchants to review" });
         expect(within(list).getAllByRole("listitem")).toHaveLength(2);
         expect(within(list).getByText("2 transactions · −$12.00")).toBeInTheDocument();
-        await pickCategory(screen.getByRole("combobox", { name: "Category for 2 transactions from Alpha" }), "Groceries");
+        await pickCategory(screen.getByRole("combobox", { name: /^Category for 2 transactions from Alpha(:|$)/ }), "Groceries");
         expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a", "b"], category: "Groceries" } });
         await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(1));
         expect(toast).toHaveBeenLastCalledWith("Alpha → Groceries", expect.objectContaining({ action: expect.objectContaining({ label: "Always for Alpha" }) }));

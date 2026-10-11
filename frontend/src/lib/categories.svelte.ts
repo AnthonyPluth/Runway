@@ -36,7 +36,7 @@ export const staleCategories = (): Category[] | undefined => {
   return rows && withPaths(rows);
 };
 
-export const catLabel = (c: Category) => (c.path && c.path.length > 1 ? c.path.join(" > ") : c.name);
+export const catLabel = (c: Category, sep = " > ") => (c.path && c.path.length > 1 ? c.path.join(sep) : c.name);
 
 /** A category's emoji and color. Unknown names (a category removed meanwhile) get a tag and gray. */
 export function catLook(name: string | null | undefined): { icon: string; color: string } {

@@ -58,7 +58,7 @@ describe("RuleEditor", () => {
     setup();
     expect(screen.getByRole("checkbox", { name: /Apply to past/ })).not.toBeChecked();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole foods");
-    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: /^Category(:|$)/ })[0], "Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const body = posts("/api/rules").at(-1)!;
     expect(body).toMatchObject({ match: "whole foods", category: "Groceries", apply: false, split: null });
@@ -72,7 +72,7 @@ describe("RuleEditor", () => {
       : path === "/api/rules/12/apply" ? { updated: 2, changed: [{ id: "t1" }, { id: "t2" }], undoable: true } : {}) as never);
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole foods");
-    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: /^Category(:|$)/ })[0], "Groceries");
     await userEvent.click(screen.getByRole("checkbox", { name: /Apply to past/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const dialog = await screen.findByRole("dialog", { name: "Apply this rule to past transactions?" });
@@ -122,7 +122,7 @@ describe("RuleEditor", () => {
     const add = screen.getByRole("button", { name: "Add rule" });
     expect(add).toBeDisabled();
     expect(screen.queryByText(/Add a condition/)).not.toBeInTheDocument();
-    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: /^Category(:|$)/ })[0], "Groceries");
     const box = screen.getByPlaceholderText("whole foods");
     expect(screen.getByText(/Add a condition/)).toBeInTheDocument();
     expect(box).toHaveAttribute("aria-invalid", "true");
@@ -137,7 +137,7 @@ describe("RuleEditor", () => {
 
   it("takes an amount, a direction or an account as the condition too, and checks the amounts' order", async () => {
     setup();
-    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: /^Category(:|$)/ })[0], "Groceries");
     const add = screen.getByRole("button", { name: "Add rule" });
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
     expect(add).toBeEnabled();

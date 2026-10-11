@@ -755,7 +755,7 @@ describe("Recurring page", () => {
         { name: "Housing", path: ["Housing"], depth: 0, top: "Housing" }, { name: "Utilities", path: ["Utilities"], depth: 0, top: "Utilities" }] });
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
-      const pick = await screen.findByRole("combobox", { name: "Category" });
+      const pick = await screen.findByRole("combobox", { name: /^Category(:|$)/ });
       expect(pick).toHaveTextContent("Housing");
       await userEvent.click(pick);
       await userEvent.click(await screen.findByRole("option", { name: "Utilities" }));

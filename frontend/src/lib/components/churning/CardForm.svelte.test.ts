@@ -130,9 +130,9 @@ describe("card form", () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
     expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Restaurants");
+    await userEvent.selectOptions(screen.getByLabelText(/^Category of rate 1(:|$)/), "Restaurants");
     expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Travel");
+    await userEvent.selectOptions(screen.getByLabelText(/^Category of rate 1(:|$)/), "Travel");
     expect(screen.getByLabelText("Only through the issuer's travel portal")).toBeInTheDocument();
   });
 
@@ -140,7 +140,7 @@ describe("card form", () => {
     setup();
     await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
-    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Hotels");
+    await userEvent.selectOptions(screen.getByLabelText(/^Category of rate 1(:|$)/), "Hotels");
     await userEvent.type(screen.getByLabelText("Points per dollar on Hotels"), "10");
     await userEvent.click(screen.getByLabelText("Only through the issuer's travel portal"));
     await userEvent.type(screen.getByLabelText("The portal's name"), "Capital One Travel");
@@ -249,7 +249,7 @@ describe("card form", () => {
       expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire");
       expect(screen.getByLabelText("Earns")).toHaveValue("ur");
       expect(screen.getByLabelText("Annual fee")).toHaveValue("550");
-      expect(screen.getByLabelText("Category of rate 1")).toHaveValue("Travel");
+      expect(screen.getByLabelText(/^Category of rate 1(:|$)/)).toHaveValue("Travel");
       expect(screen.getByLabelText("The portal's name")).toHaveValue("Chase Travel");
       expect(screen.getByLabelText("Suggested benefit 1")).toHaveValue("Travel credit");
       expect(screen.getAllByText(/Suggested by AI, check before saving/).length).toBeGreaterThan(1);

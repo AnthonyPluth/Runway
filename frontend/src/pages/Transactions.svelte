@@ -245,7 +245,7 @@
     <NativeSelect aria-label="Category" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-52" bind:value={txs.f.category} onchange={txs.load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
-      {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}
+      {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c, " · ")}</option>{/each}
     </NativeSelect>
     <DateRange from={txs.f.from} to={txs.f.to} note={txs.f.scope === "budget" ? "Budget accounts" : ""} onchange={txs.setDates} />
     <MoreFilters kind={txs.f.kind} min={txs.f.min} max={txs.f.max} onchange={txs.setMore} />

@@ -1,0 +1,13 @@
+{
+  "name": "transactions-category-picker",
+  "page": "transactions",
+  "steps": [
+    { "goto": "#transactions" },
+    { "wait_for": "[role=listitem] button[data-category-trigger]" },
+    { "click": "[role=listitem] button[data-category-trigger]" },
+    { "wait_for": "[role=listbox]" },
+    { "screenshot": "open" },
+    { "press": { "selector": "input[aria-label='Search categories']", "key": "g" } },
+    { "screenshot": "search" }
+  ]
+}

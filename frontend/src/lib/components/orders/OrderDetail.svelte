@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { catLook, loadCategories } from "$lib/categories.svelte";
-  import { cn } from "$lib/utils";
+  import { loadCategories } from "$lib/categories.svelte";
   import AiButton from "$lib/components/AiButton.svelte";
+  import CategoryChip, { chipButton } from "$lib/components/CategoryChip.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -119,13 +119,10 @@
             <span class="truncate font-medium text-foreground" title={i.title}>{#if i.quantity > 1}<span class="mr-0.5 font-normal text-muted-foreground tabular-nums">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right font-medium tabular-nums">{fmt(i.amount)}</span>
             <div class="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <CategorySelect value={i.category ?? ""} label={`Category for ${i.title}`}
-                class={cn("inline-flex min-h-6 max-w-full min-w-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring phone:min-h-8",
-                  i.category ? "bg-muted text-muted-foreground hover:bg-muted/70" : "border border-dashed border-warning/60 text-warning hover:bg-warning/10")}
+              <CategorySelect value={i.category ?? ""} label={`Category for ${i.title}`} class={chipButton("receipt")}
                 onchange={(v) => v && undoablePost(`/api/retail/items/${i.id}`, `/api/retail/items/${i.id}/restore`, { category: v },
                   (r) => `${i.title} → ${v}${(r.orders ?? 0) > 1 ? ` · ${r.orders} orders` : ""}`)}>
-                {#if i.category}<span aria-hidden="true">{catLook(i.category).icon}</span>{/if}
-                <span class="truncate" title={i.category || undefined}>{i.category || "Choose category"}</span>
+                <CategoryChip category={i.category} size="receipt" />
               </CategorySelect>
               {#if !i.category && suggestions[i.id]}
                 {@const s = suggestions[i.id]}

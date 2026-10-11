@@ -166,7 +166,7 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 0, offer_rule: null } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
-    await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
     expect(api).toHaveBeenCalledWith("/api/transactions/a/category", { method: "POST", body: { category: "Groceries" } });
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Coffee → Groceries", expect.objectContaining({ description: "Alpha", action: expect.objectContaining({ label: "Undo" }) })));
   });
@@ -179,7 +179,7 @@ describe("Transactions page", () => {
     render(Transactions);
     await screen.findByText("Market");
     const loads = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length;
-    await pickCategory(screen.getByRole("combobox", { name: "Category for the Groceries part of Market" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for the Groceries part of Market(:|$)/ }), "Coffee");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/s/category", { method: "POST", body: { category: "Coffee", only: "Groceries" } }));
     await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length).toBeGreaterThan(loads));
     expect(vi.mocked(toast).mock.calls.at(-1)?.[0]).toBe("Groceries → Coffee");
@@ -189,7 +189,7 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 0, offer_rule: { merchant: "Alpha" } } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
-    await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
     await waitFor(() => expect(toast).toHaveBeenLastCalledWith("Groceries", expect.objectContaining({
       action: expect.objectContaining({ label: "Always for Alpha" }), cancel: expect.objectContaining({ label: "Undo" }) })));
   });
@@ -199,7 +199,7 @@ describe("Transactions page", () => {
     render(Transactions);
     await screen.findByText("Alpha");
     const before = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("ignored=only")).length;
-    await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
     await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("ignored=only")).length).toBe(before + 1));
   });
 
@@ -207,7 +207,7 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path, o) => { if (path.endsWith("/category") && o?.method === "POST") throw new Error("Cannot save"); return undefined; });
     render(Transactions);
     await screen.findByText("Alpha");
-    await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot save"));
   });
 
@@ -286,7 +286,7 @@ describe("Transactions page", () => {
     });
     render(Transactions);
     await screen.findByText("Alpha");
-    await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: /^Category for Alpha(:|$)/ }), "Groceries");
     expect(await screen.findByText("Couldn’t refresh")).toBeInTheDocument();
     expect(screen.getByText("Alpha")).toBeInTheDocument();
     expect(summary()).toHaveClass("opacity-50");
