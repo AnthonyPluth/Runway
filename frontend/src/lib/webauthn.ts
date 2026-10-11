@@ -72,8 +72,17 @@ export async function signChallenge(ch: LockChallenge, prfInput?: Uint8Array<Arr
   return {
     answer: { credential_id: b64uEncode(cred.rawId), client_data: b64uEncode(r.clientDataJSON),
               authenticator_data: b64uEncode(r.authenticatorData), signature: b64uEncode(r.signature) },
-    prf: out ? new Uint8Array(out instanceof ArrayBuffer ? out : (out as ArrayBufferView).buffer.slice(0)) : null,
+    prf: prfBytes(out),
   };
+}
+
+/** A copy of the PRF output the browser gave (an ArrayBuffer, or a view of part of one), or null when it gave none: a
+ *  passkey or browser without PRF (then there's no encrypted cache, lib/deviceCache.ts). */
+function prfBytes(out: unknown): Uint8Array | null {
+  if (!out) return null;
+  if (ArrayBuffer.isView(out)) return new Uint8Array(out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength));
+  if (Object.prototype.toString.call(out) === "[object ArrayBuffer]") return new Uint8Array((out as ArrayBuffer).slice(0));
+  return null;
 }
 
 /** What to tell the person when the device said no. The browser's own words name the API, not what happened. */

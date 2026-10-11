@@ -99,15 +99,98 @@ async function runStep(page, step, shot) {
 }
 
 /** A signed_in flow's browser: the signed-in demo server's session cookie, and a virtual platform authenticator (Chrome's
- *  DevTools WebAuthn domain) standing in for Face ID or Touch ID, which verifies the person until a step says otherwise. */
-async function signIn(ctx, page, url, token) {
+ *  DevTools WebAuthn domain) standing in for Face ID or Touch ID, which verifies the person until a step says otherwise.
+ *  `prf`: the authenticator gives a PRF secret (as a passkey on a current iPhone, Android or Mac would), so the app keeps
+ *  its encrypted cache; without it (the flows), it's a passkey without PRF, and the app keeps none. */
+async function signIn(ctx, page, url, token, { prf = false } = {}) {
   await ctx.addCookies([{ name: "runway_session", value: token, url }]);
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
   const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
     protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true,
-    automaticPresenceSimulation: true } });
+    automaticPresenceSimulation: true, ...(prf ? { hasPrf: true } : {}) } });
   page.authenticator = { cdp, authenticatorId };
+}
+
+/** What's in the device cache's IndexedDB (lib/idb.ts) in this page: each row, its bytes as latin1 text, so a test can
+ *  look for plaintext in it; null when there's no such database. */
+const cacheRows = (page) => page.evaluate(async () => {
+  if (!(await globalThis.indexedDB.databases()).some((d) => d.name === "runway-cache")) return null;
+  const db = await new Promise((ok, no) => { const r = globalThis.indexedDB.open("runway-cache"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  try {
+    if (!db.objectStoreNames.contains("rows")) return [];
+    const rows = await new Promise((ok, no) => { const r = db.transaction("rows").objectStore("rows").getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const text = (b) => { const u = b instanceof ArrayBuffer ? new Uint8Array(b) : b; let s = ""; for (const x of u) s += String.fromCharCode(x); return s; };
+    return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v instanceof ArrayBuffer || ArrayBuffer.isView(v) ? text(v) : v])));
+  } finally { db.close(); }
+});
+
+/** Polls `test` (async) until it's true, or fails with `what` after `timeout` ms. */
+async function until(test, what, timeout = 10000) {
+  const end = Date.now() + timeout;
+  while (!(await test())) {
+    if (Date.now() > end) throw new Error(`timed out: ${what}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/** The encrypted cache on the device (#379), end to end, with a passkey that gives a PRF secret: after an unlock the
+ *  Transactions list is kept sealed (none of its text readable in IndexedDB); a cold start (a reload, then the unlock)
+ *  paints it from the device before the server's list arrives (held back here), then the server's replaces it; past the
+ *  72-hour window it isn't painted (it's wiped at launch); signing out leaves nothing in IndexedDB. It signs the shared
+ *  session out at the end, so it runs after every flow. */
+async function cacheCheck(page, base) {
+  const SLOW_MS = 6000;
+  // The lock screen offers the unlock on its own; should the browser want a tap first, the button.
+  const launch = async () => {
+    await page.reload({ waitUntil: "load" });
+    void page.locator("button:text-is('Unlock'):not([disabled])").click({ timeout: 8000 }).catch(() => { /* unlocked on its own */ });
+  };
+  await page.clock.install();   // (time runs as usual; jumped ahead below)
+  await page.goto(`${base}/#setup/data`, { waitUntil: "networkidle" });
+  await page.locator("button:text-is('Turn on app lock')").first().click();
+  await page.locator("text=On for this device").first().waitFor();
+  // A launch: the lock screen, and the unlock it offers on its own (the authenticator verifies).
+  await page.goto(`${base}/#transactions`);
+  await launch();
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: 20000 });
+  await until(async () => (await cacheRows(page))?.some((r) => r.k.startsWith("r:transactions?")), "the Transactions list kept on the device");
+  const rows = await cacheRows(page);
+  if (!rows.some((r) => r.k === "share")) throw new Error("no sealed copy of the share on the device");
+  const words = [...new Set((await page.locator("[data-tx-list]").innerText()).split(/\s+/).filter((w) => /^[A-Za-z]{5,}$/.test(w)))].slice(0, 20);
+  const stored = JSON.stringify(rows);
+  const readable = words.filter((w) => stored.includes(w));
+  if (!words.length || readable.length) throw new Error(`the cache isn't sealed: ${readable.join(", ") || "no words to look for"}`);
+  for (const r of rows) for (const f of Object.keys(r)) if (!["k", "v", "version", "at", "iv", "ct", "device", "fetchedAt", "expiresAt"].includes(f)) throw new Error(`unexpected field ${f} in a stored row`);
+
+  // Cold start, the server slow to send the list: painted from the device (marked as not yet current), then replaced.
+  let held = 0, released = 0;
+  await page.route(/\/api\/transactions\?/, async (route) => {
+    held++;
+    await new Promise((r) => setTimeout(r, SLOW_MS));
+    released++;
+    await route.continue().catch(() => { /* the page moved on */ });
+  });
+  await launch();
+  await page.locator("[data-testid=tx-rows][aria-busy=true] [data-tx-list]").waitFor({ timeout: 20000 });
+  if (!held || released) throw new Error("the list wasn't painted from the device before the server's arrived");
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: SLOW_MS + 10000 });
+
+  // Past the window: the copy of the share is out of date at launch, so the cache goes, and nothing is painted from it.
+  await page.clock.setSystemTime(Date.now() + 73 * 3600 * 1000);
+  await launch();
+  // Either the page's loading placeholder (from the server: right) or rows painted from the device (wrong) comes first.
+  await page.locator("[role=status][aria-busy=true], [data-testid=tx-rows][aria-busy=true]").first().waitFor({ timeout: 20000 });
+  if (await page.locator("[data-testid=tx-rows][aria-busy=true]").count()) throw new Error("painted from a cache past its window");
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: SLOW_MS + 10000 });
+  await page.unroute(/\/api\/transactions\?/);
+
+  // Signing out deletes it.
+  await page.locator("a[aria-label='Sign out']").click();
+  await page.waitForURL((u) => !u.hash.includes("transactions"), { timeout: 15000 }).catch(() => {});
+  await page.goto(`${base}/auth/signed-out`).catch(() => {});
+  const left = await cacheRows(page);
+  if (left && left.length) throw new Error(`signing out left ${left.length} row(s) in IndexedDB`);
 }
 
 async function main() {
@@ -140,10 +223,10 @@ async function main() {
   const notes = [];      // what's only reported
   const results = [];
 
-  async function visit(label, viewport, work, signedIn = false) {
+  async function visit(label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext({ viewport: VIEWPORTS[viewport] });
     const page = await ctx.newPage();
-    if (signedIn) await signIn(ctx, page, signedInUrl, session);
+    if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
@@ -188,6 +271,11 @@ async function main() {
         await shot(`flow-${flow.name}`);
       }, !!flow.signed_in);
     }
+  }
+  // Last: it signs the shared session out.
+  if (!args.length || args.includes("transactions")) {
+    if (signedInUrl && session) await visit("device cache", "desktop", (page) => cacheCheck(page, signedInUrl), true, { prf: true });
+    else notes.push("device cache: skipped (no signed-in server: run it with make verify)");
   }
   await browser.close();
 

@@ -749,7 +749,9 @@
       "method": "POST",
       "path": "/api/lock/key-share",
       "handler": "runway/server/api/lock.py:api_lock_key_share",
-      "web": [],
+      "web": [
+        "frontend/src/lib/deviceCache.ts"
+      ],
       "tests": [
         "tests/test_api_contract.py",
         "tests/test_applock.py"

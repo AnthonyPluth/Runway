@@ -13,6 +13,7 @@
 import { errMsg } from "./act";
 import { api, forgetReplies, newPage } from "./api";
 import { apiCall } from "./contract";
+import { closeCache, openCache, prfInput, sweep, wipe as wipeDeviceCache } from "./deviceCache";
 import { clearCache } from "./swr";
 import { signChallenge, webauthnError } from "./webauthn";
 import type { LockStatus } from "./api-types";
@@ -43,6 +44,9 @@ function save(s: Saved | null): void {
 }
 
 const saved = readSaved();
+// The device's encrypted cache (lib/deviceCache.ts) is only for a device with the lock on: without it nothing may be
+// kept, and with it a copy of the cache key's share past its window takes the cache with it.
+void sweep(saved.on);
 export const lock = $state({
   phase: (saved.on ? "locked" : "off") as Phase,
   idle: saved.idle,
@@ -54,7 +58,14 @@ export const lock = $state({
   launch: saved.on,
   /** The lock screen offers the device's prompt on its own (not after Lock now: you just locked it). */
   offer: true,
+  /** Just unlocked, and the device's encrypted cache is being opened (lib/deviceCache.ts): App holds the page back for
+   *  that long, at most OPENING_MS, so a list it kept paints at once rather than after the page's own loading. */
+  opening: false,
 });
+/** How long App waits for the device's encrypted cache after an unlock, at most (it's one small request and a read). */
+export const OPENING_MS = 600;
+let openings = 0;
+let openingTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const isLocked = (): boolean => lock.phase === "locked";
 
@@ -83,17 +94,20 @@ function adopt(s: LockStatus): void {
   save({ on: true, idle: s.idle });
 }
 
-/** Forget the lock on this device (signing out, turning it off, or the server has none), and what an unlock held. */
-export function forget(): void {
+/** Forget the lock on this device (signing out, turning it off, or the server has none), and what an unlock held.
+ *  The device's encrypted cache is deleted too; the promise says when it's gone (signing out waits for it). */
+export function forget(): Promise<void> {
   wipeSecret();
   clearCache(); forgetReplies();   // both kept copies of replies (lib/swr.ts, lib/api.ts's ETag ones)
   save(null);
+  return wipeDeviceCache();
 }
 
 // ------------------------------------------------------------------------------------------ the unlocked secret
-/** What the last unlock proved, for what may later need it: #357's encrypted cache will make its key from the passkey's
- *  PRF output (`prf`, when the unlock asked for it and the device gave it) and a share the server holds for this device
- *  (`deviceId`). Held only while unlocked: locking, the re-lock timers, signing out and a 401 zero it and drop it. */
+/** What the last unlock proved, for what may later need it: the encrypted cache (lib/deviceCache.ts) makes its key from
+ *  the passkey's PRF output (`prf`, when the unlock asked for it and the device gave it) and a share the server holds
+ *  for this device (`deviceId`). Held only while unlocked: locking, the re-lock timers, signing out and a 401 zero it
+ *  and drop it. */
 export interface Unlocked { deviceId: string | null; credentialId: string | null; at: number; prf: Uint8Array | null }
 let secret: Unlocked | null = null;
 /** The unlocked secret, or null whenever Runway isn't unlocked on this device. */
@@ -106,11 +120,26 @@ function hold(s: LockStatus, prf: Uint8Array | null = null): void {
   secret = { deviceId: s.device_id, credentialId: s.credential_id, at: Date.now(), prf };
   maxTimer = setTimeout(() => lockNow(), MAX_UNLOCKED_MS);
 }
-/** Zero and drop what the last unlock held. */
+/** Open the device's encrypted cache with what the unlock held, in the background. While a passkey gave a PRF secret
+ *  (there may be something to open), `lock.opening` holds the page back until it's open, OPENING_MS at most. */
+function openDeviceCache(): void {
+  const mine = ++openings;
+  const done = () => { if (mine === openings) { clearTimeout(openingTimer); lock.opening = false; } };
+  if (secret?.prf) {
+    lock.opening = true;
+    clearTimeout(openingTimer);
+    openingTimer = setTimeout(done, OPENING_MS);
+  }
+  void openCache(secret).finally(done);
+}
+
+/** Zero and drop what the last unlock held, and the cache key made from it. */
 export function wipeSecret(): void {
   secret?.prf?.fill(0);
   secret = null;
   clearTimeout(maxTimer);
+  closeCache();
+  openings++; clearTimeout(openingTimer); lock.opening = false;
 }
 
 /** Lock now: draw the lock screen (the page goes, and with it what it showed) and tell the server, so the data stays
@@ -166,7 +195,8 @@ export async function unlock(quiet = false): Promise<boolean> {
     if (lock.launch && !(await lockScreenShown())) return true;
     const ch = await apiCall<"POST /api/lock/challenge">("/api/lock/challenge", { method: "POST", body: { purpose: "unlock" } });
     let signed;
-    try { signed = await signChallenge(ch); }
+    // The same prompt also asks the passkey for its PRF secret, for the encrypted cache (when this browser can keep one).
+    try { signed = await signChallenge(ch, prfInput()); }
     catch (err) {
       if (!quiet) lock.error = webauthnError(err);
       return false;
@@ -175,6 +205,7 @@ export async function unlock(quiet = false): Promise<boolean> {
     adopt(s);
     if (s.locked) { signed.prf?.fill(0); lock.error = "Runway is still locked. Try again."; return false; }
     hold(s, signed.prf);
+    openDeviceCache();
     opened();
     return true;
   } catch (err) {
@@ -244,8 +275,9 @@ if (typeof document !== "undefined") {
   // The server said this sign-in is locked (its lock ran out, or another tab locked it): it's on, whatever the device
   // remembered (its storage may have been cleared).
   // Signed out (a 401): the sign-in, and the lock with it, is gone on the server; so is what the device held for it.
-  window.addEventListener("runway:signed-out", () => forget());
+  window.addEventListener("runway:signed-out", () => { void forget(); });
   window.addEventListener("runway:locked", () => {
+    void wipeDeviceCache();   // the server locked it on its own: the device's copy goes too (opened again after a fresh share)
     if (lock.phase === "locked") return;
     save({ on: true, idle: lock.idle });
     lock.phase = "unlocked";
