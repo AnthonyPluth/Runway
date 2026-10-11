@@ -3,11 +3,14 @@
   "page": "transactions",
   "steps": [
     { "goto": "#transactions" },
-    { "wait_for": "[role=listitem] button[data-category-trigger]" },
-    { "click": "[role=listitem] button[data-category-trigger]" },
+    { "wait_for": "button[aria-label^='Category for Green Grocer Market']" },
+    { "click": "button[aria-label^='Category for Green Grocer Market']" },
     { "wait_for": "[role=listbox]" },
     { "screenshot": "open" },
     { "press": { "selector": "input[aria-label='Search categories']", "key": "g" } },
+    { "press": { "selector": "input[aria-label='Search categories']", "key": "r" } },
+    { "press": { "selector": "input[aria-label='Search categories']", "key": "o" } },
+    { "press": { "selector": "input[aria-label='Search categories']", "key": "c" } },
     { "screenshot": "search" }
   ]
 }

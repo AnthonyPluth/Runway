@@ -180,6 +180,29 @@ def seed_receipt(conn, today: date | None = None) -> None:
                                              tx_id="demo-card|demo-receipt", match_source="auto"))
 
 
+# parent, name, emoji: subcategories for the screens that show a hierarchy (opt-in: `seed_subcategories`)
+SUBCATEGORIES = [("Groceries", "Pantry", "🥫"), ("Groceries", "Snacks & Sweets", "🍪"), ("Restaurants", "Takeout", "🥡")]
+
+
+def seed_subcategories(conn) -> None:
+    """Opt-in, on top of `seed` (and `seed_receipt`, if that's used; `run.py demo --subcategories`, which `make verify`
+    passes): Pantry and Snacks & Sweets under Groceries, Takeout under Restaurants, so the Transactions list, a receipt,
+    the category picker and the Budget page have subcategories to show. Every other Green Grocer Market purchase and every
+    Pizza Palace one go into them, the receipt's chocolate and sparkling water, and Snacks & Sweets has a budget."""
+    from . import categories
+    for parent, name, icon in SUBCATEGORIES:
+        categories.add(conn, name, parent=parent)
+        categories.set_look(conn, name, icon, None)
+    grocer = [r["id"] for r in conn.execute(select(Transaction.id).where(Transaction.payee == "Green Grocer Market").order_by(Transaction.posted.desc()))]
+    for i, tx_id in enumerate(grocer):
+        if i % 2 == 0:
+            conn.execute(update(Transaction).where(Transaction.id == tx_id).values(category="Pantry"))
+    conn.execute(update(Transaction).where(Transaction.payee == "Pizza Palace").values(category="Takeout"))
+    for title, category in (("Dark chocolate bar", "Snacks & Sweets"), ("Sparkling water 12-pack, assorted flavors", "Pantry")):
+        conn.execute(update(RetailItem).where(RetailItem.title == title).values(category=category))
+    conn.execute(insert(Budget).values(category="Snacks & Sweets", amount=40))
+
+
 def seed_investments(conn, today: date) -> None:
     """A brokerage account with three holdings and a year of closes, so the Investments page has a day's gain, a day's
     loss and a nearly flat day to show."""

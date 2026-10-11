@@ -107,7 +107,7 @@
 
 <!-- The columns give way before the amount does: below lg the merchant and category shrink to fit, and the amount and
      the chevron always keep their width. -->
-<div role="listitem" data-tx={t.id} data-focused={focused || undefined} onclickcapture={tapToSelect} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-y-1 py-2.5 pr-1 pl-4 md:grid-cols-[auto_auto_minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] md:gap-y-0 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(3rem,auto)] lg:py-1 lg:pr-4",
+<div role="listitem" data-tx={t.id} data-focused={focused || undefined} onclickcapture={tapToSelect} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-y-1 py-2.5 pr-1 pl-4 md:grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:gap-y-0 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(3rem,auto)] lg:py-1 lg:pr-4",
   review && "md:grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto] lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_10rem_2.5rem]",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]", selecting && "cursor-pointer select-none", focused && "relative z-[1] rounded-md ring-2 ring-ring ring-inset")}>
   <!-- On a phone (Select mode) a 20px box with padding round it; the whole row ticks it too. -->
@@ -177,7 +177,7 @@
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
-  <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
+  <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:pr-1 lg:pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
     {#if part}
       <!-- Only the part in the filter's category: picking another changes just that part. -->
       <CategorySelect bind:value={pickedPart} disabled={saving} label={`Category for the ${part.categories.join(", ")} part of ${name}`} onchange={save}
@@ -198,7 +198,7 @@
       </button>
     {:else}
       <!-- The chip shows the category and opens the picker. Picking the one it has keeps it (and takes it out of Review). -->
-      <CategorySelect bind:value={picked} disabled={saving} label={`Category for ${name}`} repick={!!t.needs_review} onchange={save}
+      <CategorySelect bind:value={picked} disabled={saving} label={`Category for ${name}${transfer ? ", a transfer" : ""}`} repick={!!t.needs_review} onchange={save}
         class={chipButton("row", saving && "opacity-60")}>
         <CategoryChip category={picked} compactEmpty="Category">
           {#snippet lead()}{#if transfer}<ArrowLeftRight class="size-3.5 shrink-0 text-muted-foreground" aria-label="Transfer" />{/if}{/snippet}

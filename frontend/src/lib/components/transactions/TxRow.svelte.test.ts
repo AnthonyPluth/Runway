@@ -123,6 +123,15 @@ describe("TxRow", () => {
     expect(within(row()).queryByLabelText("Transfer")).not.toBeInTheDocument();
   });
 
+  it("keeps the transfer cue in the button's accessible name, which hides the ⇄ icon's own label", () => {
+    categories.list.push(category("Transfer", { is_transfer: 1 }), category("Ignore", { is_transfer: 1 }));
+    const { unmount } = render(TxRow, props(tx({ category: "Transfer" })));
+    expect(screen.getByRole("combobox", { name: "Category for Blue Bottle, a transfer: Transfer" })).toBeInTheDocument();
+    unmount();
+    render(TxRow, props(tx({ category: "Ignore" })));
+    expect(screen.getByRole("combobox", { name: "Category for Blue Bottle: Ignore" })).toBeInTheDocument();
+  });
+
   it("shows the saved category again when a pick couldn't be saved", async () => {
     render(TxRow, props(tx(), { onsave: vi.fn().mockResolvedValue(false) }));
     const select = screen.getByRole("combobox", { name: /^Category for Blue Bottle(:|$)/ });
