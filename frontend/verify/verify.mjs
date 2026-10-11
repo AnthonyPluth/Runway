@@ -187,8 +187,8 @@ async function cacheCheck(page, base) {
 
   // Signing out deletes it.
   await page.locator("a[aria-label='Sign out']").click();
-  await page.waitForURL((u) => !u.hash.includes("transactions"), { timeout: 15000 }).catch(() => {});
-  await page.goto(`${base}/auth/signed-out`).catch(() => {});
+  await page.waitForURL((u) => !u.hash.includes("transactions"), { timeout: 15000 }).catch(() => { /* the page may already have moved on: the rows left are checked below */ });
+  await page.goto(`${base}/auth/signed-out`).catch(() => { /* signing out may navigate meanwhile: the rows left are checked below */ });
   const left = await cacheRows(page);
   if (left && left.length) throw new Error(`signing out left ${left.length} row(s) in IndexedDB`);
 }
@@ -245,8 +245,7 @@ async function main() {
       await work(page, shot);
     } catch (e) {
       problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
-      // The failure screenshot is best effort: the step's own error is already recorded above.
-      await shot(`${label.replace(/\W+/g, "-")}-FAILED`).catch(() => {});
+      await shot(`${label.replace(/\W+/g, "-")}-FAILED`).catch(() => { /* best effort: the step's own error is already recorded above */ });
     }
     for (const c of consoleErrors) problems.push(`${where}: console error: ${c.slice(0, 300)}`);
     results.push({ label, viewport, screenshots: files, consoleErrors });

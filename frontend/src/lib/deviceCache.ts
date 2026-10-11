@@ -50,6 +50,9 @@ let gen = 0;                          // bumped by closing and wiping: work star
 let changes = 0;                      // bumped when the records are dropped after a change: writes started before then stop
 let version: string | null = null;    // the data version /api/state last said
 let broken = false;                   // IndexedDB failed during this unlock: nothing more is written until the next
+let held = false;                     // this unlock went to open the cache: what's on the device may be from before a change
+let clearing: Promise<void> = Promise.resolve();   // the records going after a change: opening reads what's left after it
+let unremoved = false;                // a change's records couldn't be deleted: opening takes them all as misses
 const kept = new Map<string, { version: string; json: string }>();   // the records opened at unlock
 const pending = new Set<Promise<unknown>>();                          // work under way (for `settled`)
 function track<T>(p: Promise<T>): Promise<T> {
@@ -122,9 +125,10 @@ async function keptShare(wrap: CryptoKey, device: string): Promise<Kept> {
  *  gave none (then there's no cache, and whatever was kept goes). */
 export function openCache(secret: { deviceId: string | null; prf: Uint8Array | null } | null): Promise<void> {
   closeCache();
-  return track(opening(secret, gen));
+  if (secret?.deviceId && secret.prf && supported()) held = true;
+  return track(opening(secret, gen, changes));
 }
-async function opening(secret: { deviceId: string | null; prf: Uint8Array | null } | null, mine: number): Promise<void> {
+async function opening(secret: { deviceId: string | null; prf: Uint8Array | null } | null, mine: number, change: number): Promise<void> {
   const device = secret?.deviceId, prf = secret?.prf ? new Uint8Array(secret.prf) : null;
   try {
     if (!device || !prf || prf.length !== SECRET_BYTES || !supported()) { await wipe(); return; }
@@ -165,7 +169,7 @@ async function opening(secret: { deviceId: string | null; prf: Uint8Array | null
     if (mine !== gen) return;
     key = k;
     broken = false;
-    await load(mine);
+    await load(mine, change);
   } catch {
     // IndexedDB or WebCrypto failed: no cache this unlock (the in-memory one goes on as before).
     if (mine === gen) { key = null; kept.clear(); }
@@ -174,25 +178,30 @@ async function opening(secret: { deviceId: string | null; prf: Uint8Array | null
   }
 }
 
-/** Open the records with the cache key, keeping those that open under the current data version; the rest go. */
-async function load(mine: number): Promise<void> {
+/** Open the records with the cache key, keeping those that open under the current data version; the rest go. A change
+ *  since the unlock began (`change`: what `changes` was then) means what's on the device may be from before it: none of
+ *  it is opened (changed() deletes it). */
+async function load(mine: number, change: number): Promise<void> {
   const k = key!;
+  await clearing;   // (never rejects)
   const drop: string[] = [];
   for (const row of await idb.allRows()) {
-    if (mine !== gen) return;
+    if (mine !== gen || change !== changes) return;
     if (row.k === "share") continue;
     const name = row.k.startsWith("r:") ? row.k.slice(2) : null;
-    if (!name || row.v !== SCHEMA || typeof row.version !== "string" || (version && row.version !== version) || !persistable(name)) {
+    if (!name || unremoved || row.v !== SCHEMA || typeof row.version !== "string" || (version && row.version !== version) || !persistable(name)) {
       drop.push(row.k); continue;
     }
     try {
       const json = await openText(k, recordAad(name, row.version), row);
       JSON.parse(json);
-      if (mine !== gen) return;
+      if (mine !== gen || change !== changes) return;
       kept.set(name, { version: row.version, json });
     } catch { drop.push(row.k); }   // tampered, moved, or sealed under another key: a miss, and it goes
   }
-  if (drop.length && mine === gen) await idb.removeRows(drop);
+  if (mine !== gen || change !== changes) return;
+  if (drop.length) await idb.removeRows(drop);
+  unremoved = false;
 }
 
 /** Whether `v` carries one of EXCLUDED's fields with something in it, anywhere. */
@@ -234,19 +243,23 @@ function read(name: string): unknown {
   return JSON.parse(e.json);
 }
 
-/** A change went through: the records may no longer be right, so they go (the share stays: it's still this device's). */
+/** A change went through: the records may no longer be right, so they go (the share stays: it's still this device's).
+ *  Also while it isn't open (still opening, or it couldn't: the share unreachable), so a later unlock doesn't paint
+ *  them; not when this unlock didn't go to open it (the lock off, no PRF secret: nothing is kept, and no store is made
+ *  on the device for nothing) or it's locked (the unlock's own requests aren't changes to what's kept). */
 function changed(): void {
   changes++;
   kept.clear();
-  if (!key) return;
-  void track(idb.allRows().then((rows) => idb.removeRows(rows.filter((r) => r.k !== "share").map((r) => r.k)))
-    .catch(() => { /* not removed: tagged with the old data version, they don't open after the next sync */ }));
+  if (!key && !held) return;
+  clearing = track(idb.allRows().then((rows) => idb.removeRows(rows.filter((r) => r.k !== "share").map((r) => r.k)))
+    .catch(() => { unremoved = true; /* not removed: the next opening takes them all as misses */ }));
 }
 
 /** Locked (or the re-lock timers): the key and what was opened go from memory. What's on the device stays, sealed. */
 export function closeCache(): void {
   gen++;
   key = null;
+  held = false;
   kept.clear();
 }
 
@@ -275,4 +288,4 @@ async function sweeping(mine: number): Promise<void> {
 persistWith({ write, read, changed });
 
 /** For tests: forget the data version too. */
-export function resetForTests(): void { closeCache(); version = null; broken = false; }
+export function resetForTests(): void { closeCache(); version = null; broken = false; unremoved = false; clearing = Promise.resolve(); }
