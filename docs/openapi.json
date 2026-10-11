@@ -382,6 +382,38 @@
         }
       }
     },
+    "/api/lock/key-share": {
+      "post": {
+        "operationId": "api_lock_key_share",
+        "x-handler": "runway/server/api/lock.py:api_lock_key_share",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockKeyShare"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/budget": {
       "get": {
         "operationId": "api_budget",
@@ -1144,6 +1176,23 @@
         },
         "required": [
           "idle"
+        ],
+        "additionalProperties": false
+      },
+      "LockKeyShare": {
+        "type": "object",
+        "description": "POST /api/lock/key-share (no body), right after an unlock or turning the lock on: this device's share of its\non-device cache's key, 32 random bytes as base64url (no padding), the same each time until the device's lock ends,\nand until when the device may keep using its own copy of it without asking again (whole seconds since the epoch,\nby the server's clock: the time of this reply plus applock.SHARE_WINDOW, 72 hours).",
+        "properties": {
+          "share": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "share",
+          "expires"
         ],
         "additionalProperties": false
       },

@@ -497,6 +497,32 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
+    def test_0044_adds_the_key_share_to_app_locks_and_it_goes_with_the_row(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0043")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("key_share", {col["name"] for col in sa.inspect(c).get_columns("app_locks")})
+            c.exec_driver_sql("INSERT INTO auth_sessions(token_hash, sub, email, created, expires) "
+                              "VALUES ('h1', 'u1', 'me@example.com', 1, 2)")
+            c.exec_driver_sql("INSERT INTO app_locks(id, session, credential_id, public_key, alg, idle, unlocked_until, "
+                              "created) VALUES ('dev_1', 'h1', 'Y3JlZA', 'a2V5', -7, 60, 5.5, 1)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            row = conn.execute(select(schema.app_locks)).fetchone()
+            self.assertEqual((row["id"], row["credential_id"], row["unlocked_until"], row["key_share"]),
+                             ("dev_1", "Y3JlZA", 5.5, None))   # the lock as it was, without a share until asked
+            conn.execute(sa.update(schema.app_locks).values(key_share="enc:v1:x"))
+            conn.execute(sa.delete(schema.auth_sessions))   # the share goes with the row, which goes with the sign-in
+            self.assertEqual(conn.execute(select(func.count()).select_from(schema.app_locks)).scalar(), 0)
+        with db.engine(self.path).begin() as c:   # and back down
+            command.downgrade(db.alembic_config(c), "0043")
+            self.assertNotIn("key_share", {col["name"] for col in sa.inspect(c).get_columns("app_locks")})
+            self.assertIn("app_locks", sa.inspect(c).get_table_names())
+
     def test_0043_adds_app_locks_that_go_with_their_sign_in(self):
         from alembic import command
         db.init(self.path)

@@ -462,6 +462,7 @@ class AppLock(Base):
     unlocked_until: Mapped[float | None]
     created: Mapped[float]
     last_used: Mapped[float | None]
+    key_share: Mapped[str | None]
 
 
 class OAuthClient(Base):

@@ -662,7 +662,8 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "start/deployment"
+        "contributing/development",
+        "reference/architecture"
       ]
     },
     {
@@ -745,6 +746,20 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/lock/key-share",
+      "handler": "runway/server/api/lock.py:api_lock_key_share",
+      "web": [],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_applock.py"
+      ],
+      "docs": [
+        "contributing/development",
+        "reference/architecture"
+      ]
+    },
+    {
       "method": "DELETE",
       "path": "/api/lock",
       "handler": "runway/server/api/lock.py:api_lock_off",
@@ -757,7 +772,8 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "start/deployment"
+        "contributing/development",
+        "reference/architecture"
       ]
     },
     {

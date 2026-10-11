@@ -171,6 +171,17 @@ export interface LockIdle {
   idle: number;
 }
 
+/**
+ * POST /api/lock/key-share (no body), right after an unlock or turning the lock on: this device's share of its
+ * on-device cache's key, 32 random bytes as base64url (no padding), the same each time until the device's lock ends,
+ * and until when the device may keep using its own copy of it without asking again (whole seconds since the epoch,
+ * by the server's clock: the time of this reply plus applock.SHARE_WINDOW, 72 hours).
+ */
+export interface LockKeyShare {
+  share: string;
+  expires: number;
+}
+
 /** POST /api/lock/register: the passkey navigator.credentials.create made, all base64url, and when to lock. */
 export interface LockRegister {
   credential_id: string;
@@ -341,6 +352,7 @@ export interface Endpoints {
   "POST /api/lock/unlock": { body: LockUnlock; reply: LockStatus };
   "POST /api/lock/engage": { body: never; reply: LockStatus };
   "POST /api/lock/settings": { body: LockIdle; reply: LockStatus };
+  "POST /api/lock/key-share": { body: never; reply: LockKeyShare };
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
   "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };

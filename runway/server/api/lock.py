@@ -6,8 +6,9 @@ from __future__ import annotations
 import time
 
 from ... import applock
+from ...storage import db
 from ..common import ApiError, _current
-from ..contract import LockChallenge, LockChallengeAsk, LockIdle, LockRegister, LockStatus, LockUnlock
+from ..contract import LockChallenge, LockChallengeAsk, LockIdle, LockKeyShare, LockRegister, LockStatus, LockUnlock
 
 
 def _key() -> str:
@@ -45,7 +46,7 @@ def api_lock_challenge(conn, _q, body: LockChallengeAsk) -> LockChallenge:
         raise ApiError('Send "purpose": "register" or "unlock"')
     st = applock.status(conn, key, time.time())
     if purpose == "unlock" and not st["on"]:
-        raise ApiError("App lock isn’t on for this device.")
+        raise ApiError(applock.NOT_ON)
     return {"challenge": applock.challenge(key, purpose, time.time()), "rp_id": rp[1],
             "credential_id": st["credential_id"] if purpose == "unlock" else None}
 
@@ -82,3 +83,23 @@ def api_lock_settings(conn, _q, body: LockIdle) -> LockStatus:
 def api_lock_off(conn, _q, _b) -> LockStatus:
     applock.turn_off(conn, _key())
     return _status(conn)
+
+
+def api_lock_key_share(conn, _q, _b) -> LockKeyShare:
+    """The device's cache key share (applock.key_share): sent as no-store JSON like every API reply, and never logged
+    (the request log and Sentry carry the route and status only). Refused with 403 without an unlock just before it (or
+    a second time for one), 423 when locked meanwhile, 429 when asked too often, 400 when the lock isn't on."""
+    key = _key()
+    try:
+        share, expires = applock.key_share(conn, key, getattr(_current, "user", None), time.time())
+    except applock.Lapsed as e:
+        with db.session() as other:   # (this request's own connection is rolled back with the refusal)
+            applock.drop_share(other, key)
+        raise ApiError(str(e), 403) from None
+    except applock.NotFresh as e:
+        raise ApiError(str(e), 403) from None
+    except applock.TooMany as e:
+        raise ApiError(str(e), 429) from None
+    except applock.LockError as e:
+        raise _refused(e) from None
+    return {"share": share, "expires": expires}

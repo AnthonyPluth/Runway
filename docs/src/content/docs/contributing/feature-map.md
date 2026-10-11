@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-181 routes; 27 have no test yet.
+182 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -53,13 +53,14 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/push/unsubscribe` | `notifications.py:api_push_unsubscribe` | `lib/components/settings/NotificationsSection.svelte` | `test_notify.py` | [using/features](/Runway/using/features/) |
 | `POST /api/push/prefs` | `notifications.py:api_push_prefs` | `lib/components/settings/NotificationsSection.svelte` | `test_notify.py` | [using/features](/Runway/using/features/) |
 | `POST /api/push/test` | `notifications.py:api_push_test` | `lib/components/settings/NotificationsSection.svelte` | `test_mcp.py`, `test_notify.py`, `test_routes.py` | [using/features](/Runway/using/features/) |
-| `GET /api/lock` | `lock.py:api_lock` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [start/deployment](/Runway/start/deployment/) |
+| `GET /api/lock` | `lock.py:api_lock` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [contributing/development](/Runway/contributing/development/), [reference/architecture](/Runway/reference/architecture/) |
 | `POST /api/lock/challenge` | `lock.py:api_lock_challenge` | `lib/components/settings/AppLockCard.svelte`, `lib/lock.svelte.ts` | `test_api_contract.py`, `test_applock.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/lock/register` | `lock.py:api_lock_register` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/lock/unlock` | `lock.py:api_lock_unlock` | `lib/lock.svelte.ts` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/lock/engage` | `lock.py:api_lock_engage` | `lib/lock.svelte.ts` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [start/deployment](/Runway/start/deployment/) |
 | `POST /api/lock/settings` | `lock.py:api_lock_settings` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py` | [start/deployment](/Runway/start/deployment/) |
-| `DELETE /api/lock` | `lock.py:api_lock_off` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [start/deployment](/Runway/start/deployment/) |
+| `POST /api/lock/key-share` | `lock.py:api_lock_key_share` | - | `test_api_contract.py`, `test_applock.py` | [contributing/development](/Runway/contributing/development/), [reference/architecture](/Runway/reference/architecture/) |
+| `DELETE /api/lock` | `lock.py:api_lock_off` | `lib/components/settings/AppLockCard.svelte` | `test_api_contract.py`, `test_applock.py`, `test_mcp.py` | [contributing/development](/Runway/contributing/development/), [reference/architecture](/Runway/reference/architecture/) |
 | `GET /api/budget` | `budget.py:api_budget` | `lib/components/budget/BudgetView.svelte`, `lib/components/overview/ThisMonth.svelte` | `test_api_contract.py`, `test_api_handlers.py`, `test_budget_months.py`, `test_categorize.py`, `test_http_server.py`, `test_routes.py`, `test_splits.py` | [using/features](/Runway/using/features/) |
 | `POST /api/budget` | `budget.py:api_budget_set` | `lib/components/budget/BudgetRow.svelte`, `lib/components/budget/BudgetSuggest.svelte`, `lib/components/budget/BudgetView.svelte` | `test_api_contract.py`, `test_api_handlers.py`, `test_api_validation.py`, `test_budget_months.py`, `test_categorize.py`, `test_http_server.py`, `test_routes.py` | [using/features](/Runway/using/features/) |
 | `GET /api/budget/suggestions` | `budget_suggest.py:api_budget_suggestions` | `lib/components/budget/BudgetSuggest.svelte` | `test_api_contract.py`, `test_budget_suggest.py` | [using/features](/Runway/using/features/) |
