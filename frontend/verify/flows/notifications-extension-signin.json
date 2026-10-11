@@ -3,6 +3,7 @@
   "page": "setup",
   "steps": [
     { "goto": "#setup/notifications" },
+    { "wait_for": "text=Browser extension needs a sign-in" },
     { "expect_text": { "selector": "body", "text": "Browser extension needs a sign-in" } },
     { "screenshot": "rules" }
   ]

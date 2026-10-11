@@ -1,0 +1,67 @@
+name: Verify flows
+
+# Runs `make verify`'s scripted flows (frontend/verify/flows/*.json) in a real browser against the demo server, so a change
+# to the web app that moves a button, a label or the Tab order fails here instead of leaving a flow broken on main (the
+# budget-rollover-menu flow did). Only a change that can reach a flow runs it: the web app, the demo data, the verify
+# runner or this file. A pull request without one has no run at all, which the merge gate treats as nothing to wait for.
+# A push to main runs it too, for two pull requests that each pass alone and break a flow together.
+# It sends nothing out and needs no secret: the demo server is made-up data on the loopback address.
+on:
+  push:
+    branches: [main]
+    paths:
+      - frontend/**
+      - runway/domain/demo.py
+      - runway/verify.py
+      - .github/workflows/verify.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/**
+      - runway/domain/demo.py
+      - runway/verify.py
+      - .github/workflows/verify.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
+# A newer push replaces a pull request's run that's still going; on main, runs queue rather than cut one off. Built from
+# the pull request's number, so cancel-on-close.yml can join the group when it closes.
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  flows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
+        with:
+          cache-name: verify
+          install-args: --only main
+      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
+        with:
+          directory: frontend
+      # The runner has no Chromium where verify.mjs looks (PLAYWRIGHT_BROWSERS_PATH), so take the one the locked
+      # @playwright/test version is built for.
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Build the web app
+        working-directory: frontend
+        run: npm run build
+      # Exits non-zero on a failed step (a selector that matches nothing, a focus that never arrives), a console error or a
+      # 5xx, and prints each as a FAIL line naming the flow and the width.
+      - name: Run the pages and flows
+        run: poetry run python run.py verify

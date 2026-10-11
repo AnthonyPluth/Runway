@@ -1,7 +1,7 @@
 name: Cancel runs on close
 
 # When a pull request is merged or closed, stop its runs that are still going: the Docker image build and tests,
-# and the security scans. Nothing is lost, since a merge starts main's own runs.
+# the security scans and the verify flows. Nothing is lost, since a merge starts main's own runs.
 #
 # GitHub doesn't cancel a pull request's runs when it closes. Each of those workflows is in a concurrency group per pull
 # request with cancel-in-progress, which is how a new push already replaces an older run. Each job below joins one of
@@ -37,3 +37,10 @@ jobs:
       cancel-in-progress: true
     steps:
       - run: echo "Stopped any security scan still running on this pull request."
+  verify:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: verify-${{ github.event.pull_request.number }}   # verify.yml
+      cancel-in-progress: true
+    steps:
+      - run: echo "Stopped any verify run still going on this pull request."
