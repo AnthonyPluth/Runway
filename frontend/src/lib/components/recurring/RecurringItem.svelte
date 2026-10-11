@@ -120,7 +120,8 @@
   // changes to single dates go.
   let removing = $state(false);
   async function remove(): Promise<boolean> {
-    return act(async () => { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); });
+    // The sheet closes with it, so the page behind takes clicks again and the item isn't remembered as open.
+    return act(async () => { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); setOpen(false); reload(); });
   }
   async function showMatches() {
     if (matches) { matches = null; return; }

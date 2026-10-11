@@ -944,6 +944,8 @@ describe("Recurring page", () => {
       await userEvent.click(within(confirm).getByRole("button", { name: "Remove" }));
       await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" }));
       await waitFor(() => expect(toast).toHaveBeenCalledWith("Removed"));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
     });
 
     it("keeps the item when the confirmation is cancelled, and says so when nothing is linked", async () => {
