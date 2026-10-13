@@ -723,7 +723,8 @@ def forecast_accounts(conn, accounts: list[dict], today: date) -> tuple[list[dic
 def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overrides: dict[str, float], today: date,
                      end: date) -> list[dict]:
     """The recurring items' occurrences through `end` on the accounts here (`by_id`), as events: what's still due of
-    each, with your one-off edits (`overrides`, rec:<id>:<date>) applied."""
+    each, with your one-off edits (`overrides`, rec:<id>:<date>) applied. An event's category is the item's own, else the
+    one its matched transactions (or its match text's) mostly have."""
     T = Transaction
     most_used = (func.count().desc(), func.max(T.posted).desc())
     rec_overrides = {k: v for k, v in overrides.items() if k.startswith("rec:")}
@@ -733,7 +734,7 @@ def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overri
             continue
         history = rec.matched(conn, item["id"])
         amount = rec.expected_amount(item, history)
-        cat_row = conn.execute(
+        cat_row = {"category": item["category"]} if item.get("category") else conn.execute(
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:

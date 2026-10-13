@@ -189,6 +189,14 @@ class PaymentModeTests(LedgerCase):
         i = fc["dates"].index("2026-10-20")
         self.assertAlmostEqual(fc["total"][i - 1] - fc["total"][i], 500 / 31, delta=0.01)
 
+    def test_a_recurring_item_with_a_category_and_no_history_keeps_it(self):
+        # The budget's "expected" is made of the events that have a category: one set on the item counts without matches.
+        self.conn.execute(insert(Recurring).values(name="Property Taxes", account_id="cc", amount=-3000, frequency="dates",
+                                                   dates="10-15", anchor_date="2026-10-15", category="Taxes"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        tax = next(e for e in [*fc["events"], *fc["charges"]] if e.get("name") == "Property Taxes")
+        self.assertEqual(tax["category"], "Taxes")
+
     def test_with_budgets_a_recurring_charge_on_the_card_counts_once(self):
         self.tx("cc", "2025-10-20", -600.0, "STREAMFLIX YEARLY", "Subscriptions")
         self.conn.execute(insert(Recurring).values(name="Streamflix", account_id="cc", amount=-600, frequency="yearly",
