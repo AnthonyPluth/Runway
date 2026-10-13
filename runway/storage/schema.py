@@ -1,5 +1,7 @@
-"""Runway's database schema, for SQLite and Postgres alike. Alembic migrations (runway/storage/migrations) create and change it."""
-from sqlalchemy import Column, Float, ForeignKey, Index, Integer, MetaData, PrimaryKeyConstraint, Table, Text, text
+"""Runway's database schema, for SQLite and Postgres alike. Alembic migrations (runway/storage/migrations) change it; a new,
+empty database is made from it in one step (db.create_fresh), so it must give exactly the tables the migrations leave,
+column order included (tests/test_fresh_database.py)."""
+from sqlalchemy import Column, Float, ForeignKey, Index, Integer, MetaData, PrimaryKeyConstraint, Table, Text, event, text
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import FunctionElement
 
@@ -48,11 +50,11 @@ accounts = Table(
     Column('owed_positive', Integer, server_default=text('0'), doc='credit/loan: 1 if the bank reports the amount owed as a positive number'),
     Column('in_forecast', Integer, server_default=text('1'), doc='cash accounts: include in the projection'),
     Column('hidden', Integer, server_default=text('0')),
-    Column('networth_hidden', Integer, server_default=text('0'), doc='1: left out of Net worth (still shown everywhere else)'),
     Column('owner', Text, doc='a signed-in person\'s first name, "Joint", or NULL'),
     Column('provider', Text, server_default=text("'simplefin'"), doc='where balances and transactions come from: simplefin | plaid'),
     Column('plaid_account_id', Text, doc='the same account in a Plaid connection, if any'),
     Column('provider_since', Text, doc='when the provider last changed (YYYY-MM-DD); overlapping history is matched up'),
+    Column('networth_hidden', Integer, server_default=text('0'), doc='1: left out of Net worth (still shown everywhere else)'),
     Column('logo', Text, doc='the logo you chose: a website ("citi.com"), "none" for a letter, or NULL for its institution\'s'),
     Column('interest_rate', Float, doc='loans: the annual interest rate in percent, as you set it (Plaid\'s, if any, is in loan_terms)'),
     Column('monthly_payment', Float, doc='loans: the monthly payment, as you set it; NULL works it out from recent payments'),
@@ -144,7 +146,8 @@ retail_items = Table(
     Column('category', Text),
     Column('category_source', Text, doc='manual | memory | ai | department; NULL = not decided yet'),
     Column('confidence', Float),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
 )
 
 retail_charges = Table(
@@ -229,7 +232,8 @@ rules = Table(
     Column('rename', Text, doc='show the merchant as this'),
     Column('review', Integer, server_default=text('0'), doc='1: put matching transactions in Review'),
     Column('split', Text, doc='JSON [{"category", "percent"}]: split matching transactions this way'),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
 )
 
 recurring = Table(
@@ -249,7 +253,8 @@ recurring = Table(
     Column('amount_max', Float, doc='only payments of at most this much'),
     Column('amount_since', Text, doc='when the amount was last set (YYYY-MM-DD); the "use $X" hint looks at payments since'),
     Column('category', Text, doc='the category (and so the icon) its transactions get when linked to it; NULL = none'),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
 )
 
 recurring_dismissed = Table(
@@ -610,7 +615,8 @@ assets = Table(
     Column('notes', Text),
     Column('created_at', Text, server_default=now_text()),
     info={'doc': 'things you own that no bank reports: a home, a car'},
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
 )
 
 asset_values = Table(
@@ -740,7 +746,8 @@ churn_cards = Table(
     Column('plan_done_on', Text, doc='the day you checked the plan off'),
     Column('plan_new_id', Integer, refers('churn_cards', 'plan_new_id', 'churn_cards.id', 'SET NULL'), doc='the card checking off a product change added (churn_cards.id); undo removes it'),
     Column('hide_upcoming', Integer, server_default=text('0'), doc='1: leave this card out of Upcoming and its alerts'),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
     info={'doc': 'credit cards you and your partner opened for their sign-up bonuses and rewards'},
 )
 
@@ -754,6 +761,13 @@ churn_rates = Table(
     PrimaryKeyConstraint('card_id', 'category', 'portal_only'),
     info={'doc': 'what a card earns in a category, instead of its base rate'},
 )
+
+
+@event.listens_for(churn_rates, "before_create")
+def _churn_rates_key_name(table, connection, **_kw):
+    """The primary key's name as migration 0019 left it: pk_churn_rates on SQLite (it made the table again with that
+    key), Postgres's own churn_rates_pkey there (it kept the name it had), so db.create_fresh makes the same table."""
+    table.primary_key.name = "pk_churn_rates" if connection.dialect.name == "sqlite" else None
 
 churn_currencies = Table(
     'churn_currencies', metadata,
@@ -782,7 +796,8 @@ churn_tasks = Table(
     Column('action', Text, nullable=False, doc='e.g. close, downgrade to Freedom, call retention'),
     Column('done', Integer, server_default=text('0')),
     Column('snooze_until', Text, doc='left out of Upcoming until this day'),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
     info={'doc': 'things to do about a card, and when'},
 )
 
@@ -798,7 +813,6 @@ churn_benefits = Table(
     Column('basis', Text, server_default=text("'calendar'"),
            doc="calendar (resets Jan 1, the 1st of the month...) | anniversary (the cardmember year, from opened_on)"),
     Column('annual_value', Float, doc="what it's worth to you a year, instead of amount times periods (access: the only value)"),
-    Column('guests', Integer, doc='access: guests you can bring in free each visit (0: the cardholder only; NULL: not set)'),
     Column('counts', Integer, server_default=text('1'), doc="1: you'll use it, so it counts against the annual fee"),
     Column('remind', Integer, server_default=text('1'), doc='1: remind you before a credit with money left resets'),
     Column('remind_days', Integer, doc='... this many days ahead (NULL = 14 for monthly and quarterly, else 30)'),
@@ -807,7 +821,9 @@ churn_benefits = Table(
     Column('notes', Text),
     Column('active', Integer, server_default=text('1'), doc='0: kept for the record, but no longer on the card'),
     Column('created_at', Text, server_default=now_text()),
-    sqlite_autoincrement=True,
+    Column('guests', Integer, doc='access: guests you can bring in free each visit (0: the cardholder only; NULL: not set)'),
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
     info={'doc': "a card's perks and credits (lounges, Uber, airline and hotel credits...)"},
 )
 
@@ -818,7 +834,8 @@ churn_benefit_uses = Table(
     Column('period_start', Text, nullable=False, doc='the first day of the period it was used in'),
     Column('amount_used', Float, doc='dollars of a credit used (NULL: a benefit without an amount, used)'),
     Column('used_on', Text, nullable=False),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
     info={'doc': 'when a benefit was used, per period'},
 )
 
@@ -849,10 +866,10 @@ churn_wishlist = Table(
     Column('assume_prior_planned', Integer, server_default=text('0'),
            doc="1: count your earlier-priority planned cards as opened, for this one's 5/24"),
     Column('notes', Text),
-    Column('apply_url', Text, doc='where to apply: the offer\'s page (http or https)'),
     Column('applied_on', Text),
     Column('applied_id', Integer, doc='what applying made: churn_cards.id or churn_bank_bonuses.id (by kind)'),
     Column('created_at', Text, server_default=now_text()),
+    Column('apply_url', Text, doc='where to apply: the offer\'s page (http or https)'),
     sqlite_autoincrement=True,
     info={'doc': "cards and bank bonuses you want next, and what's in the way of applying"},
 )
@@ -901,7 +918,8 @@ churn_bank_bonuses = Table(
     Column('eligible_on', Text, doc='you know better: the day the bonus can be earned again'),
     Column('notes', Text),
     Column('created_at', Text, server_default=now_text()),
-    sqlite_autoincrement=True,
+    # No sqlite_autoincrement: migration 0040 made the table again on SQLite (batch mode) without AUTOINCREMENT, so no
+    # database the migrations made has it, and db.create_fresh makes the same table (tests/test_fresh_database.py).
     info={'doc': 'checking and savings account sign-up bonuses'},
 )
 

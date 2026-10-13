@@ -1,7 +1,7 @@
 """Runway's database: SQLite (a file in RUNWAY_DATA) by default, or Postgres when DATABASE_URL is set.
 
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/storage/schema.py) up to date: migrations run
-when Runway starts. The rest of Runway queries through the small Connection wrapper here, which works the same on
+when Runway starts (a new, empty database is made from schema.py in one step instead: create_fresh). The rest of Runway queries through the small Connection wrapper here, which works the same on
 either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
 models in runway/storage/models.py (docs/src/content/docs/contributing/orm.md), or through its ORM Session (`conn.orm`). SQL
 text isn't taken: a statement is compiled for whichever database the connection is on.
@@ -141,6 +141,24 @@ def _lower(v):
     return str(v).lower()
 
 
+# Tests only: the schema a path's database lives in, when tests/shared.py's pool lent it one; otherwise a path's schema
+# is named after it (schema_for).
+TEST_SCHEMAS: dict[str, str] = {}
+
+
+def schema_for(path: str) -> str:
+    """The Postgres schema a test's database at this path lives in."""
+    # Only a short, stable name for a test's schema, not a secret; changing the hash would orphan existing test schemas.
+    return TEST_SCHEMAS.get(path) or "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]
+
+
+def forget_engine(path: str) -> None:
+    """Tests only: drop the engine made for this path, so a connection asked for after the test gave its schema back
+    gets an engine (and a schema) of its own instead of the schema's next borrower."""
+    with _engines_lock:
+        _engines.pop((engine_url(path), path if using_postgres() else None), None)
+
+
 def _postgres_engine(url: str, path: str | None) -> Engine:
     from psycopg.adapt import Dumper   # the Postgres driver: only loaded when DATABASE_URL is set
 
@@ -154,19 +172,18 @@ def _postgres_engine(url: str, path: str | None) -> Engine:
                 return b"1" if obj else b"0"
             return str(obj).encode()
 
-    # Only a short, stable name for a test's schema, not a secret; changing the hash would orphan existing test schemas.
-    test_schema = None if path is None else "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]
+    schema_name = None if path is None else schema_for(path)
     # Tests make an engine per database; they don't keep connections open, so they don't run Postgres out of them.
-    eng = (create_engine(url, poolclass=NullPool) if test_schema
+    eng = (create_engine(url, poolclass=NullPool) if schema_name
            else create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=60))   # up to 64 requests plus syncs at once
 
     @event.listens_for(eng, "connect")
     def _setup(dbapi_conn, _record):
         for t in (str, int, float, bool):
             dbapi_conn.adapters.register_dumper(t, Untyped)
-        if test_schema:
-            dbapi_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{test_schema}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
-            dbapi_conn.execute(f'SET search_path TO "{test_schema}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
+        if schema_name:
+            dbapi_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
+            dbapi_conn.execute(f'SET search_path TO "{schema_name}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
             dbapi_conn.commit()
     return eng
 
@@ -461,6 +478,15 @@ def _upgrade_legacy(sa_conn) -> None:
                     index.create(sa_conn, checkfirst=True)
 
 
+def create_fresh(sa_conn, cfg: Config) -> None:
+    """A database with no tables, made in one step: schema.py's tables, recorded as being at the newest migration. It
+    is the database replaying every migration would make (tests/test_fresh_database.py compares the two, column order,
+    keys, indexes and rows included) in a fraction of the time; init seeds the categories either way. A database that
+    has tables is upgraded through the migrations as before (_upgrade_legacy first, for one from before them)."""
+    schema.metadata.create_all(sa_conn)
+    command.stamp(cfg, "head")
+
+
 MIGRATE_LOCK = 0x52554E574159   # "RUNWAY": Postgres advisory lock key, held while one process migrates
 SCHEMA_LOCK = 0x52554E57        # "RUNW": with the schema's hash, the lock for migrating a test's own schema
 
@@ -486,10 +512,13 @@ def migrate(path: str | None = None) -> None:
                     sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK}, hashtext(current_schema()))")   # nosemgrep: runway-sql-from-string -- integer constants
             tables = set(inspect(sa_conn).get_table_names())
             cfg = alembic_config(sa_conn)
-            if tables and "alembic_version" not in tables:
-                _upgrade_legacy(sa_conn)
-                command.stamp(cfg, BASELINE)
-            command.upgrade(cfg, "head")
+            if not tables:
+                create_fresh(sa_conn, cfg)
+            else:
+                if "alembic_version" not in tables:
+                    _upgrade_legacy(sa_conn)
+                    command.stamp(cfg, BASELINE)
+                command.upgrade(cfg, "head")
             if sqlite:
                 broken = sorted({r[0] for r in sa_conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()})
                 if broken:   # the migrations left a row referring to one that isn't there (table names only: no data)
