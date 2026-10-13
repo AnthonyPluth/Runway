@@ -149,7 +149,7 @@ TEST_SCHEMAS: dict[str, str] = {}
 def schema_for(path: str) -> str:
     """The Postgres schema a test's database at this path lives in."""
     # Only a short, stable name for a test's schema, not a secret; changing the hash would orphan existing test schemas.
-    return TEST_SCHEMAS.get(path) or "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]
+    return TEST_SCHEMAS.get(path) or "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]   # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1 -- a short test schema name, not a secret
 
 
 def forget_engine(path: str) -> None:
