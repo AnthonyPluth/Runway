@@ -20,19 +20,25 @@ poetry run mypy                                        # type-check the Python (
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
-To run the tests on Postgres as CI does (in parallel, where tests that share the database can trip over each other), start a throwaway one; Docker's default 64 MB of shared memory isn't enough for the schemas the tests make:
+To run the tests on Postgres as CI does (in parallel, where tests that share the database can trip over each other), start a throwaway one, as CI does: its data in memory (`--tmpfs`) and nothing waiting for the disk (`fsync`, `synchronous_commit` and `full_page_writes` off), so a crash loses it. That's fine for a database that lives for one test run, and never for Runway's own database, the image or the Compose files. Docker's default 64 MB of shared memory isn't enough for the schemas the tests make, and `max_connections` needs at least 30 per test process plus 100:
 
 ```bash
-docker run -d --rm --name runway-test-pg --shm-size=1g -p 5432:5432 -e POSTGRES_USER=runway -e POSTGRES_PASSWORD=runway -e POSTGRES_DB=runway postgres:16
-DATABASE_URL=postgresql://runway:runway@127.0.0.1:5432/runway poetry run unittest-parallel -t . -s tests -j 4
+docker run -d --rm --name runway-test-pg --shm-size=1g --tmpfs /var/lib/postgresql/data -p 5432:5432 \
+  -e POSTGRES_USER=runway -e POSTGRES_PASSWORD=runway -e POSTGRES_DB=runway postgres:16 \
+  -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c shared_buffers=512MB -c max_connections=600
+DATABASE_URL=postgresql://runway:runway@127.0.0.1:5432/runway make test-pg
 docker stop runway-test-pg
 ```
 
-`make test-pg` runs the suite against the Postgres at `$DATABASE_URL` (the command above, with a check that the variable is set). Whatever Postgres you use must be UTF-8: a cluster you make yourself needs `initdb -E UTF8 --locale=C.UTF-8` (the `postgres` Docker image already is). Each test that writes settings or goes through the server makes and drops its own schema, so running the suite twice on the same database gives the same result.
+`make test-pg` runs the suite against the Postgres at `$DATABASE_URL`, in one process per CPU (at least 4, at most 16: `tools/test_jobs.sh`), after checking that the variable is set. Whatever Postgres you use must be UTF-8: a cluster you make yourself needs `initdb -E UTF8 --locale=C.UTF-8` (the `postgres` Docker image already is). A test that writes settings or goes through the server takes a database of its own (`own_database` in `tests/shared.py`): on Postgres a schema borrowed from its test process's pool, made once and emptied when the test gives it back (the pool drops its schemas left by an earlier run on the same machine when it starts), so running the suite twice on the same database gives the same result. Drop the database when you're done with it.
+
+A new database, in the tests or a first start, is made from `runway/storage/schema.py` in one step (`db.create_fresh`) rather than by replaying every migration, and `tests/test_fresh_database.py` checks both give the same tables, column order included. So a migration that adds a column puts it last in `schema.py` too, where the migration leaves it.
+
+`make test-timings` prints where the tests' time goes: the slowest tests and classes, and the time spent making and giving back databases (on SQLite, or on Postgres with `DATABASE_URL` set; `TEST_ARGS="-k tests.test_backup."` runs part of it). A manual run of the Docker image workflow with "timings" ticked prints the same for each CI shard of the Postgres tests in the run's summary.
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-CI's Postgres is the same official `postgres:16` image, but pulled through Google's Docker Hub mirror (`mirror.gcr.io/library/postgres:16`, set in `.github/workflows/docker.yml`): GitHub's runners share addresses, so Docker Hub's limit on anonymous pulls used to fail the test jobs before any test ran. The tag follows Postgres 16's minor releases, so CI picks them up without a change here; to pull from Docker Hub instead, set the image back to `postgres:16`. Locally, `postgres:16` from Docker Hub is fine.
+CI's Postgres is the same official `postgres:16` image, with the settings above, but pulled through Google's Docker Hub mirror (`mirror.gcr.io/library/postgres:16`, set in `.github/workflows/docker.yml`): GitHub's runners share addresses, so Docker Hub's limit on anonymous pulls used to fail the test jobs before any test ran. The tag follows Postgres 16's minor releases, so CI picks them up without a change here; to pull from Docker Hub instead, set the image back to `postgres:16`. Locally, `postgres:16` from Docker Hub is fine.
 
 `make check` runs the checks to run before you push, each tool once: ruff, mypy and import-linter, Runway's own Semgrep rules, the fleet checks (see [Merging](#merging)), the feature map and API contract checks, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make pre-push` is the quick version for the pushes before the last (about a minute): the feature map, API contract and fleet checks, and the tests that read shared fixtures (the demo seed, the golden forecast, the contract's sample data, migrations and backups). `make setup` installs the backend's and the web app's dependencies on a fresh checkout. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 

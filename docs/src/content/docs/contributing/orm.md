@@ -260,7 +260,8 @@ tests that set up an older schema, a column the models don't have, or a SQLite s
 
 Tests here run on SQLite; CI also runs everything on Postgres 16 (`DATABASE_URL`, see
 `.github/workflows/docker.yml`). To run it locally: start Postgres, then
-`DATABASE_URL=postgresql://user:pass@localhost/db python -m unittest discover tests` (each test gets its own schema).
+`DATABASE_URL=postgresql://user:pass@localhost/db python -m unittest discover tests` (each test that needs one gets a
+schema of its own, borrowed from its process's pool).
 
 - Statements are compiled for the connection's database, so portable constructs are portable automatically. Avoid
   `func.<something>` that exists on only one (`func.instr` -> `db.instr`; `func.strftime`, `func.datetime`,
