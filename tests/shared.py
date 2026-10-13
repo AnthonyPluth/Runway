@@ -13,9 +13,11 @@ import fcntl
 import hashlib
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -31,6 +33,21 @@ from runway.storage.models import (Account, CardStatement, ManualStatement, OAut
                                    OAuthGrant, OAuthToken, Transaction)
 
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
+
+# Seconds this process has spent in each phase of making and giving back databases ("schema", "teardown"), and the
+# connections the schema pool had to end to give a schema back: what tests/timing_result.py reports.
+PHASES: dict[str, float] = {}
+ENDED = [0]
+
+
+@contextmanager
+def phase(name):
+    """Count the block's time towards PHASES[name]."""
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        PHASES[name] = PHASES.get(name, 0.0) + time.perf_counter() - started
 
 
 @contextmanager
@@ -68,30 +85,212 @@ def forget_oauth(conn, client_ids) -> None:
         conn.execute(delete(OAuthClient).where(OAuthClient.id == cid))
 
 
-def drop_schema(path) -> None:
-    """On Postgres, drop the schema db.init(path) made for this path (db.py names it from the path); SQLite has nothing
-    to drop: the file goes with its directory."""
-    from runway.storage import db
-    if not db.using_postgres():
-        return
+LOCK_WAIT = "200ms"     # how long giving a schema back waits for a connection the test left open before ending it
+
+
+def _pg():
+    import psycopg
+    return psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+
+
+def _end_holders(conn, name) -> None:
+    """End the connections holding locks in this schema (a test left a transaction open): they belong to the test that
+    is done with it."""
+    from psycopg import sql
+    ended = conn.execute(sql.SQL(
+        "SELECT pg_terminate_backend(pid) FROM (SELECT DISTINCT l.pid FROM pg_locks l JOIN pg_class c ON c.oid = l.relation "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = {} AND l.pid <> pg_backend_pid()) holders"
+    ).format(sql.Literal(name))).fetchall()
+    ENDED[0] += len(ended)
+
+
+def _run_ending_holders(conn, name, *statements) -> None:
+    """Run statements (in one transaction) that need the schema's tables to themselves, ending whatever connection
+    still holds one after a short wait (waiting for it would wait forever)."""
     import psycopg
     from psycopg import sql
-    name = "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]   # as db._postgres_engine names it
-    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+    conn.execute(sql.SQL("SET lock_timeout = {}").format(sql.Literal(LOCK_WAIT)))
+
+    def run():
+        with conn.transaction():
+            for statement in statements:
+                conn.execute(statement)
+    try:
+        run()
+    except psycopg.errors.LockNotAvailable:
+        _end_holders(conn, name)
+        run()
+
+
+class SchemaPool:
+    """On Postgres, the databases this test process lends its tests: schemas made once (db.init, so db.create_fresh)
+    and emptied when a test gives one back, instead of a schema made and dropped for each test, which was most of the
+    Postgres run's time. A schema is lent to one test at a time. Giving it back ends the connections the test left
+    holding locks in it, deletes every row (with the foreign keys checked at the end, so in any order), restarts the
+    sequences that were used and copies back the rows db.init seeds (the categories) from a template schema. That
+    gives what TRUNCATE ... RESTART IDENTITY CASCADE would, several times faster: a TRUNCATE of every table makes
+    new files for all of them, even on a throwaway server. One whose tables a test changed is dropped instead.
+
+    Schemas are named p_<host>_<pid>_<n>. A test process doesn't get to clean up after itself (unittest-parallel ends
+    its workers), so each new pool drops the ones left by processes on this machine that are gone."""
+
+    def __init__(self):
+        self.free: list[str] = []
+        self.made = 0
+        self.template: str | None = None
+        self.prefix = ""
+        self.fingerprint = ""
+        self.seeded: list[str] = []
+        self.tables: list[str] = []
+
+    @staticmethod
+    def _fingerprint(conn, name) -> str:
+        """Everything about the schema a test could change and the next one would notice: its tables' columns (type,
+        nullable, default), constraints (keys, foreign keys, checks), indexes, sequences, functions and the revision
+        alembic_version records (a test that downgrades a migration changes the keys and the revision, not the
+        columns). The schema's own name is left out, so two schemas built the same way match."""
+        from psycopg import sql
+        ns = sql.SQL("to_regnamespace({})").format(sql.Literal(name))
+        parts = [
+            sql.SQL("SELECT c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || "
+                    "a.attnotnull || ':' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') FROM pg_class c "
+                    "JOIN pg_attribute a ON a.attrelid = c.oid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum "
+                    "WHERE c.relnamespace = {} AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped").format(ns),
+            sql.SQL("SELECT t.relname || ':' || k.conname || ':' || pg_get_constraintdef(k.oid) FROM pg_constraint k "
+                    "JOIN pg_class t ON t.oid = k.conrelid WHERE k.connamespace = {}").format(ns),
+            sql.SQL("SELECT indexname || ':' || indexdef FROM pg_indexes WHERE schemaname = {}").format(sql.Literal(name)),
+            sql.SQL("SELECT 'sequence:' || relname FROM pg_class WHERE relnamespace = {} AND relkind = 'S'").format(ns),
+            sql.SQL("SELECT 'function:' || p.oid::regprocedure FROM pg_proc p WHERE p.pronamespace = {}").format(ns),
+        ]
+        rows = [r[0] for part in parts for r in conn.execute(part)]
+        if conn.execute(sql.SQL("SELECT to_regclass({})").format(sql.Literal(f'"{name}".alembic_version'))).fetchone()[0]:
+            rows += ["revision:" + r[0] for r in conn.execute(sql.SQL("SELECT version_num FROM {}").format(
+                sql.Identifier(name, "alembic_version")))]
+        return "\n".join(sorted(r.replace(name, "<schema>") for r in rows))
+
+    def _make(self, name, path) -> None:
+        from psycopg import sql
+
+        from runway.storage import db
+        with _pg() as conn:
+            conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+        db.TEST_SCHEMAS[path] = name
+        db.init(path)
+
+    def _drop_leftovers(self) -> None:
+        from psycopg import sql
+        host = hashlib.sha1(socket.gethostname().encode(), usedforsecurity=False).hexdigest()[:6]
+        self.prefix = f"p_{host}_{os.getpid()}_"
+        with _pg() as conn:
+            pattern = f"p\\_{host}\\_%"
+            for (name,) in conn.execute(sql.SQL("SELECT nspname FROM pg_namespace WHERE nspname LIKE {}").format(
+                    sql.Literal(pattern))).fetchall():
+                try:
+                    os.kill(int(name.split("_")[2]), 0)
+                except ProcessLookupError:
+                    conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+                except (PermissionError, ValueError, IndexError):
+                    pass    # another user's live process, or not one of ours
+
+    def start(self) -> None:
+        from psycopg import sql
+
+        from runway.storage import db
+        self._drop_leftovers()
+        self.template = self.prefix + "template"
+        self._make(self.template, self.template)
+        db.TEST_SCHEMAS.pop(self.template, None)
+        db.forget_engine(self.template)
+        with _pg() as conn:
+            self.tables = [r[0] for r in conn.execute(sql.SQL("SELECT tablename FROM pg_tables WHERE schemaname = {} "
+                                                              "ORDER BY 1").format(sql.Literal(self.template)))
+                           if r[0] != "alembic_version"]
+            # The rows db.init seeds (the categories): whatever the template has, so a new seed is restored too.
+            self.seeded = [t for t in self.tables if conn.execute(sql.SQL("SELECT EXISTS (SELECT 1 FROM {})").format(
+                sql.Identifier(self.template, t))).fetchone()[0]]
+            self.fingerprint = self._fingerprint(conn, self.template)
+
+    def acquire(self, path) -> str:
+        """Lend this path a schema (db.session(path) and the rest use it until it's given back); returns its name."""
+        from runway.storage import db
+        if self.template is None:
+            self.start()
+        if self.free:
+            db.TEST_SCHEMAS[path] = self.free.pop()
+        else:
+            self.made += 1
+            self._make(f"{self.prefix}{self.made}", path)
+        return db.TEST_SCHEMAS[path]
+
+    def release(self, path) -> None:
+        """Take the path's schema back, empty, for the next test; one whose tables the test changed (or that can't be
+        emptied) is dropped instead."""
+        from psycopg import sql
+
+        from runway.storage import db
+        name = db.TEST_SCHEMAS.pop(path)
+        db.forget_engine(path)
+        with _pg() as conn:
+            try:
+                _end_holders(conn, name)    # what the test left running mustn't write into the next one's database
+                conn.execute(sql.SQL("SET lock_timeout = {}").format(sql.Literal(LOCK_WAIT)))   # else: dropped, below
+                if self._fingerprint(conn, name) != self.fingerprint:
+                    raise LookupError(name)
+                filled = {r[0] for r in conn.execute(sql.SQL(" UNION ALL ").join(
+                    sql.SQL("SELECT {} WHERE EXISTS (SELECT 1 FROM {})").format(sql.Literal(t), sql.Identifier(name, t))
+                    for t in self.tables))}
+                used = [r[0] for r in conn.execute(sql.SQL("SELECT sequencename FROM pg_sequences WHERE schemaname = {} "
+                                                           "AND last_value IS NOT NULL").format(sql.Literal(name)))]
+                with conn.transaction():
+                    conn.execute(sql.SQL("SET CONSTRAINTS ALL DEFERRED"))   # every foreign key is (schema.refers)
+                    for t in [t for t in self.tables if t in filled]:
+                        conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(name, t)))
+                    for seq in used:
+                        conn.execute(sql.SQL("ALTER SEQUENCE {} RESTART").format(sql.Identifier(name, seq)))
+                    for t in self.seeded:
+                        conn.execute(sql.SQL("INSERT INTO {} SELECT * FROM {}").format(sql.Identifier(name, t),
+                                                                                       sql.Identifier(self.template, t)))
+            except Exception:
+                _run_ending_holders(conn, name, sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+                return
+        self.free.append(name)
+
+
+POOL = SchemaPool()
+
+
+def drop_schema(path) -> None:
+    """On Postgres, drop the schema db.init(path) made for this path (db.schema_for names it from the path); SQLite has
+    nothing to drop: the file goes with its directory. A schema the pool lent the path is the pool's to take back."""
+    from runway.storage import db
+    if not db.using_postgres() or path in db.TEST_SCHEMAS:
+        return
+    from psycopg import sql
+    name = db.schema_for(path)
+    db.forget_engine(path)
+    with phase("teardown"), _pg() as conn:
         # A connection the test left open (a transaction never ended) holds locks that would make the drop wait forever.
-        conn.execute(sql.SQL("SELECT pg_terminate_backend(l.pid) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation "
-                             "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = {} AND l.pid <> pg_backend_pid()"
-                             ).format(sql.Literal(name)))
-        conn.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+        _run_ending_holders(conn, name, sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(name)))
+
+
+def release_database(path) -> None:
+    with phase("teardown"):
+        POOL.release(path)
 
 
 def add_database(case, path) -> str:
-    """db.init(path), and (in setUp, or setUpClass with the class) drop its schema on Postgres when the test is cleaned
-    up, so nothing a run makes stays in the database. own_database does this for its own; a test that needs a second
-    database (a restore target, an old schema to migrate) makes it with this. Returns the path."""
+    """A new database at this path, all of it gone when the test (or class, in setUpClass) is cleaned up: on SQLite
+    db.init(path) (with the file in the test's own directory), on Postgres a schema borrowed from this process's pool
+    (SchemaPool), already made, emptied when it's given back. own_database does this for its own; a test that needs a
+    second database (a restore target, say) makes it with this. Returns the path."""
     from runway.storage import db
-    db.init(path)
-    (case.addClassCleanup if isinstance(case, type) else case.addCleanup)(drop_schema, path)
+    later = case.addClassCleanup if isinstance(case, type) else case.addCleanup
+    with phase("schema"):
+        if db.using_postgres():
+            POOL.acquire(path)
+            later(release_database, path)
+        else:
+            db.init(path)
     return path
 
 
@@ -113,8 +312,8 @@ def database_path(case, name="runway.db") -> str:
 
 def own_database(case, **env) -> str:
     """In setUp (or a test): a database for this test alone, with db.session() pointed at it and RUNWAY_DATA (plus any
-    other environment variables given) set, all undone when the test is cleaned up. On Postgres its schema is named
-    after its path. Returns the path, for db.connect().
+    other environment variables given) set, all undone when the test is cleaned up. On Postgres it is a schema
+    borrowed from the process's pool (SchemaPool). Returns the path, for db.connect().
 
     In setUpClass (pass the class): the same for every test in the class, undone after tearDownClass. db.session() is
     patched for the whole process, so a server a class starts on a thread uses it too: start the server after this, and
