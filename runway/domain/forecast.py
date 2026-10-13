@@ -41,7 +41,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
-from sqlalchemy import ColumnElement, and_, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, splits, statements
@@ -194,9 +194,13 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
 
 
 def _pending_counted(today: date) -> ColumnElement[bool]:
-    """Which pending rows to believe: all of Plaid's, and SimpleFIN's from the last simplefin.REFRESH_DAYS only."""
+    """Which pending rows to believe: all of Plaid's, and SimpleFIN's from the last simplefin.REFRESH_DAYS only, and not
+    on an account that has moved to Plaid: nothing refreshes its SimpleFIN rows any more, so a pending one that posted
+    under Plaid's id would be counted twice."""
     T = Transaction
-    return or_(T.id.like(plaidbank.PLAID_IDS), T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())
+    recent = T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat()
+    on_plaid = T.account_id.in_(select(Account.id).where(Account.provider == "plaid"))
+    return or_(T.id.like(plaidbank.PLAID_IDS), and_(recent, not_(on_plaid)))
 
 
 def pending_total(conn, account: dict, today: date) -> float:
