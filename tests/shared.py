@@ -145,13 +145,28 @@ class SchemaPool:
 
     @staticmethod
     def _fingerprint(conn, name) -> str:
-        """The schema's tables and columns, to tell whether a test changed them."""
+        """Everything about the schema a test could change and the next one would notice: its tables' columns (type,
+        nullable, default), constraints (keys, foreign keys, checks), indexes, sequences, functions and the revision
+        alembic_version records (a test that downgrades a migration changes the keys and the revision, not the
+        columns). The schema's own name is left out, so two schemas built the same way match."""
         from psycopg import sql
-        return conn.execute(sql.SQL(
-            "SELECT string_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod), ',' "
-            "ORDER BY c.relname, a.attnum) FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid "
-            "WHERE c.relnamespace = to_regnamespace({}) AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped"
-        ).format(sql.Literal(name))).fetchone()[0] or ""
+        ns = sql.SQL("to_regnamespace({})").format(sql.Literal(name))
+        parts = [
+            sql.SQL("SELECT c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) || ':' || "
+                    "a.attnotnull || ':' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') FROM pg_class c "
+                    "JOIN pg_attribute a ON a.attrelid = c.oid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum "
+                    "WHERE c.relnamespace = {} AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped").format(ns),
+            sql.SQL("SELECT t.relname || ':' || k.conname || ':' || pg_get_constraintdef(k.oid) FROM pg_constraint k "
+                    "JOIN pg_class t ON t.oid = k.conrelid WHERE k.connamespace = {}").format(ns),
+            sql.SQL("SELECT indexname || ':' || indexdef FROM pg_indexes WHERE schemaname = {}").format(sql.Literal(name)),
+            sql.SQL("SELECT 'sequence:' || relname FROM pg_class WHERE relnamespace = {} AND relkind = 'S'").format(ns),
+            sql.SQL("SELECT 'function:' || p.oid::regprocedure FROM pg_proc p WHERE p.pronamespace = {}").format(ns),
+        ]
+        rows = [r[0] for part in parts for r in conn.execute(part)]
+        if conn.execute(sql.SQL("SELECT to_regclass({})").format(sql.Literal(f'"{name}".alembic_version'))).fetchone()[0]:
+            rows += ["revision:" + r[0] for r in conn.execute(sql.SQL("SELECT version_num FROM {}").format(
+                sql.Identifier(name, "alembic_version")))]
+        return "\n".join(sorted(r.replace(name, "<schema>") for r in rows))
 
     def _make(self, name, path) -> None:
         from psycopg import sql

@@ -84,17 +84,41 @@ class SchemaPoolTests(unittest.TestCase):
         with db.session("/pool/gone.db") as conn:     # a late connection gets an empty schema of its own
             self.assertEqual(conn.execute(select(func.current_schema())).scalar(), db.schema_for("/pool/gone.db"))
 
-    def test_a_schema_whose_tables_a_test_changed_is_dropped_not_lent_again(self):
-        name = self.borrow("/pool/changed.db")
-        with db.session("/pool/changed.db") as conn:
-            conn.sa.exec_driver_sql("ALTER TABLE rules ADD COLUMN extra TEXT")
-        shared.POOL.release("/pool/changed.db")
-        self.assertNotIn(name, shared.POOL.free)
+    def test_a_schema_a_test_changed_is_dropped_not_lent_again(self):
+        from alembic import command
         from psycopg import sql
-        with shared._pg() as conn:
-            self.assertIsNone(conn.execute(sql.SQL("SELECT 1 FROM pg_namespace WHERE nspname = {}").format(
-                sql.Literal(name))).fetchone())
 
+        def downgrade(c):
+            command.downgrade(db.alembic_config(c), "0039")    # as test_backup does: same columns, no foreign keys
+
+        changes = {
+            "a column added": lambda c: c.exec_driver_sql("ALTER TABLE rules ADD COLUMN extra TEXT"),
+            "a default changed": lambda c: c.exec_driver_sql("ALTER TABLE accounts ALTER COLUMN currency SET DEFAULT 'EUR'"),
+            "an index dropped": lambda c: c.exec_driver_sql("DROP INDEX " + next(
+                ix["name"] for ix in sa.inspect(c).get_indexes("transactions"))),
+            "a foreign key dropped": lambda c: c.exec_driver_sql(
+                "ALTER TABLE transactions DROP CONSTRAINT fk_transactions_account_id"),
+            "only the revision changed": lambda c: c.exec_driver_sql("UPDATE alembic_version SET version_num = '0043'"),
+            "a migration downgraded": downgrade,
+        }
+        for i, (what, change) in enumerate(changes.items()):
+            with self.subTest(what):
+                path = f"/pool/changed-{i}.db"
+                name = self.borrow(path)
+                with db.engine(path).begin() as c:
+                    change(c)
+                shared.POOL.release(path)
+                self.assertNotIn(name, shared.POOL.free)
+                with shared._pg() as conn:
+                    self.assertIsNone(conn.execute(sql.SQL("SELECT 1 FROM pg_namespace WHERE nspname = {}").format(
+                        sql.Literal(name))).fetchone())
+
+    def test_a_schema_only_written_to_is_lent_again(self):
+        name = self.borrow("/pool/rows.db")
+        with db.session("/pool/rows.db") as conn:
+            conn.execute(insert(Account).values(id="a", name="A", kind="checking"))
+        shared.POOL.release("/pool/rows.db")
+        self.assertIn(name, shared.POOL.free)
 
 if __name__ == "__main__":
     unittest.main()

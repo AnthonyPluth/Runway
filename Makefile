@@ -63,7 +63,7 @@ test-timings:
 	rm -rf .timings
 	TIMINGS_DIR=.timings PYTHONPATH=. $(UNITTEST_PARALLEL_BASE) -j $(if $(DATABASE_URL),$(PG_JOBS),4) \
 		--result tests.timing_result.TimingResult $(TEST_ARGS) || status=$$?; \
-	$(PYTHON) tools/test_timings.py .timings; exit $${status:-0}
+	$(PYTHON) tools/test_timings.py .timings || report=$$?; exit $${status:-$${report:-0}}
 
 # Applies ruff's safe fixes (unused imports and the like); review the diff before committing.
 fix:
