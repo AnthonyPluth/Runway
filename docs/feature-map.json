@@ -157,6 +157,7 @@
       "tests": [
         "tests/test_api_handlers.py",
         "tests/test_api_queries.py",
+        "tests/test_api_validation.py",
         "tests/test_applock.py",
         "tests/test_backup.py",
         "tests/test_categorize.py",

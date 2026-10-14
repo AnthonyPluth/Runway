@@ -135,6 +135,8 @@ def old_api_state(conn):
         "connection_logos": brands.connection_logos(conn),
         "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
         "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
+        "ollama_url": db.get_setting(conn, sk.OLLAMA_URL),
+        "ai_configured": bool(categorize.ai_access(conn)),
         "llm_model": categorize.llm_model(conn),
         "card_ai_model": categorize.card_ai_model(conn),
         "llm_model_default": categorize.DEFAULT_MODEL, "card_ai_model_default": categorize.DEFAULT_CARD_MODEL,

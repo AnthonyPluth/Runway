@@ -11,7 +11,7 @@
   import { checkCls, fieldCls, helpCls, inputCls, linkCls, rowCls } from "./ui";
   import { act, errMsg } from "$lib/act";
 
-  // AI categorization through OpenRouter: the key, the two models, and whether new merchants get categorized during
+  // AI categorization through OpenRouter (a key) or your own Ollama server (its address, which replaces OpenRouter): the two models, and whether new merchants get categorized during
   // syncs. What's sent is said here, since it's your data leaving Runway (categorize.ask_model builds it). The model
   // fields are empty while they're the defaults (their placeholders), and emptying one goes back to its default.
   const st = $derived(app.state!);
@@ -25,6 +25,9 @@
     toast.success("Key saved"); await refreshState();
   }
   const shown = (model?: string, fallback?: string) => (model && model !== fallback ? model : "");
+  async function saveOllama(f: Field) {
+    await api("/api/settings", { method: "POST", body: { ollama_url: f.value.trim() } }); await refreshState();
+  }
   async function saveModel(key: "llm_model" | "card_ai_model", f: Field) {
     await api("/api/settings", { method: "POST", body: { [key]: f.value.trim() || null } }); await refreshState();
   }
@@ -42,11 +45,16 @@
   }
 </script>
 
-<ServiceRow name="AI categorization" purpose="OpenRouter · sorts new transactions into categories" on={!!st.has_api_key}
-  warn={!!st.has_api_key && !!st.last_llm_error}>
-  <p class={helpCls}>Get an <a class={linkCls} href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter key</a>.
-    OpenRouter gets each new merchant’s name and bank description, with one recent amount, date and account type; never account names or numbers.</p>
+<ServiceRow name="AI categorization" purpose={`${st.ollama_url ? "Ollama" : "OpenRouter"} · sorts new transactions into categories`} on={!!st.ai_configured}
+  warn={!!st.ai_configured && !!st.last_llm_error}>
+  <p class={helpCls}>Get an <a class={linkCls} href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter key</a>, or run
+    <a class={linkCls} href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> yourself and enter its address: with an address set, Ollama is asked instead and nothing leaves your network.
+    Either gets each new merchant’s name and bank description, with one recent amount, date and account type; never account names or numbers.
+    Ollama can’t search the web, so card lookups answer from the model’s memory, and its model has to be pulled on the server first (<code>ollama pull</code>).</p>
   <div class={rowCls}>
+    <label class={`${fieldCls} w-full sm:w-64`}>Ollama address
+      <input class={inputCls} value={st.ollama_url ?? ""} placeholder="http://localhost:11434" spellcheck="false" autocapitalize="off"
+        use:autosave={(f) => saveOllama(f)} /></label>
     <SecretInput label="OpenRouter API key" class="w-full sm:w-64" placeholder={st.has_api_key ? "Key saved" : "sk-or-…"} save={saveKey} />
     <label class={`${fieldCls} w-full sm:w-60`}>Categorization model
       <input class={inputCls} value={shown(st.llm_model, st.llm_model_default)} placeholder={st.llm_model_default} spellcheck="false"
@@ -59,7 +67,7 @@
   <label class={checkCls}><input type="checkbox" checked={!!st.auto_ai_on_sync} onchange={(e) => setFlag("auto_ai_on_sync", e)} />
     Categorize new merchants during each sync when the AI is confident</label>
   <label class={checkCls}><input type="checkbox" checked={st.churn_ai_web !== false} onchange={(e) => setFlag("churn_ai_web", e)} />
-    Search the web when filling in a card with AI (Churning)</label>
+    Search the web when filling in a card with AI (Churning; not with Ollama)</label>
   {#if st.last_llm_error}<ProblemNote text="The last AI request failed." detail={st.last_llm_error} />{/if}
-  {#if st.has_api_key}<AiLogTable />{/if}
+  {#if st.ai_configured}<AiLogTable />{/if}
 </ServiceRow>

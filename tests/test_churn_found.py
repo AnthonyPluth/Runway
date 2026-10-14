@@ -312,6 +312,29 @@ class ChatRequestTests(DbCase):
         for private in ("acct-secret-1", "Alex", "4321", "8814", "sk-or-test"):
             self.assertNotIn(private, json.dumps(body))
 
+    def test_ollama_gets_a_plain_chat_request_to_your_server_and_no_web_search(self):
+        db.set_setting(self.c, sk.OPENROUTER_API_KEY, None)
+        api_state.api_settings(self.c, {}, {"ollama_url": "gpu-box:11434/"})
+        self.assertEqual(db.get_setting(self.c, sk.OLLAMA_URL), "http://gpu-box:11434")
+        with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
+            out = churn_found.suggest(self.c, "chase", "Sapphire Reserve")
+        (req,), _ = urlopen.call_args
+        body = self.sent(urlopen)
+        self.assertEqual(req.full_url, "http://gpu-box:11434/v1/chat/completions")
+        self.assertNotIn("Authorization", req.headers)
+        self.assertEqual(body["model"], categorize.OLLAMA_MODEL)
+        for absent in ("tools", "plugins", "provider"):
+            self.assertNotIn(absent, body)
+        self.assertFalse(out["web"])   # it can't search, whatever Settings says
+
+    def test_an_unreachable_ollama_server_says_so(self):
+        api_state.api_settings(self.c, {}, {"ollama_url": "http://localhost:11434"})
+        with mock.patch("runway.tls.urlopen", side_effect=urllib.error.URLError("Connection refused")):
+            with self.assertRaises(RuntimeError) as cm:
+                churn_found.suggest(self.c, "chase", "Sapphire Reserve")
+        self.assertIn("Ollama isn't reachable at http://localhost", str(cm.exception))   # (the error text is scrubbed: no port)
+        self.assertIn("Connection refused", str(cm.exception))
+
     def test_a_model_without_tools_gets_the_web_plugin(self):
         refused = urllib.error.HTTPError("u", 404, "Not Found", {}, io.BytesIO(b'{"error":{"message":"No endpoints found that support tool use"}}'))
         with mock.patch("runway.tls.urlopen", side_effect=[refused, _response(self.REPLY)]) as urlopen:

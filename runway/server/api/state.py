@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, date, datetime
+from urllib.parse import urlsplit
 
 from sqlalchemy import delete, func, select
 
@@ -30,16 +31,19 @@ def api_state(conn, _q, _b):
     s = db.get_settings(conn, STATE_SETTINGS)
     present = {k for k in SECRETS_SET if s[k]}
     connected = bank_configured(conn)
+    default_llm, default_card = (categorize.OLLAMA_MODEL,) * 2 if s[sk.OLLAMA_URL] else (categorize.DEFAULT_MODEL, categorize.DEFAULT_CARD_MODEL)
     return {
         "connected": connected,
         "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
         "connection_logos": brands.connection_logos(conn),   # each bank connection's, by its institution's name
         "simplefin": sk.SIMPLEFIN_ACCESS_URL in present,
         "has_api_key": sk.OPENROUTER_API_KEY in present,
-        "llm_model": s[sk.LLM_MODEL] or categorize.DEFAULT_MODEL,             # (categorize.llm_model)
-        "card_ai_model": s[sk.CARD_AI_MODEL] or categorize.DEFAULT_CARD_MODEL,   # (categorize.card_ai_model)
+        "ollama_url": s[sk.OLLAMA_URL],   # set: AI requests go to this Ollama server instead of OpenRouter
+        "ai_configured": bool(s[sk.OLLAMA_URL] or sk.OPENROUTER_API_KEY in present),   # (categorize.ai_access)
+        "llm_model": s[sk.LLM_MODEL] or default_llm,             # (categorize.llm_model)
+        "card_ai_model": s[sk.CARD_AI_MODEL] or default_card,   # (categorize.card_ai_model)
         # what an empty model field means, for Settings to show as its placeholder
-        "llm_model_default": categorize.DEFAULT_MODEL, "card_ai_model_default": categorize.DEFAULT_CARD_MODEL,
+        "llm_model_default": default_llm, "card_ai_model_default": default_card,
         "last_sync_ok": with_offset(s[sk.LAST_SYNC_OK]),
         "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
         "sync_warnings": json.loads(s[sk.LAST_SYNC_WARNINGS] or "[]"),   # what banks said on that sync
@@ -140,7 +144,7 @@ def api_override_delete(conn, _q, body):
 # The keys api_state only says are set (when they can be read): the bank connection and the services' API keys.
 SECRETS_SET = (sk.SIMPLEFIN_ACCESS_URL, sk.OPENROUTER_API_KEY, sk.REALIE_API_KEY, sk.FINNHUB_API_KEY, sk.LOGODEV_TOKEN)
 # The settings api_state reads, in one go.
-STATE_SETTINGS = (sk.LLM_MODEL, sk.CARD_AI_MODEL, sk.LAST_SYNC_OK, sk.LAST_SYNC_WARNINGS, sk.LAST_LLM_ERROR, sk.LAST_BACKUP,
+STATE_SETTINGS = (sk.OLLAMA_URL, sk.LLM_MODEL, sk.CARD_AI_MODEL, sk.LAST_SYNC_OK, sk.LAST_SYNC_WARNINGS, sk.LAST_LLM_ERROR, sk.LAST_BACKUP,
                   sk.HORIZON_DAYS, sk.PRIMARY_ACCOUNT, sk.AUTO_AI_ON_SYNC, sk.CHURN_AI_WEB, sk.SETUP_DISMISSED, *SECRETS_SET)
 
 
@@ -181,6 +185,14 @@ def api_settings(conn, _q, body):
     if "openrouter_api_key" in body:
         key = text(body.get("openrouter_api_key"), "openrouter_api_key").strip()
         db.set_setting(conn, sk.OPENROUTER_API_KEY, key or None)
+        db.set_setting(conn, sk.LAST_LLM_ERROR, None)
+    if "ollama_url" in body:
+        url = text(body.get("ollama_url"), "ollama_url").strip()
+        if url and not url.lower().startswith(("http://", "https://")):
+            url = "http://" + url
+        if url and not urlsplit(url).hostname:
+            raise ApiError("Enter the Ollama server's address, like http://localhost:11434")
+        db.set_setting(conn, sk.OLLAMA_URL, url.rstrip("/") or None)
         db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "llm_model" in body:
         db.set_setting(conn, sk.LLM_MODEL, text(body.get("llm_model"), "llm_model").strip() or None)

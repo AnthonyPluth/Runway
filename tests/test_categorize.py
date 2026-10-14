@@ -255,6 +255,23 @@ class CategorizeTests(LedgerCase):
         categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append(m) or "[]")
         self.assertEqual(seen, ["openai/gpt-4o-mini"])
 
+    def test_ollama_is_asked_instead_of_openrouter_and_needs_no_key(self):
+        self.tx("cc", "2026-09-04", -40.0, "MYSTERY MERCHANT 123")
+        db.set_setting(self.conn, sk.OPENROUTER_API_KEY, "k")
+        db.set_setting(self.conn, sk.OLLAMA_URL, "http://localhost:11434")
+        seen = []
+        categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append((k, m)) or "[]")
+        self.assertEqual(seen, [("http://localhost:11434", categorize.OLLAMA_MODEL)])
+        self.assertIsInstance(seen[0][0], categorize.OllamaServer)
+        db.set_setting(self.conn, sk.OPENROUTER_API_KEY, None)   # no OpenRouter key: Ollama still answers
+        self.assertTrue(categorize.ai_access(self.conn))
+        db.set_setting(self.conn, sk.OLLAMA_URL, None)
+        self.assertIsNone(categorize.ai_access(self.conn))
+
+    def test_ollamas_address_may_be_given_in_any_of_its_forms(self):
+        for given in ("localhost:11434", "http://localhost:11434/", "http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions"):
+            self.assertEqual(categorize.ollama_chat_url(given), "http://localhost:11434/v1/chat/completions", given)
+
     def test_one_question_per_merchant_and_history_reuse(self):
         for d in range(5):
             self.tx("cc", f"2026-09-0{d + 1}", -3.0, "MTA*NYCT PAYGO")

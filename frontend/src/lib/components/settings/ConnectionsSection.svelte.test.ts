@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.mocked(api).mockReset(); vi.mocked(reload).mockClear(); vi.mocked(connectPlaid).mockClear(); vi.mocked(toast.error).mockClear();
   vi.mocked(refreshState).mockReset();
   state.simplefin = false; state.last_log = null; state.sync_warnings = []; state.connected = false; statuses = {};
-  for (const k of ["has_api_key", "finnhub_configured", "realie_configured", "logodev_configured", "last_llm_error", "llm_model",
+  for (const k of ["has_api_key", "ai_configured", "ollama_url", "finnhub_configured", "realie_configured", "logodev_configured", "last_llm_error", "llm_model",
     "llm_model_default", "card_ai_model", "card_ai_model_default"]) delete state[k];
 });
 
@@ -252,7 +252,7 @@ describe("Settings → Connections", () => {
 
 describe("Settings → Connections, the optional services", () => {
   it("are collapsed, and say On or Not set for each", async () => {
-    state.connected = true; state.has_api_key = true; state.finnhub_configured = true;
+    state.connected = true; state.has_api_key = true; state.ai_configured = true; state.finnhub_configured = true;
     serve(status());
     render(ConnectionsSection);
     for (const name of ["AI categorization", "Home values", "Live stock prices", "Merchant and bank logos"]) expect(card(name).open).toBe(false);
@@ -291,7 +291,7 @@ describe("Settings → Connections, the optional services", () => {
   });
 
   it("need attention when they hold an error, opening with it said plainly and the service's words under Details", async () => {
-    state.connected = true; state.has_api_key = true; state.finnhub_configured = true; state.logodev_configured = true;
+    state.connected = true; state.has_api_key = true; state.ai_configured = true; state.finnhub_configured = true; state.logodev_configured = true;
     state.last_llm_error = "401 Unauthorized from upstream";
     statuses = { "/api/finnhub/status": { configured: true, active: true, connected: false, symbols: 0, limit: 50, error: "socket closed 1006" },
       "/api/logodev/status": { plaid: 0, logodev: 2, unknown: 0, waiting: 0, last_error: "HTTP 403", last_error_name: null, searchable: false, fetching: false } };
@@ -323,7 +323,7 @@ describe("Settings → Connections, the optional services", () => {
   });
 
   it("say what the AI is sent, link to a key, and show the default models as placeholders", async () => {
-    state.connected = true; state.has_api_key = true;
+    state.connected = true; state.has_api_key = true; state.ai_configured = true;
     Object.assign(state, { llm_model: "vendor/default-a", llm_model_default: "vendor/default-a", card_ai_model: "vendor/mine", card_ai_model_default: "vendor/default-b" });
     serve(status());
     render(ConnectionsSection);
@@ -339,6 +339,19 @@ describe("Settings → Connections, the optional services", () => {
     await userEvent.clear(cardModel);
     await userEvent.tab();
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { card_ai_model: null } }));
+  });
+
+  it("save an Ollama address, which turns the AI on without a key and names Ollama", async () => {
+    state.connected = true;
+    serve(status());
+    render(ConnectionsSection);
+    const ai = within(card("AI categorization"));
+    expect(ai.queryByText(/Ollama · sorts/)).toBeNull();
+    const address = ai.getByLabelText("Ollama address");
+    expect(address).toHaveValue("");
+    await userEvent.type(address, "http://localhost:11434");
+    await userEvent.tab();
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { ollama_url: "http://localhost:11434" } }));
   });
 
   it("puts an AI switch back when saving it fails", async () => {

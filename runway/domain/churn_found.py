@@ -380,11 +380,11 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
     product = _MARKS.sub("", _strip_masks(" ".join(str(product or "").split())))[:80].strip()
     if not product:
         raise churning.ChurnError("Enter the card's name first")
-    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    api_key = categorize.ai_access(conn)
     if not api_key:
-        raise churning.ChurnError("Add an OpenRouter API key in Settings first.")
+        raise churning.ChurnError("Add an OpenRouter API key or an Ollama address in Settings first.")
     model = categorize.card_ai_model(conn)
-    web = web_search_on(conn)
+    web = web_search_on(conn) and not isinstance(api_key, categorize.OllamaServer)   # Ollama has no web search
     currencies = {k: v["name"] for k, v in churning.values(conn).items()}
     categories = [c["name"] for c in churning.spending_categories(conn)]
     prompt = build_prompt(issuer, product, currencies, categories, web)

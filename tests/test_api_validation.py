@@ -62,6 +62,17 @@ class FlagTests(DbCase):
         row = self.c.execute(select(Category.is_income, Category.is_transfer).where(Category.name == "Side Gig")).fetchone()
         self.assertEqual(tuple(row), (0, 0))
 
+    def test_ollama_address(self):
+        state.api_settings(self.c, {}, {"ollama_url": " localhost:11434/ "})
+        self.assertEqual(db.get_setting(self.c, sk.OLLAMA_URL), "http://localhost:11434")
+        st = state.api_state(self.c, {}, None)
+        self.assertEqual((st["ollama_url"], st["ai_configured"], st["has_api_key"]), ("http://localhost:11434", True, False))
+        with self.assertRaises(ApiError):
+            state.api_settings(self.c, {}, {"ollama_url": "http://"})
+        self.assertEqual(db.get_setting(self.c, sk.OLLAMA_URL), "http://localhost:11434")   # the bad one saved nothing
+        state.api_settings(self.c, {}, {"ollama_url": ""})
+        self.assertFalse(state.api_state(self.c, {}, None)["ai_configured"])
+
     def test_settings_switches(self):
         state.api_settings(self.c, {}, {"auto_ai_on_sync": "false", "churn_ai_web": "no", "setup_dismissed": "0"})
         self.assertEqual(db.get_setting(self.c, sk.AUTO_AI_ON_SYNC), "0")

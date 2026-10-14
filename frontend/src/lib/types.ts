@@ -28,6 +28,10 @@ export interface AppState {
   connection_logos?: Record<string, string | null>;
   simplefin?: boolean;
   has_api_key?: boolean;
+  /** An Ollama server's address: set, AI requests go there instead of OpenRouter. */
+  ollama_url?: string | null;
+  /** An OpenRouter key or an Ollama address is set: the AI can be asked. */
+  ai_configured?: boolean;
   llm_model?: string;
   card_ai_model?: string;
   /** The models an empty model field stands for. */

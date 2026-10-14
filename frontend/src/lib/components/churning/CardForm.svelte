@@ -106,8 +106,8 @@
     changed = true;
   }
 
-  // "Fill in the rest" (when an OpenRouter key is set): see cardSuggest.svelte.ts.
-  const canSuggest = $derived(!!app.state?.has_api_key);
+  // "Fill in the rest" (when an OpenRouter key or an Ollama address is set): see cardSuggest.svelte.ts.
+  const canSuggest = $derived(!!app.state?.ai_configured);
   const ai = new CardSuggest({ get card() { return c; }, v, rates, open: form.open, ratesBody, saved: () => { changed = true; }, onchanged: () => onchanged() });
 
   const currencyName = $derived(d.currencies.find((x) => x.key === v.currency)?.name ?? "");
