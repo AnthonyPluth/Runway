@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.mocked(api).mockReset(); vi.mocked(reload).mockClear(); vi.mocked(connectPlaid).mockClear(); vi.mocked(toast.error).mockClear();
   vi.mocked(refreshState).mockReset();
   state.simplefin = false; state.last_log = null; state.sync_warnings = []; state.connected = false; statuses = {};
-  for (const k of ["has_api_key", "ai_configured", "ollama_url", "finnhub_configured", "realie_configured", "logodev_configured", "last_llm_error", "llm_model",
+  for (const k of ["has_api_key", "ai_configured", "ai_provider", "ollama_url", "ollama_model", "ollama_model_default", "finnhub_configured", "realie_configured", "logodev_configured", "last_llm_error", "llm_model",
     "llm_model_default", "card_ai_model", "card_ai_model_default"]) delete state[k];
 });
 
@@ -341,15 +341,28 @@ describe("Settings → Connections, the optional services", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { card_ai_model: null } }));
   });
 
-  it("save an Ollama address, which turns the AI on without a key and names Ollama", async () => {
-    state.connected = true;
+  it("choose Ollama as the provider, which swaps the key and OpenRouter models for its address and model", async () => {
+    state.connected = true; state.has_api_key = true; state.ai_configured = true;
+    Object.assign(state, { llm_model: "vendor/mine", llm_model_default: "vendor/default-a", ollama_model: "llama3.1", ollama_model_default: "llama3.1" });
     serve(status());
     render(ConnectionsSection);
     const ai = within(card("AI categorization"));
-    expect(ai.queryByText(/Ollama · sorts/)).toBeNull();
-    const address = ai.getByLabelText("Ollama address");
-    expect(address).toHaveValue("");
-    await userEvent.type(address, "http://localhost:11434");
+    expect(ai.queryByLabelText("Ollama address")).toBeNull();
+    await userEvent.selectOptions(ai.getByLabelText("Provider"), "ollama");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { ai_provider: "ollama" } }));
+  });
+
+  it("with Ollama chosen, show its address and model and hide OpenRouter's", async () => {
+    state.connected = true;
+    Object.assign(state, { ai_provider: "ollama", ollama_url: "", ollama_model: "llama3.1", ollama_model_default: "llama3.1" });
+    serve(status());
+    render(ConnectionsSection);
+    const ai = within(card("AI categorization"));
+    expect(ai.queryByLabelText("OpenRouter API key")).toBeNull();
+    expect(ai.queryByLabelText("Categorization model")).toBeNull();
+    expect(ai.queryByText(/Search the web when filling in a card/)).toBeNull();
+    expect(ai.getByLabelText("Model")).toHaveAttribute("placeholder", "llama3.1");
+    await userEvent.type(ai.getByLabelText("Ollama address"), "http://localhost:11434");
     await userEvent.tab();
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { ollama_url: "http://localhost:11434" } }));
   });

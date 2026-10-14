@@ -12,7 +12,7 @@ sidebar:
 | [SimpleFIN Bridge](https://beta-bridge.simplefin.org) | Balances, transactions and investment positions from your bank and brokerages | SimpleFIN or Plaid |
 | [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | SimpleFIN or Plaid; card statements can be entered by hand instead |
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to OpenRouter’s free router) and card lookups (defaults to Claude Haiku) | Optional |
-| [Ollama](https://ollama.com) (your own server) | The same AI requests, in place of OpenRouter, when its address is set in Settings (no web search for card lookups) | Optional |
+| [Ollama](https://ollama.com) (your own server) | The same AI requests, in place of OpenRouter, when it is chosen as the provider in Settings (no web search for card lookups) | Optional |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
 | [Finnhub](https://finnhub.io) | Real-time stock and ETF trades for the live prices (WebSocket; the free plan covers 50 tickers, for personal use) | Optional |
 | [Realie](https://www.realie.ai) | Automated home value estimates | Optional |

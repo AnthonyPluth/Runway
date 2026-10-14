@@ -190,12 +190,17 @@ class OllamaServer(str):
     as it is, so there is one path for both)."""
 
 
+def using_ollama(conn) -> bool:
+    """Whether Settings has the AI go to your Ollama server instead of OpenRouter."""
+    return db.get_setting(conn, sk.AI_PROVIDER) == "ollama"
+
+
 def ai_access(conn) -> str | None:
-    """What asks the model: your Ollama server when its address is set (Settings), else the OpenRouter key; None when
-    neither is, and no AI request is made."""
-    url = db.get_setting(conn, sk.OLLAMA_URL)
-    if url:
-        return OllamaServer(url)
+    """What asks the model: your Ollama server's address when that's the provider chosen in Settings, else the
+    OpenRouter key; None when the chosen one isn't set up, and no AI request is made."""
+    if using_ollama(conn):
+        url = db.get_setting(conn, sk.OLLAMA_URL)
+        return OllamaServer(url) if url else None
     return db.get_setting(conn, sk.OPENROUTER_API_KEY) or None
 
 
@@ -572,23 +577,26 @@ def log_call(conn, purpose, model, merchants, answered, new_cats, ok, seconds, m
     conn.execute(delete(AiLog).where(AiLog.id.not_in(newest)))
 
 
-def default_models(conn) -> tuple[str, str]:
-    """What an empty model field means: (categorization, card lookup)."""
-    if db.get_setting(conn, sk.OLLAMA_URL):
-        return OLLAMA_MODEL, OLLAMA_MODEL
-    return DEFAULT_MODEL, DEFAULT_CARD_MODEL
+def ollama_model(conn) -> str:
+    """The model asked on your Ollama server (for categorizing and for card lookups): the one set in Settings, else the
+    default. The OpenRouter model ids saved in Settings are never sent to it."""
+    return db.get_setting(conn, sk.OLLAMA_MODEL) or OLLAMA_MODEL
 
 
 def llm_model(conn) -> str:
-    """The model for categorizing (transactions and order items): the one set in Settings, else the free router (or
-    Ollama's default, when it's your Ollama server that's asked)."""
-    return db.get_setting(conn, sk.LLM_MODEL) or default_models(conn)[0]
+    """The model for categorizing (transactions and order items): the one set in Settings, else the free router
+    (on Ollama, its one model)."""
+    if using_ollama(conn):
+        return ollama_model(conn)
+    return db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
 
 
 def card_ai_model(conn) -> str:
     """The model for Churning's card lookups: the one set in Settings, else a small paid model that searches the web reliably
-    (or Ollama's default, when it's your Ollama server that's asked)."""
-    return db.get_setting(conn, sk.CARD_AI_MODEL) or default_models(conn)[1]
+    (on Ollama, its one model)."""
+    if using_ollama(conn):
+        return ollama_model(conn)
+    return db.get_setting(conn, sk.CARD_AI_MODEL, DEFAULT_CARD_MODEL) or DEFAULT_CARD_MODEL
 
 
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:

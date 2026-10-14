@@ -314,7 +314,7 @@ class ChatRequestTests(DbCase):
 
     def test_ollama_gets_a_plain_chat_request_to_your_server_and_no_web_search(self):
         db.set_setting(self.c, sk.OPENROUTER_API_KEY, None)
-        api_state.api_settings(self.c, {}, {"ollama_url": "gpu-box:11434/"})
+        api_state.api_settings(self.c, {}, {"ai_provider": "ollama", "ollama_url": "gpu-box:11434/"})
         self.assertEqual(db.get_setting(self.c, sk.OLLAMA_URL), "http://gpu-box:11434")
         with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
             out = churn_found.suggest(self.c, "chase", "Sapphire Reserve")
@@ -328,7 +328,7 @@ class ChatRequestTests(DbCase):
         self.assertFalse(out["web"])   # it can't search, whatever Settings says
 
     def test_an_unreachable_ollama_server_says_so(self):
-        api_state.api_settings(self.c, {}, {"ollama_url": "http://localhost:11434"})
+        api_state.api_settings(self.c, {}, {"ai_provider": "ollama", "ollama_url": "http://localhost:11434"})
         with mock.patch("runway.tls.urlopen", side_effect=urllib.error.URLError("Connection refused")):
             with self.assertRaises(RuntimeError) as cm:
                 churn_found.suggest(self.c, "chase", "Sapphire Reserve")

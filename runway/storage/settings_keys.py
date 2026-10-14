@@ -43,7 +43,9 @@ def plaid_stmt_note(item_id: str) -> str:
 
 # AI categorizing (OpenRouter, or your own Ollama server)
 OPENROUTER_API_KEY = "openrouter_api_key"
-OLLAMA_URL = "ollama_url"   # an Ollama server's address; when set it's used instead of OpenRouter (categorize.ai_access)
+AI_PROVIDER = "ai_provider"   # "openrouter" (unset) or "ollama": who the AI requests go to (categorize.ai_access)
+OLLAMA_URL = "ollama_url"   # the Ollama server's address, used while AI_PROVIDER is "ollama"
+OLLAMA_MODEL = "ollama_model"   # its model (categorizing and card lookups); unset means categorize.OLLAMA_MODEL
 LLM_MODEL = "llm_model"
 CARD_AI_MODEL = "card_ai_model"   # Churning's card lookups; unset means categorize.DEFAULT_CARD_MODEL
 LAST_LLM_ERROR = "last_llm_error"
