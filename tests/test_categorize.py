@@ -1,6 +1,7 @@
 """Categorizing transactions: payees, the AI categorizer, categories and their budgets, and reports."""
 import json
 import unittest
+from unittest import mock
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
@@ -213,6 +214,20 @@ class BrandNameApiTests(LedgerCase):
         self.assertEqual(categorize.kept_bank_names(self.conn), set())
         self.call("chk|0", use="bank", all=True)
         self.assertEqual(categorize.kept_bank_names(self.conn), {"Amazon"})
+
+
+class ChatTimeoutTests(unittest.TestCase):
+    def _timeout(self, key):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        with mock.patch.object(categorize.tls, "urlopen", return_value=reply) as opened:
+            categorize.chat(key, "m", "hi")
+        return opened.call_args.kwargs["timeout"]
+
+    def test_ollama_waits_far_longer_than_openrouter(self):
+        self.assertEqual(self._timeout(categorize.OllamaServer("http://localhost:11434")), categorize.OLLAMA_TIMEOUT)
+        self.assertEqual(self._timeout("k"), categorize.OPENROUTER_TIMEOUT)
+        self.assertGreater(categorize.OLLAMA_TIMEOUT, categorize.OPENROUTER_TIMEOUT)
 
 
 class CategorizeTests(LedgerCase):
