@@ -13,7 +13,6 @@ from sqlalchemy.orm import aliased
 from ...domain import categories, categorize, forecast, merchants, retail, splits
 from ...storage import db
 from ... import validate
-from ...storage import settings_keys as sk
 from ...storage.models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
 from ...money import CENT
 from ..common import ApiError, _month_range, query_int, row_id, text
@@ -634,8 +633,8 @@ def api_tx_accept(conn, _q, _b, tx_id):
 
 
 def api_ai_suggest(conn, _q, body):
-    if not db.get_setting(conn, sk.OPENROUTER_API_KEY):
-        raise ApiError("Add an OpenRouter API key in Settings first.")
+    if not categorize.ai_access(conn):
+        raise ApiError("Add an OpenRouter API key or an Ollama address in Settings first.")
     skip = body.get("skip") if isinstance(body, dict) else None
     try:
         return categorize.suggest_for_review(conn, skip=[str(m) for m in skip[:1000]] if isinstance(skip, list) else None)

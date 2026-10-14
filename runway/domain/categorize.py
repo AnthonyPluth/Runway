@@ -1,4 +1,4 @@
-"""Categorization: payee cleanup, built-in heuristics, user rules, optional AI (via OpenRouter), and a review queue."""
+"""Categorization: payee cleanup, built-in heuristics, user rules, optional AI (via OpenRouter or Ollama), and a review queue."""
 from __future__ import annotations
 
 import json
@@ -23,6 +23,7 @@ REVIEW_THRESHOLD = 0.85
 DEFAULT_MODEL = "openrouter/free"  # OpenRouter's free-models router; any OpenRouter model id works
 DEFAULT_CARD_MODEL = "anthropic/claude-haiku-4.5"  # card lookups use OpenRouter's web-search tool, which it calls reliably; cheap
 PAID_HINT_MODEL = "anthropic/claude-haiku-4.5"   # what to suggest when a free model's reply is unusable
+OLLAMA_MODEL = "llama3.1"   # what an empty model field means with Ollama (the model has to be pulled on the server)
 OPENROUTER_URL = os.environ.get("RUNWAY_OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 
 # Processor prefixes that hide the real merchant name.
@@ -182,7 +183,36 @@ def rule_key(tx: dict) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------
-# AI categorization (OpenRouter)
+# AI categorization (OpenRouter or Ollama)
+
+class OllamaServer(str):
+    """An Ollama server's address, passed to `chat` where OpenRouter's API key goes (callers hand `ai_access`'s answer on
+    as it is, so there is one path for both)."""
+
+
+def using_ollama(conn) -> bool:
+    """Whether Settings has the AI go to your Ollama server instead of OpenRouter."""
+    return db.get_setting(conn, sk.AI_PROVIDER) == "ollama"
+
+
+def ai_access(conn) -> str | None:
+    """What asks the model: your Ollama server's address when that's the provider chosen in Settings, else the
+    OpenRouter key; None when the chosen one isn't set up, and no AI request is made."""
+    if using_ollama(conn):
+        url = db.get_setting(conn, sk.OLLAMA_URL)
+        return OllamaServer(url) if url else None
+    return db.get_setting(conn, sk.OPENROUTER_API_KEY) or None
+
+
+def ollama_chat_url(base: str) -> str:
+    """The chat completions address of an Ollama server given as host:port or as its base address (with or without /v1)."""
+    base = base.strip().rstrip("/")
+    if "://" not in base:
+        base = "http://" + base
+    if base.endswith("/v1/chat/completions"):
+        return base
+    return base.removesuffix("/v1") + "/v1/chat/completions"
+
 
 def _category_names(conn) -> list[str]:
     return conn.execute(select(Category.name).order_by(Category.name)).scalars()
@@ -331,25 +361,34 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
 
 
 def chat(api_key: str, model: str, prompt: str, web: str | None = None, private: bool = False) -> tuple[str, list[str]]:
-    """Ask a model through OpenRouter's chat completions API: its reply, and the web pages it cites. `web` is None (no
-    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model.
+    """Ask a model through OpenRouter's chat completions API, or an Ollama server's when `api_key` is an OllamaServer
+    (`ai_access`): its reply, and the web pages it cites. `web` is None (no search), "tool" or "plugin" (see WEB_RESULTS;
+    Ollama has no web search). Raises ToolsUnsupported when "tool" can't be used with the model.
     `private` asks OpenRouter for providers that don't collect what they're sent (provider.data_collection "deny"):
-    for anything about your money. A model with none of them says so (NO_PRIVATE_PROVIDER)."""
-    if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
-        raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
+    for anything about your money. A model with none of them says so (NO_PRIVATE_PROVIDER). Ollama is your own server."""
+    ollama = isinstance(api_key, OllamaServer)
+    name = "Ollama" if ollama else "OpenRouter"
+    if ollama:
+        if web:
+            raise RuntimeError("Ollama can't search the web")
+        url = ollama_chat_url(api_key)
+    else:
+        url = OPENROUTER_URL
+    if not url.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
+        raise RuntimeError("The AI address must be an http(s) address.")
     body = json.dumps({
         "model": model,
         "max_tokens": 4096,
         "temperature": 0,
         "messages": [{"role": "user", "content": prompt}],
         **_web_request(web),
-        **({"provider": {"data_collection": "deny"}} if private else {}),
+        **({"provider": {"data_collection": "deny"}} if private and not ollama else {}),
     }).encode()
     req = urllib.request.Request(
-        OPENROUTER_URL,
+        url,
         data=body,
         method="POST",
-        headers={
+        headers={"Content-Type": "application/json"} if ollama else {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "http://localhost:8765",
@@ -357,23 +396,28 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
         },
     )
     # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
-    with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0, **({"web_search": web} if web else {})) as span:
+    with monitoring.ai_call(model, prompt, provider=name.lower(), max_tokens=4096, temperature=0,
+                            **({"web_search": web} if web else {})) as span:
         try:
             with tls.urlopen(req, timeout=120, allow_http=True) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
-            if private and "data policy" in detail.lower():
+            if private and not ollama and "data policy" in detail.lower():
                 raise RuntimeError(f"{NO_PRIVATE_PROVIDER} (OpenRouter HTTP {e.code})") from e
             raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
-                f"OpenRouter HTTP {e.code}: {detail}") from e
+                f"{name} HTTP {e.code}: {detail}") from e
+        except urllib.error.URLError as e:
+            if ollama:   # nothing answered: say which address, so a wrong host or port is easy to spot
+                raise RuntimeError(f"Ollama isn't reachable at {api_key}: {e.reason}") from e
+            raise
         if data.get("error"):
             err = data["error"]
-            if private and "data policy" in str(err).lower():
+            if private and not ollama and "data policy" in str(err).lower():
                 raise RuntimeError(NO_PRIVATE_PROVIDER)
             code = err.get("code") if isinstance(err, dict) else None
             raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
-                f"OpenRouter: {err}")
+                f"{name}: {err}")
         message = (data.get("choices") or [{}])[0].get("message") or {}
         content = message.get("content") or ""
         if isinstance(content, list):  # some providers return content parts
@@ -400,7 +444,7 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         else:
             leftover.append(tx)
 
-    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    api_key = ai_access(conn)
     auto_ai = (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1"
     if leftover and use_ai and auto_ai and api_key:
         _categorize_with_ai(conn, leftover, caller, counts)
@@ -533,20 +577,32 @@ def log_call(conn, purpose, model, merchants, answered, new_cats, ok, seconds, m
     conn.execute(delete(AiLog).where(AiLog.id.not_in(newest)))
 
 
+def ollama_model(conn) -> str:
+    """The model asked on your Ollama server (for categorizing and for card lookups): the one set in Settings, else the
+    default. The OpenRouter model ids saved in Settings are never sent to it."""
+    return db.get_setting(conn, sk.OLLAMA_MODEL) or OLLAMA_MODEL
+
+
 def llm_model(conn) -> str:
-    """The model for categorizing (transactions and order items): the one set in Settings, else the free router."""
+    """The model for categorizing (transactions and order items): the one set in Settings, else the free router
+    (on Ollama, its one model)."""
+    if using_ollama(conn):
+        return ollama_model(conn)
     return db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
 
 
 def card_ai_model(conn) -> str:
-    """The model for Churning's card lookups: the one set in Settings, else a small paid model that searches the web reliably."""
+    """The model for Churning's card lookups: the one set in Settings, else a small paid model that searches the web reliably
+    (on Ollama, its one model)."""
+    if using_ollama(conn):
+        return ollama_model(conn)
     return db.get_setting(conn, sk.CARD_AI_MODEL, DEFAULT_CARD_MODEL) or DEFAULT_CARD_MODEL
 
 
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:
     """Ask the model for one category per group. Doesn't write anything except the last error message.
     Call with no write transaction open: requests can take a while."""
-    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    api_key = ai_access(conn)
     empty = (None, 0.0, None) if allow_new else (None, 0.0)
     if not api_key or not groups:
         return [empty] * len(groups)
@@ -578,7 +634,8 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 if extract_json_array(reply) is None:
                     snippet = " ".join((reply or "(empty reply)").split())[:160]
                     raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                     f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings.")
+                                     + ("Small models often do this; try a larger one in Settings." if isinstance(api_key, OllamaServer)
+                                        else f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings."))
                 results = parse_ai_reply(reply, categories, allow_new)
                 db.set_setting(conn, sk.LAST_LLM_ERROR, None)
                 answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
@@ -586,7 +643,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 log_call(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
                          f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
                          reply)
-            except Exception as e:  # network or API error (its text quotes OpenRouter's answer: kept scrubbed)
+            except Exception as e:  # network or API error (its text quotes the provider's answer: kept scrubbed)
                 said = monitoring.public_text(str(e))
                 db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
                 log_call(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)

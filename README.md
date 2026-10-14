@@ -36,7 +36,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **Bank sync, account by account.** SimpleFIN or Plaid for each account, once a day and on demand. Switching providers keeps your history.
 - **Recurring.** Paychecks, bills and subscriptions on any schedule, matched to transactions automatically, with a flag for payments that didn't happen.
 - **Transactions and rules.** Categories with subcategories, split transactions, bulk editing, a review queue, and rules that categorize, rename or split by merchant, amount or account.
-- **Optional AI categorization** through OpenRouter, with confidence scores and a log of every call.
+- **Optional AI categorization** through OpenRouter or your own Ollama server, with confidence scores and a log of every call.
 - **Store orders.** A browser extension reads your Amazon, Target and Costco orders and splits each card charge by what you bought.
 - **Budgets and reports.** Monthly budgets with rollover, a cash-flow Sankey, spending over time, merchants, income against spending, and a drill-down breakdown.
 - **Net worth, investments and equity.** Accounts, homes and vehicles minus debts, recorded daily; brokerage performance with live prices; stock options, RSUs and Carta grants with vesting schedules.

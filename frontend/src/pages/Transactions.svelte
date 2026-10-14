@@ -199,7 +199,7 @@
   {#if !review && app.state?.connected}
     <Button variant="outline" onclick={openAdd} title="Add a transaction by hand"><Plus />Add</Button>
   {/if}
-  {#if review && app.state?.has_api_key}
+  {#if review && app.state?.ai_configured}
     {#if txs.list && txs.count > 0}
       <AiButton busy={aiStatus === "asking"} busyLabel="Suggesting…" label={aiStatus === "asked" ? "Ask again" : "Suggest categories"}
         onclick={() => ai?.run()} />
@@ -229,7 +229,7 @@
   {@const recurring = ready.recurring}
   {#if review}
     <AiSuggest bind:this={ai} bind:status={aiStatus} onasked={(failed) => aiLog?.refresh(failed)} onchanged={txs.load} />
-    {#if app.state?.has_api_key}<AiLog bind:this={aiLog} />{/if}
+    {#if app.state?.ai_configured}<AiLog bind:this={aiLog} />{/if}
   {/if}
 
   <div class="mb-3 flex flex-wrap items-center gap-2">

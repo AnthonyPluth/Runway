@@ -108,7 +108,7 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
         else:
             left.append(it)
 
-    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    api_key = categorize.ai_access(conn)
     if left and use_ai and api_key and (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1":
         counts["ai"] += _items_with_ai(conn, left, caller, api_key, spend)
     for it in left:
@@ -169,9 +169,9 @@ def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
     """The AI's category for each item of an order that has none yet, proposing a new category where nothing fits.
     Nothing is saved: you apply each one (see set_item_category and api_retail_item)."""
     caller = caller or categorize.call_llm
-    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    api_key = categorize.ai_access(conn)
     if not api_key:
-        raise RetailError("Add an OpenRouter key in Settings → Connections first")
+        raise RetailError("Add an OpenRouter key or an Ollama address in Settings → Connections first")
     i, o = RetailItem, RetailOrder
     items = db.rows(conn.execute(
         select(i.id, i.title, i.amount, i.department, o.retailer).join(o, o.id == i.order_id)
