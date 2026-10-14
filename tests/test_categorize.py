@@ -397,6 +397,23 @@ class CategorizeTests(LedgerCase):
         self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
         self.assertNotIn("Blue Bottle", asked)
 
+    def test_only_whats_in_review_is_sent_for_suggestions(self):
+        self.tx("cc", "2026-09-01", -9.0, "SQ *BLUE BOTTLE")
+        self.tx("cc", "2026-09-05", -30.0, "Z & H GRILL CORP")
+        self.conn.execute(update(Transaction).values(category=None, needs_review=0))
+        self.conn.execute(update(Transaction).where(Transaction.id == "cc|1").values(needs_review=1))
+        db.set_setting(self.conn, "openrouter_api_key", "k")
+        asked = []
+
+        def fake(key, model, prompt):
+            items = json.loads(prompt.split("Transactions (JSON):\n")[1].split("\n\nReply")[0])
+            asked.extend(it["payee"] for it in items)
+            return json.dumps([{"i": it["i"], "category": "Restaurants", "confidence": 0.9} for it in items])
+
+        sug = categorize.suggest_for_review(self.conn, caller=fake)
+        self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
+        self.assertEqual(asked, ["Z & H Grill Corp"])
+
     def test_sync_can_skip_ai(self):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY")
         db.set_setting(self.conn, "openrouter_api_key", "k")

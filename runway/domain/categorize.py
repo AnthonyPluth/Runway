@@ -659,14 +659,13 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
 
 
 def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120, skip: list[str] | None = None) -> list[dict]:
-    """Suggestions for everything waiting in Review, one per merchant. Nothing is applied. `skip`: merchants (as the
+    """Suggestions for what the To review tab lists (needs_review), one per merchant. Nothing is applied. `skip`: merchants (as the
     suggestions name them) you skipped before, left out so the model isn't asked about them again."""
     t = Transaction
     txs = db.rows(conn.execute(
         select(t, Account.kind, db.account_label_expr().label("account_name"))
         .join(Account, Account.id == t.account_id)
-        .where(or_(t.needs_review == 1, t.category.is_(None)), func.coalesce(t.category_source, "") != "manual",
-               Account.kind != "investment")
+        .where(t.needs_review == 1, func.coalesce(t.category_source, "") != "manual", Account.kind != "investment")
         .order_by(t.posted.desc())))
     groups = group_by_merchant(txs)
     skipped = {" ".join(str(m).split()).lower() for m in skip or []}
