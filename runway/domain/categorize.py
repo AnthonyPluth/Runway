@@ -665,7 +665,7 @@ def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120, skip: lis
     txs = db.rows(conn.execute(
         select(t, Account.kind, db.account_label_expr().label("account_name"))
         .join(Account, Account.id == t.account_id)
-        .where(or_(t.needs_review == 1, t.category.is_(None)), func.coalesce(t.category_source, "") != "manual",
+        .where(t.needs_review == 1, func.coalesce(t.category_source, "") != "manual",   # just what the To review tab lists
                Account.kind != "investment")
         .order_by(t.posted.desc())))
     groups = group_by_merchant(txs)
