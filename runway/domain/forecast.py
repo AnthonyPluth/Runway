@@ -729,10 +729,11 @@ def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overri
     most_used = (func.count().desc(), func.max(T.posted).desc())
     rec_overrides = {k: v for k, v in overrides.items() if k.startswith("rec:")}
     events: list[dict] = []
+    histories = rec.matched_by_item(conn, [i["id"] for i in recurring if i["account_id"] in by_id])
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
-        history = rec.matched(conn, item["id"])
+        history = histories[item["id"]]
         amount = rec.expected_amount(item, history)
         cat_row = {"category": item["category"]} if item.get("category") else conn.execute(
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
