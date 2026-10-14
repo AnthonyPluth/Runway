@@ -54,7 +54,7 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
     `seen`, which it sends back with the next page (so the same charge twice across two pages is still two charges)."""
     # amazon-orders (and BeautifulSoup) are heavy: loaded only when an Amazon page comes in.
     from amazonorders.exception import AmazonOrdersError
-    from amazonorders.transactions import _parse_transactions_page
+    from amazonorders.transactions import TransactionsPage
     from bs4 import BeautifulSoup
     if _signed_out(html):
         raise RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.", "signin")
@@ -63,7 +63,7 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
         raise blocked
     cfg = _amazon_config()
     try:
-        txs, next_form = _parse_transactions_page(BeautifulSoup(html, cfg.bs4_parser), cfg)
+        txs, next_form = TransactionsPage(cfg).parse_page(BeautifulSoup(html, cfg.bs4_parser))
     except AmazonOrdersError as e:
         raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}") from e
     start = store.since(conn, "amazon")
