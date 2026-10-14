@@ -24,6 +24,8 @@ DEFAULT_MODEL = "openrouter/free"  # OpenRouter's free-models router; any OpenRo
 DEFAULT_CARD_MODEL = "anthropic/claude-haiku-4.5"  # card lookups use OpenRouter's web-search tool, which it calls reliably; cheap
 PAID_HINT_MODEL = "anthropic/claude-haiku-4.5"   # what to suggest when a free model's reply is unusable
 OLLAMA_MODEL = "llama3.1"   # what an empty model field means with Ollama (the model has to be pulled on the server)
+OPENROUTER_TIMEOUT = 120    # seconds to wait on OpenRouter's reply
+OLLAMA_TIMEOUT = 3600       # seconds to wait on your own server: a big local model on modest hardware can take many minutes
 OPENROUTER_URL = os.environ.get("RUNWAY_OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 
 # Processor prefixes that hide the real merchant name.
@@ -399,7 +401,7 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
     with monitoring.ai_call(model, prompt, provider=name.lower(), max_tokens=4096, temperature=0,
                             **({"web_search": web} if web else {})) as span:
         try:
-            with tls.urlopen(req, timeout=120, allow_http=True) as resp:
+            with tls.urlopen(req, timeout=OLLAMA_TIMEOUT if ollama else OPENROUTER_TIMEOUT, allow_http=True) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
