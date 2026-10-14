@@ -402,6 +402,7 @@ class CategorizeTests(LedgerCase):
         self.tx("cc", "2026-09-05", -30.0, "Z & H GRILL CORP")
         self.conn.execute(update(Transaction).values(category=None, needs_review=0))
         self.conn.execute(update(Transaction).where(Transaction.id == "cc|1").values(needs_review=1))
+        db.set_setting(self.conn, "openrouter_api_key", "k")
         asked = []
 
         def fake(key, model, prompt):
