@@ -190,7 +190,11 @@ def api_settings(conn, _q, body):
         url = text(body.get("ollama_url"), "ollama_url").strip()
         if url and not url.lower().startswith(("http://", "https://")):
             url = "http://" + url
-        if url and not urlsplit(url).hostname:
+        try:
+            host = urlsplit(url).hostname if url else True
+        except ValueError:   # a typo urlsplit can't read, like an unclosed [ in an IPv6 address
+            host = None
+        if not host:
             raise ApiError("Enter the Ollama server's address, like http://localhost:11434")
         db.set_setting(conn, sk.OLLAMA_URL, url.rstrip("/") or None)
         db.set_setting(conn, sk.LAST_LLM_ERROR, None)

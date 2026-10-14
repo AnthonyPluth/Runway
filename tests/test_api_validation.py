@@ -69,6 +69,8 @@ class FlagTests(DbCase):
         self.assertEqual((st["ollama_url"], st["ai_configured"], st["has_api_key"]), ("http://localhost:11434", True, False))
         with self.assertRaises(ApiError):
             state.api_settings(self.c, {}, {"ollama_url": "http://"})
+        with self.assertRaises(ApiError):
+            state.api_settings(self.c, {}, {"ollama_url": "http://[bad"})
         self.assertEqual(db.get_setting(self.c, sk.OLLAMA_URL), "http://localhost:11434")   # the bad one saved nothing
         state.api_settings(self.c, {}, {"ollama_url": ""})
         self.assertFalse(state.api_state(self.c, {}, None)["ai_configured"])

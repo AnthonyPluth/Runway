@@ -48,7 +48,7 @@
 <ServiceRow name="AI categorization" purpose={`${st.ollama_url ? "Ollama" : "OpenRouter"} · sorts new transactions into categories`} on={!!st.ai_configured}
   warn={!!st.ai_configured && !!st.last_llm_error}>
   <p class={helpCls}>Get an <a class={linkCls} href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter key</a>, or run
-    <a class={linkCls} href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> yourself and enter its address: with an address set, Ollama is asked instead and nothing leaves your network.
+    <a class={linkCls} href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> yourself and enter its address: with an address set, Ollama is asked instead of OpenRouter, and the requests go only to your server (unless you’ve turned on Sentry, whose AI tracing records prompts).
     Either gets each new merchant’s name and bank description, with one recent amount, date and account type; never account names or numbers.
     Ollama can’t search the web, so card lookups answer from the model’s memory, and its model has to be pulled on the server first (<code>ollama pull</code>).</p>
   <div class={rowCls}>
