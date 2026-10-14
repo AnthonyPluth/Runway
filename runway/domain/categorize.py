@@ -385,6 +385,8 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
         "messages": [{"role": "user", "content": prompt}],
         **_web_request(web),
         **({"provider": {"data_collection": "deny"}} if private and not ollama else {}),
+        # A model that thinks first (Qwen3 and the like) can spend all of max_tokens on it and answer nothing.
+        **({"reasoning_effort": "none"} if ollama else {}),
     }).encode()
     req = urllib.request.Request(
         url,

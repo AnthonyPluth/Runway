@@ -217,6 +217,17 @@ class BrandNameApiTests(LedgerCase):
 
 
 class ChatTimeoutTests(unittest.TestCase):
+    def _body(self, key):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        with mock.patch.object(categorize.tls, "urlopen", return_value=reply) as opened:
+            categorize.chat(key, "m", "hi")
+        return json.loads(opened.call_args.args[0].data)
+
+    def test_ollama_is_asked_not_to_think_and_openrouter_is_not(self):
+        self.assertEqual(self._body(categorize.OllamaServer("http://localhost:11434"))["reasoning_effort"], "none")
+        self.assertNotIn("reasoning_effort", self._body("k"))
+
     def _timeout(self, key):
         reply = mock.MagicMock()
         reply.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
