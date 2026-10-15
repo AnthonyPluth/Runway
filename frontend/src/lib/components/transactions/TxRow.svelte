@@ -27,6 +27,7 @@
   import Flag from "@lucide/svelte/icons/flag";
   import Repeat from "@lucide/svelte/icons/repeat";
   import Check from "@lucide/svelte/icons/check";
+  import TxDelete from "./TxDelete.svelte";
   import { sourceLabel } from "./sources";
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (from its
@@ -226,6 +227,7 @@
       <button type="button" data-accept class="flex size-8 shrink-0 lg:size-9 cursor-pointer items-center justify-center rounded-full text-primary hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50 max-md:hidden lg:-my-1"
         aria-label={`Accept ${t.category} for ${name}`} title={acceptTitle} disabled={saving} onclick={() => onaccept?.()}><Check class="size-5" aria-hidden="true" /></button>
     {/if}
+    <TxDelete {t} compact {onchanged} />
     <span class="sr-only">Amount:</span>
     <div class={cn("ml-auto whitespace-nowrap text-right tabular-nums", (part?.amount ?? t.amount) > 0 ? "font-semibold text-good" : "font-medium", t.pending && "opacity-70")}>
       {#if part}{fmtSigned(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>

@@ -15,7 +15,7 @@ import { viewport } from "$lib/phone.svelte";
 import { pickCategory, pickedValue } from "../../../test/pick";
 
 const items = [
-  tx({ id: "a", posted: "2026-03-10", amount: -10, payee: "Alpha" }),
+  tx({ needs_review: 1, id: "a", posted: "2026-03-10", amount: -10, payee: "Alpha" }),
   tx({ id: "b", posted: "2026-03-10", amount: -5, payee: "Bravo" }),
   tx({ id: "c", posted: "2026-03-09", amount: 100, payee: "Charlie" }),
   tx({ id: "d", posted: "2025-12-31", amount: -1, payee: "Delta" }),
@@ -75,6 +75,14 @@ describe("TxTable", () => {
     setup({ total: 40 });
     expect(screen.queryByText("4 of 40")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show more (36 left)" })).toBeInTheDocument();
+  });
+
+  it.each([false, true])("hides bulk Accept for accepted selections (phone: %s)", async (phone) => {
+    viewport.phone = phone;
+    setup({ selecting: phone });
+    await userEvent.click(tick("Bravo"));
+    if (phone) await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 
   describe("selecting", () => {
@@ -184,7 +192,7 @@ describe("TxTable", () => {
     });
 
     describe("asking first", () => {
-      const many = Array.from({ length: 12 }, (_, i) => tx({ id: `m${i}`, posted: "2026-03-10", amount: -1, payee: `Merchant ${i}` }));
+      const many = Array.from({ length: 12 }, (_, i) => tx({ needs_review: 1, id: `m${i}`, posted: "2026-03-10", amount: -1, payee: `Merchant ${i}` }));
       const pickAll = async (n: number) => {
         setup({ items: many, total: many.length });
         for (let i = 0; i < n; i++) await userEvent.click(tick(`Merchant ${i}`));
@@ -298,6 +306,34 @@ describe("TxTable", () => {
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Accept" }));
       await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { filter: every, reviewed: true } }));
       expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it.each([false, true])("accepts unloaded matches even when the loaded rows are accepted (phone: %s)", async (phone) => {
+      vi.mocked(api).mockResolvedValue({ updated: 212, was: [] });
+      viewport.phone = phone;
+      setup({ items: items.map((t) => ({ ...t, needs_review: 0 })), total: 212, every, selecting: phone });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      if (phone) await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+      if (phone) {
+        await fireEvent.click(await screen.findByText("Select all 212", { selector: "[data-popover-content] button" }));
+        await fireEvent.click(await screen.findByText("Accept", { selector: "[data-popover-content] button" }));
+      } else {
+        await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+        await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+      }
+      const dialog = await screen.findByRole("dialog", { name: "Accept 212 transactions?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Accept" }));
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { filter: every, reviewed: true } }));
+    });
+
+    it("hides Accept again when an all-matches selection returns to accepted loaded rows", async () => {
+      setup({ items: items.map((t) => ({ ...t, needs_review: 0 })), total: 212, every });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+      expect(screen.getByRole("button", { name: "Accept" })).toBeInTheDocument();
+      await userEvent.click(tick("Alpha"));
+      expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
     });
 
     it("goes back to the ticked ones when one is unticked", async () => {

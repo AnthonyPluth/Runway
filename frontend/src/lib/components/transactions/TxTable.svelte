@@ -86,6 +86,8 @@
   let everything = $state(false);
   const ids = $derived(items.filter((t) => picked[t.id]).map((t) => t.id));
   $effect(() => { if (ids.length < items.length) everything = false; });   // unticking one (or a new list) undoes it
+  // Unloaded matches may still need review, even when every loaded row is accepted.
+  const canAccept = $derived((everything && !!every && total > items.length) || items.some((t) => picked[t.id] && !!t.needs_review));
   const chosen = $derived(everything ? total : ids.length);
   const sum = $derived(items.reduce((n, t) => n + (picked[t.id] ? (t.match?.amount ?? t.amount) : 0), 0));
   let bulkCat = $state("");
@@ -158,7 +160,7 @@
               onkeydown={(e) => { if (e.key === "Enter") { moreOpen = false; doRename(); } }} />
             <Button variant="outline" onclick={() => { moreOpen = false; doRename(); }}>Rename</Button>
           </span>
-          <Button variant="outline" title="Keep their categories and take them out of Review" onclick={() => { moreOpen = false; markReviewed(); }}>Accept</Button>
+          {#if canAccept}<Button variant="outline" title="Keep their categories and take them out of Review" onclick={() => { moreOpen = false; markReviewed(); }}>Accept</Button>{/if}
           <Button variant="ghost" onclick={() => { moreOpen = false; all(false); }}>Clear selection</Button>
         </Popover.Content>
       </Popover.Root>
@@ -177,8 +179,8 @@
           onkeydown={(e) => { if (e.key === "Enter") doRename(); }} />
         <Button variant="outline" size="sm" onclick={doRename}>Rename</Button>
       </span>
-      <Button variant="outline" size="sm" title="Keep their categories and take them out of Review"
-        onclick={markReviewed}>Accept</Button>
+      {#if canAccept}<Button variant="outline" size="sm" title="Keep their categories and take them out of Review"
+        onclick={markReviewed}>Accept</Button>{/if}
       <Button variant="link" size="sm" onclick={() => all(false)}>Clear selection</Button>
     </div>
   {/if}

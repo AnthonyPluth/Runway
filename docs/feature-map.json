@@ -530,7 +530,7 @@
       "handler": "runway/server/api/transactions.py:api_tx_delete",
       "web": [
         "frontend/src/lib/components/transactions/TxAdd.svelte",
-        "frontend/src/lib/components/transactions/TxDetail.svelte"
+        "frontend/src/lib/components/transactions/TxDelete.svelte"
       ],
       "tests": [
         "tests/test_api_contract.py",
