@@ -8,19 +8,18 @@
   import type { RecurringItem } from "$lib/components/recurring/types";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import * as Sheet from "$lib/components/ui/sheet";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmtDate, fmtSigned } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
   import RecurringPicker from "./RecurringPicker.svelte";
   import { restoreTx, type KeepBank, type Was } from "./restore";
   import SplitEditor from "./SplitEditor.svelte";
   import Switch from "./Switch.svelte";
   import type { Tx } from "./types";
+  import TxDelete from "./TxDelete.svelte";
   import { sourceLabel } from "./sources";
   import { act, errMsg } from "$lib/act";
 
@@ -147,14 +146,6 @@
   let splitting = $state(false);
   let picking = $state(false);
   let splitButton = $state<HTMLButtonElement | null>(null);
-  let deleting = $state(false);
-  async function remove() {
-    if (!(await act(async () => {
-      await api(`/api/transactions/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-      toast.success(`Deleted ${name}`);
-      refreshState(); onchanged(); onclose();
-    }))) return false;
-  }
   const lbl = "flex flex-col gap-1.5 text-xs text-muted-foreground";
 </script>
 
@@ -252,9 +243,5 @@
     <OrderDetail orderId={t.retail.order_id} {family} onchange={onchanged} />
   {/if}
 
-  {#if manual}
-    <Button variant="ghost" size="sm" class="self-start text-destructive hover:text-destructive" onclick={() => (deleting = true)}>Delete transaction</Button>
-    <ConfirmDialog bind:open={deleting} title={`Delete ${name || "this transaction"}?`} destructive confirmLabel="Delete" busyLabel="Deleting…"
-      description="It leaves reports, budgets and the list. This can’t be undone." onconfirm={remove} />
-  {/if}
+  <TxDelete {t} {onchanged} {onclose} />
 </div>

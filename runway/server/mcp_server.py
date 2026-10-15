@@ -444,7 +444,7 @@ ANY_TOOLS: list[dict[str, Any]] = [
               "puts it back with {\"restore\": was}.", "POST", "transactions/{id}",
               {"transaction_id": _TX_ID, "fields": _fields("Any of payee, posted, amount, notes; or category: null.")},
               ["transaction_id", "fields"], ids="transaction_id", fields=True, text_id=True, idempotent=True),
-    _endpoint("delete_transaction", "Delete a transaction that was added by hand (a bank's can't be deleted).", "DELETE", "transactions/{id}",
+    _endpoint("delete_transaction", "Delete a transaction. A later bank sync may import it again.", "DELETE", "transactions/{id}",
               {"transaction_id": _TX_ID}, ["transaction_id"], ids="transaction_id", text_id=True),
     _endpoint("split_transaction", "Split a transaction across categories: splits is [{amount, category}] adding up to its amount "
               "(same sign); an empty list puts it back together.", "POST", "transactions/{id}/split",

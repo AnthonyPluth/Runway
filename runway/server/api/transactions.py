@@ -593,10 +593,8 @@ def api_tx_import(conn, _q, body):
 
 
 def api_tx_delete(conn, _q, _b, tx_id) -> Ok:
-    """Delete a transaction you added (a bank's come and go with the bank)."""
+    """Delete a transaction; a later bank sync may import it again."""
     _tx(conn, tx_id)
-    if MANUAL not in tx_id:
-        raise ApiError("Only a transaction you added can be deleted")
     splits.clear(conn, tx_id)
     conn.execute(update(RetailCharge).where(RetailCharge.tx_id == tx_id).values(tx_id=None, applied=None, match_source=None))
     conn.execute(delete(Transaction).where(Transaction.id == tx_id))

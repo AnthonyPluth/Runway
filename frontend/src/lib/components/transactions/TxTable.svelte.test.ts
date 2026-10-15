@@ -15,7 +15,7 @@ import { viewport } from "$lib/phone.svelte";
 import { pickCategory, pickedValue } from "../../../test/pick";
 
 const items = [
-  tx({ id: "a", posted: "2026-03-10", amount: -10, payee: "Alpha" }),
+  tx({ needs_review: 1, id: "a", posted: "2026-03-10", amount: -10, payee: "Alpha" }),
   tx({ id: "b", posted: "2026-03-10", amount: -5, payee: "Bravo" }),
   tx({ id: "c", posted: "2026-03-09", amount: 100, payee: "Charlie" }),
   tx({ id: "d", posted: "2025-12-31", amount: -1, payee: "Delta" }),
@@ -75,6 +75,14 @@ describe("TxTable", () => {
     setup({ total: 40 });
     expect(screen.queryByText("4 of 40")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show more (36 left)" })).toBeInTheDocument();
+  });
+
+  it.each([false, true])("hides bulk Accept for accepted selections (phone: %s)", async (phone) => {
+    viewport.phone = phone;
+    setup({ selecting: phone });
+    await userEvent.click(tick("Bravo"));
+    if (phone) await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 
   describe("selecting", () => {
@@ -184,7 +192,7 @@ describe("TxTable", () => {
     });
 
     describe("asking first", () => {
-      const many = Array.from({ length: 12 }, (_, i) => tx({ id: `m${i}`, posted: "2026-03-10", amount: -1, payee: `Merchant ${i}` }));
+      const many = Array.from({ length: 12 }, (_, i) => tx({ needs_review: 1, id: `m${i}`, posted: "2026-03-10", amount: -1, payee: `Merchant ${i}` }));
       const pickAll = async (n: number) => {
         setup({ items: many, total: many.length });
         for (let i = 0; i < n; i++) await userEvent.click(tick(`Merchant ${i}`));
