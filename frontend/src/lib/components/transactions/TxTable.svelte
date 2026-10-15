@@ -86,7 +86,8 @@
   let everything = $state(false);
   const ids = $derived(items.filter((t) => picked[t.id]).map((t) => t.id));
   $effect(() => { if (ids.length < items.length) everything = false; });   // unticking one (or a new list) undoes it
-  const canAccept = $derived(items.some((t) => picked[t.id] && !!t.needs_review));
+  // Unloaded matches may still need review, even when every loaded row is accepted.
+  const canAccept = $derived((everything && !!every && total > items.length) || items.some((t) => picked[t.id] && !!t.needs_review));
   const chosen = $derived(everything ? total : ids.length);
   const sum = $derived(items.reduce((n, t) => n + (picked[t.id] ? (t.match?.amount ?? t.amount) : 0), 0));
   let bulkCat = $state("");
