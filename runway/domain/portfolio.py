@@ -316,7 +316,8 @@ class _PriceBook:
         return fallback
 
 
-def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
+def history(conn, today: date | None = None, days: int | None = HISTORY_DAYS) -> dict:
+    """Daily value, flows and returns. `days` caps how far back it goes; None goes back to the earliest activity or snapshot."""
     today = today or date.today()
     accts = [a for a in _accounts(conn) if not a["hidden"]]
     ids = [a["id"] for a in accts if a.get("source") != "simplefin"]
@@ -344,9 +345,21 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
             "missing_prices": sorted(book.missing), "estimated_before": estimated_before}
 
 
-def _history_start(conn, ids: list[str], sf_ids: list[str], today: date, days: int) -> date:
+def _history_start(conn, ids: list[str], sf_ids: list[str], today: date, days: int | None) -> date:
     """The first day of the history: `days` back, or the day before the first activity if that's later. SimpleFIN
-    accounts have no activity to start from, so with any of them the full span is shown."""
+    accounts have no activity to start from, so with any of them the full span is shown. With `days` None there is no
+    cap: it starts at the earliest activity (the day before) or SimpleFIN snapshot, or the usual span with neither."""
+    if days is None:
+        firsts = []
+        if ids:
+            first_tx = conn.execute(select(func.min(InvTransaction.date)).where(InvTransaction.account_id.in_(ids))).fetchone()[0]
+            if first_tx:
+                firsts.append(date.fromisoformat(first_tx) - timedelta(days=1))
+        if sf_ids:
+            first_snap = conn.execute(select(func.min(HoldingSnapshot.date)).where(HoldingSnapshot.account_id.in_(sf_ids))).fetchone()[0]
+            if first_snap:
+                firsts.append(date.fromisoformat(first_snap))
+        return min(firsts) if firsts else today - timedelta(days=HISTORY_DAYS)
     start = today - timedelta(days=days)
     if not ids or sf_ids:
         return start
@@ -747,7 +760,7 @@ def overview(conn, period: str = "1Y", today: date | None = None) -> dict:
     hold = holdings(conn)
     alloc = allocation(conn, hold)
     inc = income(conn, today)
-    hist = history(conn, today)
+    hist = history(conn, today, None if period == "MAX" else HISTORY_DAYS)   # All is uncapped
     bench = benchmark(conn, hist["dates"])
     perf = performance(hist, bench, period, today)
     periods = {p: performance(hist, bench, p, today) for p in ("1M", "3M", "YTD", "1Y", "2Y")}

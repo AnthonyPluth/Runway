@@ -119,6 +119,22 @@ class HistoryTests(Base):
         self.assertFalse([r for r in routes.ROUTES if r[1].startswith("/api/plaid/accounts/")])
 
 
+class PeriodHistoryTests(Base):
+    def test_all_goes_back_past_two_years_and_the_others_do_not(self):
+        old = (TODAY - timedelta(days=1000)).isoformat()
+        self.tx("t1", old, "cash", "deposit", -1000)
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=1000, price=1, value=1000,
+                                              cost_basis=1000))
+        for p in ("1Y", "2Y"):
+            h = portfolio.overview(self.c, p, TODAY)["history"]
+            self.assertEqual(len(h["dates"]), 731, p)
+            self.assertGreater(h["dates"][0], old)
+        h = portfolio.overview(self.c, "MAX", TODAY)["history"]
+        self.assertEqual(h["dates"][0], (TODAY - timedelta(days=1001)).isoformat())
+        self.assertEqual(h["dates"][-1], TODAY.isoformat())
+        self.assertEqual(h["value"][-1], 1000.0)
+
+
 class TransferHistoryTests(Base):
     """Pins how history treats transfers, corporate actions, prices from trades alone, and balance-only accounts."""
 
