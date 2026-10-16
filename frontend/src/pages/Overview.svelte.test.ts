@@ -69,7 +69,36 @@ describe("Overview", () => {
     }));
     render(Overview);
     expect(await screen.findByRole("link", { name: /Enter Visa’s latest statement/ })).toHaveAttribute("href", "/#setup/accounts?account=visa");
+    await userEvent.click(screen.getByRole("button", { name: "+1 more" }));
     expect(screen.getByRole("link", { name: /Amex: choose/ })).toHaveAttribute("href", "/#setup/accounts");
+  });
+
+  it("shows the first of several alerts and folds the rest into \"+N more\"", async () => {
+    serve(() => fc(alerts()));
+    render(Overview);
+    expect(await screen.findByRole("link", { name: W1 })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: W2 })).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "+1 more" });
+    await userEvent.click(more);
+    expect(screen.getByRole("link", { name: W2 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /more$/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a single alert with no \"more\"", async () => {
+    serve(() => fc({ warnings: [W1], warning_links: [{ text: W1, href: "#setup/accounts" }] }));
+    render(Overview);
+    expect(await screen.findByRole("link", { name: W1 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /more$/ })).not.toBeInTheDocument();
+  });
+
+  it("puts the next money in and the lowest point side by side, with the date above the title", async () => {
+    serve(() => fc({ events: [fc().events[0], { date: "2026-10-20", name: "Paycheck", amount: 2000, kind: "recurring", key: "p", balance_after: 2900 }] }));
+    render(Overview);
+    expect(await screen.findByText("Next money in")).toBeInTheDocument();
+    expect(screen.getByText("Paycheck · Oct 20")).toBeInTheDocument();
+    expect(screen.getByText("$2,000")).toBeInTheDocument();
+    expect(screen.getByText("Lowest point")).toBeInTheDocument();
+    expect(screen.getByText("On track")).toBeInTheDocument();
   });
 
   it("sends you to the forecast settings when there's no account to forecast", async () => {
@@ -92,7 +121,7 @@ describe("Overview", () => {
     serve(() => fc());
     render(Overview);
     expect(await screen.findByText(/stays above/)).toBeInTheDocument();
-    expect(screen.queryByText(/^Lowest/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^Lowest point$/)).toHaveLength(1);   // the card's two facts say the low once; the sentence doesn't repeat it
     expect(screen.queryByText("Owed on cards")).not.toBeInTheDocument();
     expect(screen.queryByText(/^In 90\sdays$/)).not.toBeInTheDocument();
   });
@@ -255,7 +284,9 @@ describe("Overview", () => {
   it("puts away a forecast warning, not the no-account alert", async () => {
     serve(() => fc({ ...alerts(), accounts: [], total: [], events: [] }));
     render(Overview);
-    expect(await screen.findByRole("link", { name: /No account to forecast yet/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: W1 })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "+2 more" }));
+    expect(screen.getByRole("link", { name: /No account to forecast yet/ })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Dismiss / })).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: `Dismiss ${W1}` }));
     await waitFor(() => expect(screen.queryByRole("link", { name: W1 })).not.toBeInTheDocument());
@@ -280,6 +311,7 @@ describe("Overview on a phone", () => {
       { text: "2 payments over $1,000 aren’t in the forecast.", href: "#recurring" }] }));
     render(Overview);
     expect(await screen.findByRole("link", { name: /Visa: choose which account/ })).toHaveAttribute("href", "/#setup/accounts");
+    await userEvent.click(screen.getByRole("button", { name: "+1 more" }));
     expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#recurring");
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });

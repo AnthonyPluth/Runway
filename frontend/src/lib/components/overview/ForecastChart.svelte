@@ -1,18 +1,23 @@
 <script lang="ts">
-  import { fmt, fmtDate, fmtSigned, fmtDow, parseDate } from "$lib/format";
+  import { fmt, fmt0, fmtDate, fmtSigned, fmtDow, parseDate } from "$lib/format";
   import YAxis from "../YAxis.svelte";
   import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
   import type { ForecastEvent, Overview } from "$lib/types";
 
   // The projected balance, day by day: what each day brings (hover or drag for a day's readout).
-  let { fc }: { fc: Overview } = $props();
+  // `compact` is the Overview card's version: about 120px tall, no value axis, the lowest day marked and the last
+  // day's balance written at the line's end.
+  let { fc, compact = false }: { fc: Overview; compact?: boolean } = $props();
 
   let width = $state(0);
-  const H = 280, m = { top: 30, right: 8, bottom: 28, left: 52 };
+  const H = $derived(compact ? 120 : 280);
+  const m = $derived(compact ? { top: 20, right: 8, bottom: 22, left: 8 } : { top: 30, right: 8, bottom: 28, left: 52 });
   const W = $derived(Math.max(320, width));
-  const iw = $derived(W - m.left - m.right), ih = H - m.top - m.bottom;
+  const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const series = $derived(fc.total);
   const n = $derived(series.length);
+  // The first day of the lowest balance, for the compact chart's mark.
+  const lowAt = $derived(n ? series.indexOf(Math.min(...series)) : 0);
 
   // The days on show, v0 to v1: every day of the forecast.
   const v0 = 0, v1 = $derived(Math.max(0, n - 1));
@@ -97,9 +102,9 @@
           <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
         </linearGradient>
       </defs>
-      <YAxis {ticks} {y} left={m.left} right={W - m.right} />
+      {#if !compact}<YAxis {ticks} {y} left={m.left} right={W - m.right} />{/if}
       {#each months as ml (ml.i)}
-        <text x={x(ml.i)} y={H - 8} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{ml.label}</text>
+        <text x={x(ml.i)} y={H - (compact ? 4 : 8)} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{ml.label}</text>
       {/each}
       {#if y0 < 0 && y1 > 0}<line x1={m.left} x2={W - m.right} y1={y(0)} y2={y(0)} stroke="var(--destructive)" stroke-dasharray="3 3" opacity="0.6" />{/if}
       {#each fc.dates as d, i (d)}
@@ -107,6 +112,10 @@
       {/each}
       <path d={`M${path(series)} L${x(v1)},${y(y0)} L${x(v0)},${y(y0)} Z`} fill="url(#fc-area)" />
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
+      {#if compact}
+        <circle cx={x(lowAt)} cy={y(series[lowAt])} r="4" fill="var(--card)" stroke="var(--chart-1)" stroke-width="2" data-low />
+        <text x={x(v1)} y={Math.max(11, y(series[v1]) - 8)} text-anchor="end" fill="var(--foreground)" font-weight="600" data-end>{fmt0(series[v1])}</text>
+      {/if}
       {#if hover != null}
         <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
         <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2" />
