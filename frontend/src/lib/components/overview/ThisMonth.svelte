@@ -23,7 +23,10 @@
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, fmtDate, fmtSigned, monthShort, pct, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
+  import type { Snippet } from "svelte";
 
+  // `after` is drawn under the month's spending, or alone if the rest can't load (Overview's Investments card).
+  let { after }: { after?: Snippet } = $props();
   const month = thisMonth();
   const fresh = Promise.all([
     api<Pace>("/api/month_pace"),
@@ -47,7 +50,11 @@
 </script>
 
 {#await data}
-  <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
+  <!-- The Investments card has its own request, so a slow month doesn't hide it. -->
+  <div class="flex min-w-0 flex-col gap-6">
+    <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
+    {@render after?.()}
+  </div>
 {:then [pace, budget, latest]}
   {@const diff = pace.spent - pace.last_same_point}
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
@@ -66,6 +73,7 @@
         <div class="mt-2"><LineChart xs={c.xs} series={c.series} labels zero height={180} fmtY={fmt0} fmtTip={fmt} table={false} /></div>
       </div>
     </Group>
+    {@render after?.()}
 
     {#if budgets.length}
     <Group title="Budgets" inset="3.75rem">
@@ -117,4 +125,5 @@
   </div>
 {:catch}
   <!-- The forecast is the main thing; if this part can't load, it just isn't shown. -->
+  {@render after?.()}
 {/await}

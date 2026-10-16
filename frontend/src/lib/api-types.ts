@@ -138,6 +138,37 @@ export interface EnteredStatement {
   next_close: string;
 }
 
+/** A holding that moved today: its ticker and its day change as a fraction (0.021 is +2.1%). */
+export interface InvestmentMover {
+  ticker: string;
+  day_change_pct: number;
+}
+
+/** A non-cash holding, as live prices re-price it: shares held, value now, and its change today in dollars. */
+export interface InvestmentPosition {
+  ticker: string;
+  quantity: number;
+  value: number;
+  day_change: number | null;
+}
+
+/**
+ * GET /api/investments/summary, the Overview card's light reply: the total, today's change (dollars, and a
+ * fraction of yesterday's value), whether the market is open by the clock, the three holdings with the largest day
+ * change % (cash left out), the last month's value at today's share counts, and the positions live prices re-price.
+ * With no investment accounts `empty` is true and the rest is blank.
+ */
+export interface InvestmentsSummary {
+  empty: boolean;
+  total: number;
+  day_change: number | null;
+  day_change_pct: number | null;
+  market: "open" | "closed";
+  movers: InvestmentMover[];
+  trend: number[];
+  positions: InvestmentPosition[];
+}
+
 /** A loan's terms (loans.terms): `rate` (annual %) and `payment` are what's used, and where they came from. */
 export interface LoanTerms {
   rate: number | null;
@@ -371,4 +402,5 @@ export interface Endpoints {
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
   "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
+  "GET /api/investments/summary": { body: never; reply: InvestmentsSummary };
 }

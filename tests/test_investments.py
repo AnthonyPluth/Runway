@@ -908,3 +908,67 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         with mock.patch.object(plaid, "call", return_value={}):
             plaid.remove_item(self.c, "wf")
         self.assertIsNone(self.c.execute(select(Account.id).where(Account.id == "pl:a1")).fetchone())
+
+
+class SummaryTests(Base):
+    """GET /api/investments/summary: the Overview card's light reply (made-up holdings)."""
+
+    def setUp(self):
+        super().setUp()
+        self.c.execute(insert(Security), [{"id": t, "ticker": t, "name": t, "type": "equity", "is_cash": 0} for t in ("AAA", "BBB", "CCC", "DDD")])
+        # security, shares, the close before last, the last close (their difference is the day's change)
+        for sec, qty, before, last in (("AAA", 10, 100, 102), ("BBB", 10, 100, 90), ("CCC", 1, 1000, 1030), ("DDD", 10, 100, 100),
+                                       ("VTI", 10, 100, 101)):
+            self.price(sec, "2026-09-21", before)
+            self.price(sec, "2026-09-22", last)
+            self.c.execute(insert(Holding).values(account_id="A", security_id=sec, quantity=qty, price=last, value=qty * last))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=500, price=1, value=500))
+
+    def test_total_change_and_the_top_three_movers_by_size_of_change(self):
+        from runway.server.api import investments
+        out = investments.api_investments_summary(self.c, {}, {})
+        self.assertFalse(out["empty"])
+        self.assertEqual(out["total"], 5460)   # cash counts in the total
+        self.assertEqual(out["day_change"], -40)
+        self.assertAlmostEqual(out["day_change_pct"], -40 / 5000, places=6)   # of what the moving holdings were worth before
+        # BBB −10%, CCC +3%, AAA +2%: by absolute change; VTI (+1%) is fourth and the cash has no change
+        self.assertEqual([(m["ticker"], m["day_change_pct"]) for m in out["movers"]], [("BBB", -0.1), ("CCC", 0.03), ("AAA", 0.02)])
+        self.assertEqual(sorted(p["ticker"] for p in out["positions"]), ["AAA", "BBB", "CCC", "DDD", "VTI"])
+        self.assertIn(out["market"], ("open", "closed"))
+
+    def test_the_trend_is_the_last_months_value_at_todays_shares(self):
+        self.price("AAA", "2026-08-01", 1)   # older than a month: not in it
+        out = portfolio.summary(self.c, date(2026, 9, 23))
+        self.assertEqual(out["trend"], [5500, 5460])
+        self.assertEqual(out["trend"][-1], out["total"])
+
+    def test_the_trend_keeps_a_balance_only_account_and_an_unpriced_position_flat(self):
+        self.c.execute(insert(Security), [{"id": "sf:balance", "ticker": None, "name": "Balance", "type": "other", "is_cash": 0},
+                                          {"id": "NOTK", "ticker": None, "name": "No ticker", "type": "equity", "is_cash": 0}])
+        self.c.execute(insert(Holding).values(account_id="A", security_id="sf:balance", quantity=1, price=300, value=300))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="NOTK", quantity=2, price=100, value=200))
+        out = portfolio.summary(self.c, date(2026, 9, 23))
+        self.assertEqual(out["total"], 5960)
+        self.assertEqual(out["trend"], [6000, 5960])
+
+    def test_the_trend_skips_days_before_every_ticker_has_a_close_and_holds_one_with_no_history_flat(self):
+        self.c.execute(insert(Security), [{"id": t, "ticker": t, "name": t, "type": "equity", "is_cash": 0} for t in ("LATE", "NONE")])
+        self.price("LATE", "2026-09-22", 50)   # first close is the last day: the 21st has no value for it
+        self.c.execute(insert(Holding).values(account_id="A", security_id="LATE", quantity=4, price=50, value=200))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="NONE", quantity=2, price=100, value=200))   # no closes at all
+        out = portfolio.summary(self.c, date(2026, 9, 23))
+        self.assertEqual(out["trend"], [5460 + 400])
+        self.assertEqual(out["trend"][-1], out["total"])
+
+    def test_market_hours_by_the_new_york_clock(self):
+        open_, early, saturday = (datetime(2026, 9, 23, 14, 0, tzinfo=UTC), datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+                                  datetime(2026, 9, 26, 15, 0, tzinfo=UTC))
+        self.assertEqual([prices.market_hours(t) for t in (open_, early, saturday)], ["open", "closed", "closed"])
+
+
+class SummaryEmptyTests(DbCase):
+    def test_no_investment_accounts_is_an_empty_reply(self):
+        from runway.server.api import investments
+        out = investments.api_investments_summary(self.c, {}, {})
+        self.assertEqual(out, {"empty": True, "total": 0.0, "day_change": None, "day_change_pct": None, "market": "closed",
+                               "movers": [], "trend": [], "positions": []})

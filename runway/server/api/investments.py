@@ -12,6 +12,7 @@ from ...domain import planner, portfolio, tracked
 from ... import validate
 from ...storage import settings_keys as sk
 from ...storage.models import CostOverride, Holding, ManualContribution, ManualState, Security
+from ..contract import InvestmentsSummary
 from ..common import ApiError, Response, own_session, text
 from ..sync import refresh_prices, run_investment_sync, run_sync
 
@@ -110,6 +111,12 @@ def api_tracked_save(conn, _q, body, acct_id):
 def api_investments(conn, q, _b):
     period = q.get("period", ["1Y"])[0]
     return portfolio.overview(conn, period if period in ("1M", "3M", "YTD", "1Y", "2Y", "MAX") else "1Y")
+
+
+def api_investments_summary(conn, _q, _b) -> InvestmentsSummary:
+    """The Overview's Investments card: total, today's change, top movers and the last month's trend, without the
+    history replay. Empty (`empty`) with no investment accounts."""
+    return portfolio.summary(conn)   # type: ignore[return-value]
 
 
 @own_session

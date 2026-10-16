@@ -20,6 +20,7 @@
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
+  import InvestmentsCard from "$lib/components/overview/InvestmentsCard.svelte";
   import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
   import { comingUp } from "$lib/components/overview/comingUp";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
@@ -222,7 +223,9 @@
           onchanged={() => load(days)} /></Group>
         <Group title="Credit cards"><CardsTable cards={fc.cards} onchanged={() => load(days)} /></Group>
       </div>
-      <ThisMonth />
+      <ThisMonth>
+        {#snippet after()}<InvestmentsCard />{/snippet}
+      </ThisMonth>
     </div>
   {/if}
 {/if}
