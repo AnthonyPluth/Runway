@@ -207,6 +207,85 @@ describe("Transactions: the card follows the list, and the queue past 20", () =>
     expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument();
   });
 
+  it("ignores a slow older answer that arrives after a newer one", async () => {
+    const all = many(2);
+    let slow!: (v: unknown) => void;
+    let calls = 0;
+    serve(all, 2, (path, o) => {
+      if (path.includes("review=1") && path.includes("limit=20")) {
+        // The first answer is held back; the next (after the accept) says only Merchant 1 is left.
+        return ++calls === 1 ? new Promise((r) => { slow = r; }) : { items: [all[1]], total: 1 };
+      }
+      if (path.endsWith("/accept") && o?.method === "POST") return { ok: true, was: wasOf(path.split("/")[3]) };
+      return undefined;
+    });
+    render(Transactions);
+    await screen.findByText("Merchant 0");
+    await userEvent.click(screen.getByRole("button", { name: /^Accept Coffee for Merchant 0/ }));
+    await waitFor(() => expect(card()).not.toBeNull());
+    expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument();
+    slow({ items: all, total: 2 });   // the old answer, with Merchant 0 still waiting
+    await new Promise((r) => setTimeout(r));
+    expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument();
+    expect(within(card()!).queryByText("Merchant 0")).not.toBeInTheDocument();
+  });
+
+  it("a decision on the card keeps the fresh queue answer that follows it (its total included)", async () => {
+    const all = many(2);
+    let calls = 0;
+    let release!: (v: unknown) => void;
+    // The refresh the accept starts is slow: the card has already moved on (by its own count) when it lands.
+    serve(all, 2, (path, o) => {
+      if (path.includes("review=1") && path.includes("limit=20")) return ++calls === 1 ? { items: all, total: 2 } : new Promise((r) => { release = r; });
+      if (path.endsWith("/accept") && o?.method === "POST") return { ok: true, was: wasOf(path.split("/")[3]) };
+      return undefined;
+    });
+    render(Transactions);
+    await waitFor(() => expect(card()).not.toBeNull());
+    await userEvent.click(within(card()!).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument());
+    release({ items: [all[1]], total: 5 });
+    // The server's answer, not just the local count down, is what the card shows.
+    await waitFor(() => expect(within(card()!).getByText("To review · 1 of 5")).toBeInTheDocument());
+    expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument();
+  });
+
+  it("loading the next batch waits for a whole-queue refresh in flight and doesn't make it stale", async () => {
+    const all = many(22);
+    let release!: (v: unknown) => void;
+    let calls = 0;
+    const asked: string[] = [];
+    // After the first batch of 20, the next whole refresh is held back; the server's queue then has m0 decided.
+    serve(all, 22, (path, o) => {
+      if (path.includes("review=1") && path.includes("limit=20")) {
+        asked.push(path);
+        const rest = all.slice(1);
+        if (++calls === 1) return { items: all.slice(0, 20), total: 22 };
+        if (calls === 2) return new Promise((r) => { release = r; });
+        const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset"));
+        return { items: rest.slice(offset, offset + 20), total: 21 };
+      }
+      if (path.endsWith("/accept") && o?.method === "POST") return { ok: true, was: wasOf(path.split("/")[3]) };
+      return undefined;
+    });
+    render(Transactions);
+    await waitFor(() => expect(card()).not.toBeNull());
+    // A row in the list is accepted: the whole queue is asked for again (held back).
+    await userEvent.click(screen.getByRole("button", { name: /^Accept Coffee for Merchant 0/ }));
+    await waitFor(() => expect(calls).toBe(2));
+    // At the end of the 20 loaded, Skip asks for more, but only once the refresh has landed.
+    for (let i = 0; i < 19; i++) await userEvent.click(within(card()!).getByRole("button", { name: "Skip" }));
+    const last = userEvent.click(within(card()!).getByRole("button", { name: "Skip" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(2);
+    release({ items: all.slice(1, 21), total: 21 });
+    await last;
+    await waitFor(() => expect(calls).toBe(3));
+    expect(asked.at(-1)).toContain("offset=20");
+    await waitFor(() => expect(within(card()!).getByText("Merchant 21")).toBeInTheDocument());
+    expect(within(card()!).queryByText("Merchant 0")).not.toBeInTheDocument();
+  });
+
   it("calls a day Today and Yesterday by the host's day (from the server), not the browser's", async () => {
     serve([tx({ id: "x", payee: "Xray", posted: "2026-03-10" }), tx({ id: "y", payee: "Yank", posted: "2026-03-09" })], 2, (path) =>
       path.startsWith("/api/overview") ? { events: [], today: "2026-03-10" } : path.includes("limit=20&") ? { items: [], total: 0 } : undefined);

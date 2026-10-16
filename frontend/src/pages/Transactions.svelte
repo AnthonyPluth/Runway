@@ -95,20 +95,38 @@
   // narrow it. A decision takes the transaction out of it at once; an undo loads it again (reloadWas).
   let queue = $state<Tx[]>([]);
   let queueTotal = $state(0);
-  async function loadQueue() {
-    if (review) return;
-    try {
-      const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: "0" })}`);
-      queue = r.items.filter((t) => t.needs_review); queueTotal = r.total;
-    } catch { queue = []; queueTotal = 0; }   // the card is an extra: without it the list and the Review tab still work
+  // The queue is asked for again whole (loadQueue) after a change, and a batch is added to its end (moreQueue). Each
+  // whole request takes a number and only the latest one's reply is applied, so a slow old answer can't bring back a
+  // transaction just decided or put an old total back; a decision on the card counts as a newer request too. A batch
+  // waits for a whole request in flight (its offset is from the queue as that leaves it) and is dropped if one starts
+  // meanwhile; it never makes a whole one stale.
+  let queueSeq = 0;
+  let refresh: Promise<void> | null = null;
+  let lastRefresh = 0;
+  function loadQueue(): Promise<void> {
+    if (review) return Promise.resolve();
+    const mine = ++queueSeq;
+    const run = (async () => {
+      try {
+        const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: "0" })}`);
+        if (mine !== queueSeq) return;
+        queue = r.items.filter((t) => t.needs_review); queueTotal = r.total;
+      } catch { if (mine === queueSeq) { queue = []; queueTotal = 0; } }   // the card is an extra: without it the list and the Review tab still work
+      finally { if (lastRefresh === mine) refresh = null; }
+    })();
+    refresh = run; lastRefresh = mine;
+    return run;
   }
   loadQueue();
   /** The next batch of the queue, added to the end: what's loaded is still the first of it (a decided one has left the
    *  server's queue too), so the next starts after them. */
   async function moreQueue() {
     if (review) return;
+    while (refresh) await refresh;
+    const mine = queueSeq;
     try {
       const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: String(queue.length) })}`);
+      if (mine !== queueSeq) return;
       const have = new Set(queue.map((t) => t.id));
       queue = [...queue, ...r.items.filter((t) => t.needs_review && !have.has(t.id))]; queueTotal = r.total;
     } catch { /* the card goes on with what it has; the Review tab has the rest */ }
@@ -180,10 +198,12 @@
 
   /** The review card's Accept: the category it shows, through the existing accept (the one it has) or save (another). */
   async function decideCard(t: Tx, category: string): Promise<boolean> {
+    queueSeq++;   // an answer still on its way was asked before this decision: don't let it bring the transaction back
     const ok = category !== (t.category ?? "") ? await save(t, category) : await accept(t);
-    if (!ok) return false;
-    queue = queue.filter((x) => x.id !== t.id); queueTotal = Math.max(0, queueTotal - 1);
-    if (queue.length < 3 && queueTotal > queue.length) moreQueue();   // what's loaded is running out
+    if (!ok) { loadQueue(); return false; }
+    // The accept or save has already asked for the queue again (that answer is the newer one and wins, refilling it
+    // too); until it lands the card moves on with the transaction taken out.
+    if (queue.some((x) => x.id === t.id)) { queue = queue.filter((x) => x.id !== t.id); queueTotal = Math.max(0, queueTotal - 1); }
     txs.reloadRows([t.id]);
     return true;
   }
