@@ -25,7 +25,8 @@ from ..storage import db
 from .. import validate
 from ..storage import settings_keys as sk
 from ..domain.categorize import bank_payee, clean_payee, kept_bank_names
-from ..storage.models import Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Transaction
+from ..storage.models import (Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Recurring,
+                              Transaction)
 from .banktx import PLAID_IDS as PLAID_IDS   # re-exported: what reads transactions tells Plaid's apart by it
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
@@ -191,7 +192,18 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
     if not conn.execute(select(Account.id).where(Account.id == target)).fetchone():
         raise ValueError("Pick one of your accounts.")
     conn.execute(update(Account).where(Account.id == target).values(plaid_account_id=plaid_account_id))
+    _move_recurring(conn, plaid_account_id, target)
     return {"ok": True, "account_id": target}
+
+
+def _move_recurring(conn, plaid_account_id: str, into: str) -> None:
+    """The Plaid account's own account ("pl:…"), hidden now that it's matched to `into`: its recurring items move there,
+    where their payments come in now (matching only looks on an item's own account). What's tied to an item (its
+    linked payments, edits, skips and dismissals) is by the item, so it comes along. Matching the Plaid account back to
+    its own account later leaves them on `into`, which is still yours and still synced."""
+    own = "pl:" + plaid_account_id
+    if conn.execute(select(Account.id).where(Account.id == own, Account.hidden == 1)).fetchone():
+        conn.execute(update(Recurring).where(Recurring.account_id == own).values(account_id=into))
 
 
 def _retire_own_account(conn, plaid_account_id: str, into: str | None) -> None:

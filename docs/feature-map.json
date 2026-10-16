@@ -792,6 +792,7 @@
         "tests/test_api_handlers.py",
         "tests/test_budget_months.py",
         "tests/test_categorize.py",
+        "tests/test_forecast_schedule.py",
         "tests/test_http_server.py",
         "tests/test_routes.py",
         "tests/test_splits.py"

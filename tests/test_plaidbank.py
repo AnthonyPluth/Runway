@@ -11,10 +11,10 @@ import sqlalchemy.exc
 from sqlalchemy import delete, insert, select, update
 
 from runway.storage import db
-from runway.domain import forecast
+from runway.domain import forecast, recurring
 from runway.providers import plaid, plaidbank, simplefin
 from runway.storage.models import (Account, CardStatement, Holding, InvAccount, InvSnapshot, InvTransaction, LoanTerms,
-                                   Merchant, Override, PlaidAccount, PlaidItem, Security, Transaction)
+                                   Merchant, Override, PlaidAccount, PlaidItem, Recurring, Security, Transaction)
 from tests.shared import DbCase, TODAY
 
 
@@ -518,6 +518,33 @@ class PlaidBankTests(DbCase):
                              .where(Account.id == "pl:p-new")).fetchone()
         self.assertEqual((own["hidden"], own["plaid_account_id"]), (0, "p-new"))
         self.assertIsNone(self.c.execute(select(Account.plaid_account_id).where(Account.id == "sf-free")).fetchone()[0])
+
+    def test_recurring_items_move_with_an_account_added_as_its_own(self):
+        """Matching the "pl:" account to another of yours moves its recurring items there, so a payment that comes in
+        on that one links to its item and isn't still due (nor counted twice in the forecast)."""
+        self.link()
+        plaidbank.match(self.c, "p-new", "new", TODAY)
+        self.c.execute(insert(Recurring).values(id=5, name="Book club", account_id="pl:p-new", amount=-25,
+                                                frequency="monthly", anchor_date="2026-08-22", match="books"))
+        self.c.execute(insert(Transaction).values(id="pl:p-new|pl:b1", account_id="pl:p-new", posted="2026-08-22",
+                                                  amount=-25.0, description="BOOKS", recurring_id=5))
+        self.c.execute(insert(Override).values(key="rec:5:2026-10-22", amount=-30))
+        self.c.execute(insert(Account).values(id="sf-free", name="Card B", kind="credit", balance=-50, pay_from="sf-chk"))
+        self.c.execute(insert(Transaction), [{"id": "sf-free|0", "account_id": "sf-free", "posted": "2026-07-01",
+                                              "amount": -5.0, "description": "SNACK"},
+                                             {"id": "sf-free|1", "account_id": "sf-free", "posted": "2026-09-22",
+                                              "amount": -25.0, "description": "BOOKS"}])
+        plaidbank.match(self.c, "p-new", "sf-free", TODAY)
+        recurring.auto_match(self.c)
+        self.assertEqual(self.c.execute(select(Transaction.recurring_id).where(Transaction.id == "sf-free|1")).scalar(), 5)
+        self.assertEqual(self.c.execute(select(Transaction.recurring_id).where(Transaction.id == "pl:p-new|pl:b1")).scalar(), 5)
+        charges = [(e["date"], e["amount"], e["account_id"]) for e in forecast.build(self.c, TODAY, 40)["charges"]
+                   if e.get("recurring_id") == 5]
+        self.assertEqual(charges, [("2026-10-22", -30.0, "sf-free")])   # September's is paid; October's edit stays
+        self.assertEqual(recurring.missed(self.c, TODAY), [])
+        self.assertEqual(self.c.execute(select(Recurring.account_id).where(Recurring.id == 5)).scalar(), "sf-free")
+        plaidbank.match(self.c, "p-new", "new", TODAY)   # its own account again: the items stay on the one still synced
+        self.assertEqual(self.c.execute(select(Recurring.account_id).where(Recurring.id == 5)).scalar(), "sf-free")
 
     def test_an_account_you_dont_use_isnt_synced(self):
         self.link()
