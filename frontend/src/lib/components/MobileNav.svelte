@@ -65,20 +65,20 @@
 
 <!-- A floating pill: inset from the sides and lifted off the bottom, translucent over the page with a blur behind it. -->
 <nav aria-label="Main" class="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 desktop:hidden">
-  <div class="mx-auto grid h-[66px] max-w-lg grid-cols-5 items-stretch gap-1 rounded-full border bg-popover/80 p-1.5 shadow-lg backdrop-blur-xl">
+  <div class="mx-auto grid h-[66px] max-w-lg grid-cols-5 items-stretch gap-0 rounded-full border bg-popover/80 p-0.5 min-[380px]:gap-0.5 min-[380px]:p-1 shadow-lg backdrop-blur-xl">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
       <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}
-        class={cn("relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px]", on ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
+        class={cn("relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", on ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
         <item.icon class={cn("size-5", on && "stroke-[2.25]")} aria-hidden="true" />
-        {item.short ?? item.label}
+        <span class="max-w-full truncate">{item.short ?? item.label}</span>
         {#if item.page === "transactions" && s?.review_count}
           <span class="absolute top-1 left-1/2 ml-2 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums">{s.review_count > 99 ? "99+" : s.review_count}</span>
         {/if}
       </a>
     {/each}
     <button type="button" aria-expanded={open} onclick={() => (open = !open)}
-      class={cn("flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[11px]", open || inMore ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
+      class={cn("flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", open || inMore ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
       <span class="relative"><Ellipsis class="size-5" aria-hidden="true" />
         <!-- A sync problem shows here too, so it's seen without opening the sheet. -->
         {#if sync.href}<span class={cn("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-popover", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}

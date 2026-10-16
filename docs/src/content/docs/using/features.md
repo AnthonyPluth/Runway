@@ -91,7 +91,7 @@ On the Recurring page, right under Budget (the old Budget → Bills & income lin
 
 ## Investments
 
-On Net worth → Investments.
+In the sidebar (**Investments**, after Budget; **Invest** in the phone's tab bar), at `#investments`, and on Net worth → Investments.
 
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a comparison with the S&P 500, gain per holding and allocation.
 - **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Connections) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
