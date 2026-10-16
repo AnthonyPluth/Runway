@@ -231,6 +231,15 @@ describe("InvestmentsView", () => {
       expect(c).toHaveTextContent("−1.06 pts vs S&P 500");
       expect(c).toHaveClass("text-loss");
     });
+    it("leaves the dollar change out of the period chip when it isn't known, rather than a placeholder", async () => {
+      const perf = { start: "2026-08-01", return: 0.05, benchmark_return: 0.04, gain: null };
+      serve((path: string) => path.startsWith("/api/investments?") ? page({ performance: perf }) : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      const c = screen.getByTestId("period-chip");
+      expect(c).toHaveTextContent("▲ +5.0% 1Y");
+      expect(c).not.toHaveTextContent("—");
+    });
     it("says level when the gap rounds to nothing", async () => {
       expect(await chip(0.10004, 0.1)).toHaveTextContent("level with the S&P 500");
     });

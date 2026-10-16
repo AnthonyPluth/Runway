@@ -177,7 +177,7 @@
       {#if perf.gain != null || perf.return != null}
         <span class={cn("inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-medium", gainCls(change))} data-testid="period-chip">
           {#if change !== 0}<span aria-hidden="true">{change > 0 ? "▲" : "▼"}</span>{/if}
-          {signed(perf.gain)} ({pct(perf.return)}) <span class="font-normal text-muted-foreground">{periodLabel(inv.period)}</span>
+          {#if perf.gain != null}{signed(perf.gain)} {#if perf.return != null}({pct(perf.return)}){/if}{:else}{pct(perf.return)}{/if} <span class="font-normal text-muted-foreground">{periodLabel(inv.period)}</span>
         </span>
       {/if}
       {#if vsBench}
