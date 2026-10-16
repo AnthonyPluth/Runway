@@ -38,9 +38,9 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "setup", sub: "rules" });
   });
 
-  it("opens the old #investments route as a tab of Net worth", async () => {
+  it("opens #investments as a page of its own, and Net worth's Investments tab at #networth/investments", async () => {
     await go("#investments");
-    expect(route).toMatchObject({ page: "networth", sub: "investments" });
+    expect(route).toMatchObject({ page: "investments", sub: "" });
     await go("#networth/investments");
     expect(route).toMatchObject({ page: "networth", sub: "investments" });
   });

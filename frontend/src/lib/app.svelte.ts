@@ -62,10 +62,11 @@ export function keepScroll(y: number): void {
 // `query`: what follows "?" (Transactions keeps its filters there).
 export const route = $state({ page: "overview", sub: "" as string, query: "" as string });
 
-// Old routes that moved (#investments is Net worth's Investments tab; #budget/recurring was Bills & income, now the
-// Recurring page): they resolve to the new route here, so everything downstream (the page, the nav highlight) sees only
-// the current routes.
-const MOVED: Record<string, [page: string, sub: string]> = { investments: ["networth", "investments"] };
+// Old routes that moved: they resolve to the new route here, so everything downstream (the page, the nav highlight) sees
+// only the current routes. (#budget/recurring was Bills & income, now the Recurring page, handled in readHash.
+// #investments is a page of its own; Net worth's Investments tab, #networth/investments, shows the same view and
+// lights the same nav item.)
+const MOVED: Record<string, [page: string, sub: string]> = {};
 
 function readHash(): void {
   const [path, query = ""] = (location.hash || "#overview").slice(1).split(/\?(.*)/s);

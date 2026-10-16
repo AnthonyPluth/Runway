@@ -109,6 +109,17 @@ describe("currentPage", () => {
     route.page = "budget";
     expect(currentPage()).toBe("budget");
   });
+
+  it("shows Investments for #investments and for Net worth's Investments tab, but not Net worth's other tabs", () => {
+    route.page = "investments"; route.sub = "";
+    expect(currentPage()).toBe("investments");
+    route.page = "networth"; route.sub = "investments";
+    expect(currentPage()).toBe("investments");
+    route.sub = "equity";
+    expect(currentPage()).toBe("networth");
+    route.sub = "";
+    expect(currentPage()).toBe("networth");
+  });
 });
 
 describe("signOut", () => {

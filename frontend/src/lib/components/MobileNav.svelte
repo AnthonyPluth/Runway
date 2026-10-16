@@ -8,11 +8,12 @@
   import Settings from "@lucide/svelte/icons/settings";
   import X from "@lucide/svelte/icons/x";
 
-  // On a phone (lib/phone.svelte.ts): a tab bar along the bottom with the four pages you use most, and More for the rest
-  // (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring is in the
-  // sidebar under Budget but goes in More here: five tabs and More wouldn't fit a phone's width.
-  const TABS = MAIN_NAV.filter((x) => x.page !== "recurring");
-  const MORE: NavItem[] = [...MAIN_NAV.filter((x) => x.page === "recurring"), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
+  // On a phone (lib/phone.svelte.ts): a floating tab bar along the bottom with the four pages you use most, and More for
+  // the rest (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring and
+  // Reports are in the sidebar's main group but go in More here: more tabs wouldn't fit a phone's width.
+  const IN_MORE = ["recurring", "reports"];
+  const TABS = MAIN_NAV.filter((x) => !IN_MORE.includes(x.page));
+  const MORE: NavItem[] = [...MAIN_NAV.filter((x) => IN_MORE.includes(x.page)), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
 
   const current = $derived(currentPage());
   const s = $derived(app.state);
@@ -29,7 +30,7 @@
 {#if open}
   <button type="button" class="fixed inset-0 z-40 cursor-default bg-black/60 desktop:hidden" aria-label="Close" onclick={() => (open = false)}></button>
   <div role="dialog" aria-modal="true" aria-label="More pages"
-    class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+5rem)] shadow-2xl desktop:hidden">
+    class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] shadow-2xl desktop:hidden">
     <div class="mb-2 flex items-center justify-between">
       <span class="text-sm font-semibold">More</span>
       <button type="button" class="flex size-8 cursor-pointer items-center justify-center rounded-full hover:bg-muted" aria-label="Close" onclick={() => (open = false)}><X class="size-4" /></button>
@@ -62,24 +63,25 @@
   </div>
 {/if}
 
-<nav aria-label="Main" class="fixed inset-x-0 bottom-0 z-50 border-t bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur desktop:hidden">
-  <div class="mx-auto grid max-w-lg grid-cols-5">
+<!-- A floating pill: inset from the sides and lifted off the bottom, translucent over the page with a blur behind it. -->
+<nav aria-label="Main" class="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 desktop:hidden">
+  <div class="mx-auto grid h-[66px] max-w-lg grid-cols-5 items-stretch gap-1 rounded-full border bg-popover/80 p-1.5 shadow-lg backdrop-blur-xl">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
-      <a href={`#${item.page}`} aria-current={on ? "page" : undefined}
-        class={cn("relative flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[11px]", on ? "text-foreground" : "text-muted-foreground")}>
+      <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}
+        class={cn("relative flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px]", on ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
         <item.icon class={cn("size-5", on && "stroke-[2.25]")} aria-hidden="true" />
-        {item.label}
+        {item.short ?? item.label}
         {#if item.page === "transactions" && s?.review_count}
           <span class="absolute top-1 left-1/2 ml-2 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums">{s.review_count > 99 ? "99+" : s.review_count}</span>
         {/if}
       </a>
     {/each}
     <button type="button" aria-expanded={open} onclick={() => (open = !open)}
-      class={cn("flex cursor-pointer flex-col items-center gap-0.5 pt-2 pb-1.5 text-[11px]", open || inMore ? "text-foreground" : "text-muted-foreground")}>
+      class={cn("flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[11px]", open || inMore ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
       <span class="relative"><Ellipsis class="size-5" aria-hidden="true" />
         <!-- A sync problem shows here too, so it's seen without opening the sheet. -->
-        {#if sync.href}<span class={cn("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-sidebar", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}
+        {#if sync.href}<span class={cn("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-popover", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}
       </span>More{#if sync.href}<span class="sr-only">{`, ${sync.text}`}</span>{/if}
     </button>
   </div>

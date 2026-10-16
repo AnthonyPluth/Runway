@@ -10,15 +10,18 @@ import House from "@lucide/svelte/icons/house";
 import Landmark from "@lucide/svelte/icons/landmark";
 import Repeat from "@lucide/svelte/icons/repeat";
 import List from "@lucide/svelte/icons/list";
+import TrendingUp from "@lucide/svelte/icons/trending-up";
 import { act } from "./act";
 import { forget as forgetLock } from "./lock.svelte";
 
-export interface NavItem { page: string; label: string; icon: typeof House }
+/** `short`: a shorter label for the phone's tab bar. */
+export interface NavItem { page: string; label: string; icon: typeof House; short?: string }
 
 export const MAIN_NAV: NavItem[] = [
   { page: "overview", label: "Overview", icon: House },
   { page: "transactions", label: "Transactions", icon: List },
   { page: "budget", label: "Budget", icon: ChartPie },
+  { page: "investments", label: "Investments", icon: TrendingUp, short: "Invest" },
   { page: "recurring", label: "Recurring", icon: Repeat },
   { page: "reports", label: "Reports", icon: ChartColumn },
 ];
@@ -27,8 +30,9 @@ export const MONEY_NAV: NavItem[] = [
   { page: "churning", label: "Churning", icon: CreditCard },
 ];
 
-/** The nav item to light up: Review is a tab of Transactions (Investments resolves to its hub in the router). */
-export const currentPage = () => (route.page === "review" ? "transactions" : route.page);
+/** The nav item to light up: Review is a tab of Transactions, and Net worth's Investments tab is the Investments page. */
+export const currentPage = () =>
+  route.page === "review" ? "transactions" : route.page === "networth" && route.sub === "investments" ? "investments" : route.page;
 
 export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? s.user : null);
 
