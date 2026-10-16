@@ -117,15 +117,15 @@ class WebAppTests(ServerCase):
                 self.assertEqual(static.cache_control(os.path.join(static.STATIC, other)), static.REVALIDATE)
 
     def test_the_page_preloads_only_the_font_the_first_screen_uses(self):
-        # frontend/index.html (what the build starts from): one preload, for the Latin Inter file, which exists, which
-        # the CSP's font-src 'self' allows, and which adds no "<script " (the nonce is put on those).
+        # frontend/index.html (what the build starts from): one preload, for the Geist file the stack leads with, which
+        # exists, which the CSP's font-src 'self' allows, and which adds no "<script " (the nonce is put on those).
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "frontend", "index.html"), encoding="utf-8") as f:
             page = f.read()
         preloads = [line for line in page.splitlines() if "<link" in line and 'rel="preload"' in line]
         self.assertEqual(len(preloads), 1)
-        self.assertIn('as="font" type="font/woff2" crossorigin href="/fonts/Inter-latin-Variable.woff2"', preloads[0])
-        self.assertTrue(os.path.isfile(os.path.join(root, "runway", "static", "fonts", "Inter-latin-Variable.woff2")))
+        self.assertIn('as="font" type="font/woff2" crossorigin href="/fonts/Geist-Variable.woff2"', preloads[0])
+        self.assertTrue(os.path.isfile(os.path.join(root, "runway", "static", "fonts", "Geist-Variable.woff2")))
         self.assertEqual(page.count("<script "), 1)
         self.assertIn("font-src 'self'", self.get("/")[1]["Content-Security-Policy"])
 
