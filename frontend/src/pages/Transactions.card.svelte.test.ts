@@ -207,6 +207,29 @@ describe("Transactions: the card follows the list, and the queue past 20", () =>
     expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument();
   });
 
+  it("ignores a slow older answer that arrives after a newer one", async () => {
+    const all = many(2);
+    let slow!: (v: unknown) => void;
+    let calls = 0;
+    serve(all, 2, (path, o) => {
+      if (path.includes("review=1") && path.includes("limit=20")) {
+        // The first answer is held back; the next (after the accept) says only Merchant 1 is left.
+        return ++calls === 1 ? new Promise((r) => { slow = r; }) : { items: [all[1]], total: 1 };
+      }
+      if (path.endsWith("/accept") && o?.method === "POST") return { ok: true, was: wasOf(path.split("/")[3]) };
+      return undefined;
+    });
+    render(Transactions);
+    await screen.findByText("Merchant 0");
+    await userEvent.click(screen.getByRole("button", { name: /^Accept Coffee for Merchant 0/ }));
+    await waitFor(() => expect(card()).not.toBeNull());
+    expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument();
+    slow({ items: all, total: 2 });   // the old answer, with Merchant 0 still waiting
+    await new Promise((r) => setTimeout(r));
+    expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument();
+    expect(within(card()!).queryByText("Merchant 0")).not.toBeInTheDocument();
+  });
+
   it("calls a day Today and Yesterday by the host's day (from the server), not the browser's", async () => {
     serve([tx({ id: "x", payee: "Xray", posted: "2026-03-10" }), tx({ id: "y", payee: "Yank", posted: "2026-03-09" })], 2, (path) =>
       path.startsWith("/api/overview") ? { events: [], today: "2026-03-10" } : path.includes("limit=20&") ? { items: [], total: 0 } : undefined);

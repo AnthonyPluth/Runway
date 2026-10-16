@@ -95,20 +95,27 @@
   // narrow it. A decision takes the transaction out of it at once; an undo loads it again (reloadWas).
   let queue = $state<Tx[]>([]);
   let queueTotal = $state(0);
+  // Each request takes a number; only the latest one's reply is applied, so a slow old answer can't bring back a
+  // transaction just decided or put an old total back. A decision on the card counts as a newer request too.
+  let queueSeq = 0;
   async function loadQueue() {
     if (review) return;
+    const mine = ++queueSeq;
     try {
       const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: "0" })}`);
+      if (mine !== queueSeq) return;
       queue = r.items.filter((t) => t.needs_review); queueTotal = r.total;
-    } catch { queue = []; queueTotal = 0; }   // the card is an extra: without it the list and the Review tab still work
+    } catch { if (mine === queueSeq) { queue = []; queueTotal = 0; } }   // the card is an extra: without it the list and the Review tab still work
   }
   loadQueue();
   /** The next batch of the queue, added to the end: what's loaded is still the first of it (a decided one has left the
    *  server's queue too), so the next starts after them. */
   async function moreQueue() {
     if (review) return;
+    const mine = ++queueSeq;
     try {
       const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: String(queue.length) })}`);
+      if (mine !== queueSeq) return;
       const have = new Set(queue.map((t) => t.id));
       queue = [...queue, ...r.items.filter((t) => t.needs_review && !have.has(t.id))]; queueTotal = r.total;
     } catch { /* the card goes on with what it has; the Review tab has the rest */ }
@@ -182,6 +189,7 @@
   async function decideCard(t: Tx, category: string): Promise<boolean> {
     const ok = category !== (t.category ?? "") ? await save(t, category) : await accept(t);
     if (!ok) return false;
+    queueSeq++;   // an answer still on its way was asked before this
     queue = queue.filter((x) => x.id !== t.id); queueTotal = Math.max(0, queueTotal - 1);
     if (queue.length < 3 && queueTotal > queue.length) moreQueue();   // what's loaded is running out
     txs.reloadRows([t.id]);
