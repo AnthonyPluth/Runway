@@ -25,7 +25,7 @@ describe("Transactions page", () => {
     const h1 = screen.getByRole("heading", { level: 1 });
     expect(h1).toHaveAccessibleName("Transactions");
     expect(summary()).toHaveTextContent("2 transactions · −$25.00 net");
-    expect(screen.getByRole("link", { name: /To review/ })).toHaveTextContent("3");
+    for (const link of screen.getAllByRole("link", { name: /To review/ })) expect(link).toHaveTextContent("3");   // the tab and the chip
     expect(lastList()).toContain("limit=100");
     expect(lastList()).not.toContain("review=1");
   });

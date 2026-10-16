@@ -10,12 +10,13 @@
   import { viewport } from "$lib/phone.svelte";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { ruleOffer } from "./remember.svelte";
-  import { fmtDate, fmtSigned, plural } from "$lib/format";
+  import { fmtSigned, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import type { RecurringItem } from "$lib/components/recurring/types";
   import { restoreTx, type Was } from "./restore";
   import TxRow from "./TxRow.svelte";
+  import { dayLabel, groupDays } from "./txDays";
   import type { RuleOffer, Tx } from "./types";
   import { act } from "$lib/act";
 
@@ -48,20 +49,9 @@
   const leftOut = (t: Tx) => (t.match ? false : t.splits?.length ? t.splits.some((p) => isTransfer(p.category)) : isTransfer(t.category));
 
   // Days, newest first, each with what came in and went out that day (and whether a transfer was left out of it).
-  const days = $derived.by(() => {
-    const out: { day: string; rows: { t: Tx; i: number }[]; net: number; transfers: boolean }[] = [];
-    items.forEach((t, i) => {
-      const day = t.posted.slice(0, 10);
-      if (out.at(-1)?.day !== day) out.push({ day, rows: [], net: 0, transfers: false });
-      const d = out.at(-1)!;
-      d.rows.push({ t, i }); d.net += counted(t);
-      if (leftOut(t)) d.transfers = true;
-    });
-    return out;
-  });
-  const thisYear = String(new Date().getFullYear());
-  const dayLabel = (d: string) => fmtDate(d, d.startsWith(thisYear) ? { weekday: "long", month: "short", day: "numeric" }
-    : { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  const days = $derived(groupDays(items, counted, leftOut));
+  const today = new Date();
+  const label = (d: string) => dayLabel(d, today);
 
   // Load more when the end of the list comes into view (the button does the same by hand). One that fails says so, with
   // a Retry, and isn't tried again on its own until you do.
@@ -198,11 +188,11 @@
        container, the days thin sub-headers in it. -->
   <div data-tx-list class="flex flex-col gap-4 lg:gap-0 lg:rounded-[0.875rem] lg:bg-card lg:[&>section:first-child>h3]:rounded-t-[0.875rem] lg:[&>section:last-child>div]:rounded-b-[0.875rem]">
     {#each days as d (d.day)}
-      <section aria-label={dayLabel(d.day)}>
+      <section aria-label={label(d.day)}>
         <!-- The right padding keeps the total over the amounts, not over the row's chevron. -->
         <!-- On the gray band (lg) the text is lighter than muted-foreground, which is too faint on gray to read. -->
         <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase backdrop-blur max-md:pr-[3.25rem] md:pr-9 lg:bg-muted lg:text-foreground/70 lg:py-1 lg:pr-14 lg:text-xs lg:backdrop-blur-none">
-          <span>{dayLabel(d.day)}</span>
+          <span>{label(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case" title={d.transfers ? "Transfers not counted" : undefined}>{fmtSigned(d.net)}</span>{/if}
         </h3>
         <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:5.25rem]">
