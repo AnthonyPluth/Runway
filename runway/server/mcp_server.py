@@ -464,6 +464,10 @@ ANY_TOOLS: list[dict[str, Any]] = [
               "object: month, account, category, q...), and any of category, payee, reviewed (true). The reply's `was` puts them "
               "back with {\"restore\": was}.", "POST", "transactions/bulk",
               {"fields": _fields("ids or filter, and category, payee, reviewed; or restore.")}, ["fields"], fields=True),
+    _endpoint("bulk_delete_transactions", "Delete many transactions at once (up to 2,000): ids (a list) or filter (list_transactions' "
+              "query as an object: month, account, category, q...). All or nothing; ids already gone are skipped. It can't be undone, "
+              "and a later bank sync may bring some of them back.", "POST", "transactions/bulk-delete",
+              {"fields": _fields("ids or filter.")}, ["fields"], fields=True),
     # budget
     _endpoint("set_budget", "Set a spending category's monthly budget.", "POST", "budget",
               {"category": _CATEGORY, "amount": {"type": "number", "exclusiveMinimum": 0}}, ["category", "amount"],

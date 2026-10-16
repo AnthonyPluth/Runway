@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-182 routes; 27 have no test yet.
+183 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -38,6 +38,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `GET /api/transactions` | `transactions.py:api_transactions` | `lib/components/overview/ThisMonth.svelte`, `lib/components/recurring/RecurringItem.svelte`, `lib/components/transactions/txList.svelte.ts` | `test_api_contract.py`, `test_api_handlers.py`, `test_api_validation.py`, `test_applock.py`, `test_categorize.py`, `test_merchants.py`, `test_retail.py`, `test_routes.py`, `test_search.py`, `test_security.py`, `test_server_errors.py`, `test_splits.py`, `test_tx_edits.py` | [contributing/development](/Runway/contributing/development/), [start/docker](/Runway/start/docker/) |
 | `POST /api/transactions` | `transactions.py:api_tx_create` | `lib/components/transactions/TxAdd.svelte` | `test_api_contract.py`, `test_api_validation.py`, `test_mcp.py`, `test_routes.py`, `test_server_errors.py`, `test_tx_edits.py` | [contributing/development](/Runway/contributing/development/), [start/docker](/Runway/start/docker/) |
 | `POST /api/transactions/bulk` | `transactions.py:api_tx_bulk` | `lib/components/transactions/ReviewGroups.svelte`, `lib/components/transactions/TxTable.svelte`, `lib/components/transactions/restore.ts`, `lib/components/transactions/review.svelte.ts` | `test_api_validation.py`, `test_bulk.py`, `test_categorize.py`, `test_mcp.py`, `test_retail.py`, `test_routes.py`, `test_rules.py`, `test_splits.py`, `test_tx_edits.py` | [using/features](/Runway/using/features/) |
+| `POST /api/transactions/bulk-delete` | `transactions.py:api_tx_bulk_delete` | `lib/components/transactions/TxTable.svelte` | `test_api_contract.py`, `test_mcp.py`, `test_tx_edits.py` | [using/features](/Runway/using/features/) |
 | `POST /api/transactions/import` | `transactions.py:api_tx_import` | - | `test_mcp.py`, `test_tx_edits.py` | [using/features](/Runway/using/features/) |
 | `POST /api/transactions/{id}/category` | `transactions.py:api_tx_category` | `lib/components/transactions/remember.svelte.ts`, `pages/Transactions.svelte` | `test_api_validation.py`, `test_bulk.py`, `test_monitoring.py`, `test_retail.py`, `test_splits.py` | [start/docker](/Runway/start/docker/) |
 | `POST /api/transactions/{id}/accept` | `transactions.py:api_tx_accept` | `pages/Transactions.svelte` | `test_rules.py` | [using/features](/Runway/using/features/) |

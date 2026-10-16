@@ -1,0 +1,45 @@
+{
+  "name": "transactions-bulk-delete-phone",
+  "page": "transactions",
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-tx]"
+    },
+    {
+      "click": "button:text-is('Select')"
+    },
+    {
+      "click": "input[aria-label='Select all shown']"
+    },
+    {
+      "wait_for": "[data-editor] button[aria-label='Delete the selected transactions']"
+    },
+    {
+      "scroll_to": "[data-editor]"
+    },
+    {
+      "screenshot": "selected"
+    },
+    {
+      "click": "[data-editor] button[aria-label='Delete the selected transactions']"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-slot=confirm-dialog]",
+        "text": "This can’t be undone."
+      }
+    },
+    {
+      "screenshot": "confirm"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text('Cancel')"
+    }
+  ],
+  "viewports": [
+    "phone"
+  ]
+}

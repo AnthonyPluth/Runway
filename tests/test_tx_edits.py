@@ -2,11 +2,12 @@
 editing, adding and deleting a transaction (with what Undo needs, and a sync that keeps what you changed)."""
 import unittest
 from datetime import date
+from unittest import mock
 
 from sqlalchemy import insert, select, update
 
 from runway.providers import plaidbank, simplefin
-from runway.domain import splits
+from runway.domain import categorize, splits
 from runway.storage.models import Account, PlaidAccount, RetailCharge, RetailOrder, Transaction, TxSplit
 from runway.server.api import transactions as tx
 from runway.server.common import ApiError
@@ -229,6 +230,74 @@ class AddTests(Ledger):
         tx.api_tx_delete(self.conn, {}, {}, r["id"])
         self.assertIsNone(self.conn.execute(select(TxSplit.id).where(TxSplit.tx_id == r["id"])).fetchone())
         self.assertIsNone(self.conn.execute(select(RetailCharge.tx_id).where(RetailCharge.id == "c1")).scalar())
+
+
+class BulkDeleteTests(Ledger):
+    """Many at once (api_tx_bulk_delete): the same clean-up as deleting one, all or nothing."""
+
+    def bulk(self, **body):
+        return tx.api_tx_bulk_delete(self.conn, {}, body)
+
+    def test_deletes_exactly_the_ids_given(self):
+        r = self.bulk(ids=["chk|1", "card|4", "chk|1"])
+        self.assertEqual(r, {"ok": True, "deleted": 2})
+        self.assertEqual(self.ids(), ["card|5", "card|6", "chk|2", "chk|3"])
+
+    def test_unknown_ids_are_skipped(self):
+        self.assertEqual(self.bulk(ids=["chk|1", "chk|nope"])["deleted"], 1)
+        self.assertEqual(self.bulk(ids=["chk|nope"])["deleted"], 0)
+        self.assertEqual(len(self.ids()), 5)
+
+    def test_deletes_every_one_a_filter_matches(self):
+        r = self.bulk(filter={"account": "card"})
+        self.assertEqual(r["deleted"], 3)
+        self.assertEqual(self.ids(), ["chk|1", "chk|2", "chk|3"])
+
+    def test_lets_go_of_parts_and_order_charges_like_deleting_one(self):
+        self.conn.execute(insert(RetailOrder).values(id="o1", retailer="amazon", order_number="1"))
+        self.conn.execute(insert(RetailCharge).values(id="c1", order_id="o1", date="2026-09-20", amount=-80, tx_id="card|5"))
+        self.conn.execute(insert(RetailCharge).values(id="c2", order_id="o1", date="2026-09-05", amount=-59.28, tx_id="chk|2"))
+        self.bulk(ids=["card|5", "chk|2"])
+        self.assertIsNone(self.conn.execute(select(TxSplit.id).where(TxSplit.tx_id == "card|5")).fetchone())
+        for charge in ("c1", "c2"):
+            row = self.conn.execute(select(RetailCharge.tx_id, RetailCharge.applied, RetailCharge.match_source)
+                                    .where(RetailCharge.id == charge)).fetchone()
+            self.assertEqual(tuple(row), (None, None, None))
+        self.assertEqual(len(self.ids()), 4)
+
+    def test_one_linked_to_a_recurring_item_goes_cleanly(self):
+        self.conn.execute(update(Transaction).where(Transaction.id.in_(["chk|1", "chk|2"])).values(recurring_id=7, recurring_linked_by="manual"))
+        self.assertEqual(self.bulk(ids=["chk|1", "chk|2"])["deleted"], 2)
+        self.assertEqual(self.ids(), ["card|4", "card|5", "card|6", "chk|3"])
+
+    def test_nothing_chosen_is_refused_and_nothing_deleted(self):
+        for body in ({}, {"ids": []}, {"ids": "chk|1"}, {"ids": [1, 2]}, {"ids": [None]}, {"filter": {"account": "nope"}}):
+            with self.subTest(body=body), self.assertRaisesRegex(ApiError, "Select some transactions first"):
+                self.bulk(**body)
+        self.assertEqual(len(self.ids()), 6)
+
+    def test_more_than_the_most_is_refused_and_nothing_deleted(self):
+        with mock.patch.object(categorize, "MAX_BULK", 3):
+            self.assertEqual(self.bulk(ids=["chk|1", "chk|2", "chk|3"])["deleted"], 3)
+            with self.assertRaisesRegex(ApiError, "Delete at most 3 transactions at once"):
+                self.bulk(ids=["card|4", "card|5", "card|6", "chk|nope"])
+        with mock.patch.object(categorize, "MAX_BULK", 2), self.assertRaisesRegex(ApiError, "Delete at most 2 transactions at once"):
+            self.bulk(filter={"account": "card"})
+        self.assertEqual(self.ids(), ["card|4", "card|5", "card|6"])
+
+    def test_a_failure_part_way_deletes_nothing(self):
+        real, calls = tx.delete, []
+
+        def flaky(*a, **kw):
+            calls.append(1)
+            if len(calls) == 4:   # the second chunk's parts
+                raise RuntimeError("disk full")
+            return real(*a, **kw)
+        with mock.patch.object(tx, "_CHUNK", 2), mock.patch.object(tx, "delete", flaky), self.assertRaises(RuntimeError):
+            self.bulk(ids=["chk|1", "chk|2", "chk|3", "card|4", "card|5"])
+        self.assertGreaterEqual(len(calls), 4)
+        self.assertEqual(len(self.ids()), 6)
+        self.assertEqual(len(self.conn.execute(select(TxSplit.id).where(TxSplit.tx_id == "card|5")).fetchall()), 2)
 
 
 class ImportTests(Ledger):

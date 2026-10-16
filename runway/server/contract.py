@@ -294,6 +294,18 @@ class TxCreated(TypedDict):
     id: str
 
 
+class TxBulkDelete(TypedDict):
+    """POST /api/transactions/bulk-delete: the transactions to delete, by `ids` or every one a list's `filter` (the query
+    GET /api/transactions takes) matches. At most 2,000."""
+    ids: NotRequired[list[str]]
+    filter: NotRequired[dict[str, str]]
+
+
+class TxDeleted(TypedDict):
+    ok: bool
+    deleted: int
+
+
 # App lock (runway/applock.py)
 
 class LockStatus(TypedDict):

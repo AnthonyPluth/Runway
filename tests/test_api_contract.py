@@ -149,6 +149,11 @@ class Replies(DbCase):
         splits.set_splits(self.c, made["id"], [])
         self.check("DELETE /api/transactions/{id}", transactions.api_tx_delete(self.c, {}, {}, made["id"]))
         self.assertIsNone(self.c.execute(select(Transaction.id).where(Transaction.id == made["id"])).fetchone())
+        more = transactions.api_tx_create(self.c, {}, {"account": "demo-checking", "posted": TODAY.isoformat(), "payee": "Corner Shop",
+                                                      "amount": "-3", "category": "Groceries"})
+        reply = transactions.api_tx_bulk_delete(self.c, {}, {"ids": [more["id"], "demo-checking|nope"]})
+        self.assertEqual(reply["deleted"], 1)
+        self.check("POST /api/transactions/bulk-delete", reply)
 
     def test_lock(self):
         # Without sign-in there's none; with it, this session's, turned on with a software passkey, locked and unlocked.

@@ -51,7 +51,7 @@ ALLOWED = [
     "POST /api/retail/charges/{id}/restore", "POST /api/retail/charges/{id}/unlink", "POST /api/retail/items/{id}",
     "POST /api/retail/items/{id}/restore", "POST /api/retail/match", "POST /api/retail/orders/{id}/suggest", "POST /api/rules",
     "POST /api/rules/preview", "POST /api/rules/{id}", "POST /api/rules/{id}/apply", "POST /api/tracked/{id}", "POST /api/transactions",
-    "POST /api/transactions/bulk", "POST /api/transactions/import", "POST /api/transactions/{id}", "POST /api/transactions/{id}/accept",
+    "POST /api/transactions/bulk", "POST /api/transactions/bulk-delete", "POST /api/transactions/import", "POST /api/transactions/{id}", "POST /api/transactions/{id}/accept",
     "POST /api/transactions/{id}/category", "POST /api/transactions/{id}/name", "POST /api/transactions/{id}/recurring",
     "POST /api/transactions/{id}/split",
 ]
@@ -457,7 +457,7 @@ class AllowlistTests(unittest.TestCase):
     def test_what_is_destructive(self):
         for m, p in (("DELETE", "/api/rules/{id}"), ("DELETE", "/api/overrides"), ("POST", "/api/categories/remove"),
                      ("POST", "/api/accounts/{id}/remove"), ("POST", "/api/recategorize"), ("POST", "/api/transactions/bulk"),
-                     ("POST", "/api/rules/{id}/apply"), ("POST", "/api/ai/apply"), ("POST", "/api/recurring/dismiss")):
+                     ("POST", "/api/transactions/bulk-delete"), ("POST", "/api/rules/{id}/apply"), ("POST", "/api/ai/apply"), ("POST", "/api/recurring/dismiss")):
             self.assertTrue(mcp_access.destructive(m, p), p)
         for m, p in (("POST", "/api/transactions"), ("POST", "/api/transactions/import"), ("POST", "/api/rules/{id}"),
                      ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore")):
