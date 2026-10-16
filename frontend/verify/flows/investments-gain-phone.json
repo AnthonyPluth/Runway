@@ -1,0 +1,15 @@
+{
+  "name": "investments-gain-phone",
+  "page": "networth",
+  "viewports": ["phone"],
+  "steps": [
+    { "goto": "#networth/investments" },
+    { "wait_for": "#inv-holdings li" },
+    { "scroll_to": "#inv-holdings" },
+    { "screenshot": "holdings-today" },
+    { "click": "#inv-holdings button:text-is('Total')" },
+    { "screenshot": "holdings-total" },
+    { "click": "#inv-holdings button:text-is('Weight')" },
+    { "screenshot": "holdings-weight" }
+  ]
+}
