@@ -748,23 +748,29 @@ TREND_DAYS = 30
 def _trend(conn, hold: list[dict], today: date) -> list[float]:
     """The last month's value, one number per trading day, of what you hold now at each day's close (cash as it is).
     A light stand-in for the history on the Investments page: no activity is replayed, so a trade last month shows at
-    today's share count."""
-    held = {h["ticker"]: h["quantity"] for h in hold if not h["is_cash"] and prices.usable_ticker(h["ticker"]) and h["quantity"]}
-    cash = sum(h["value"] for h in hold if h["is_cash"])
+    today's share count. What can't be priced (cash, a balance-only account, a position with no usable ticker, a ticker
+    with no closes this month) stays flat at its value now, as the full history does for unpriced positions. A day
+    counts once every priced ticker has a close, so a fund that starts pricing mid-month doesn't step the line."""
+    def priceable(h: dict) -> bool:
+        return not h["is_cash"] and prices.usable_ticker(h["ticker"]) and bool(h["quantity"])
+    held = {h["ticker"]: h["quantity"] for h in hold if priceable(h)}
     since = (today - timedelta(days=TREND_DAYS)).isoformat()
     closes: dict[str, dict[str, float]] = defaultdict(dict)   # ticker -> date -> close
     if held:
         for r in conn.execute(select(Price.ticker, Price.date, Price.close)
                               .where(Price.ticker.in_(list(held)), Price.date >= since, Price.close.is_not(None))):
             closes[r["ticker"]][r["date"]] = r["close"]
-    days = sorted({d for c in closes.values() for d in c})
+    flat = sum(h["value"] or 0 for h in hold if not priceable(h) or h["ticker"] not in closes)
+    held = {t: q for t, q in held.items() if t in closes}
+    first = max((min(closes[t]) for t in held), default="")
+    days = sorted({d for t in held for d in closes[t] if d >= first})
     out = []
     for d in days:
-        v = cash
+        v = flat
         for t, q in held.items():
-            c = closes.get(t)
-            if c:   # the latest close on or before this day (a fund that prices once a day is carried along)
-                v += q * c[d] if d in c else q * c[max((x for x in c if x < d), default=min(c))]
+            c = closes[t]
+            # the latest close on or before this day (a fund that prices once a day is carried along)
+            v += q * c[d] if d in c else q * c[max(x for x in c if x < d)]
         out.append(round(v, 2))
     return out
 

@@ -926,6 +926,24 @@ class SummaryTests(Base):
         self.assertEqual(out["trend"], [5500, 5460])
         self.assertEqual(out["trend"][-1], out["total"])
 
+    def test_the_trend_keeps_a_balance_only_account_and_an_unpriced_position_flat(self):
+        self.c.execute(insert(Security), [{"id": "sf:balance", "ticker": None, "name": "Balance", "type": "other", "is_cash": 0},
+                                          {"id": "NOTK", "ticker": None, "name": "No ticker", "type": "equity", "is_cash": 0}])
+        self.c.execute(insert(Holding).values(account_id="A", security_id="sf:balance", quantity=1, price=300, value=300))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="NOTK", quantity=2, price=100, value=200))
+        out = portfolio.summary(self.c, date(2026, 9, 23))
+        self.assertEqual(out["total"], 5960)
+        self.assertEqual(out["trend"], [6000, 5960])
+
+    def test_the_trend_skips_days_before_every_ticker_has_a_close_and_holds_one_with_no_history_flat(self):
+        self.c.execute(insert(Security), [{"id": t, "ticker": t, "name": t, "type": "equity", "is_cash": 0} for t in ("LATE", "NONE")])
+        self.price("LATE", "2026-09-22", 50)   # first close is the last day: the 21st has no value for it
+        self.c.execute(insert(Holding).values(account_id="A", security_id="LATE", quantity=4, price=50, value=200))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="NONE", quantity=2, price=100, value=200))   # no closes at all
+        out = portfolio.summary(self.c, date(2026, 9, 23))
+        self.assertEqual(out["trend"], [5460 + 400])
+        self.assertEqual(out["trend"][-1], out["total"])
+
     def test_market_hours_by_the_new_york_clock(self):
         open_, early, saturday = (datetime(2026, 9, 23, 14, 0, tzinfo=UTC), datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
                                   datetime(2026, 9, 26, 15, 0, tzinfo=UTC))

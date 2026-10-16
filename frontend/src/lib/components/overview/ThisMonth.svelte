@@ -50,7 +50,11 @@
 </script>
 
 {#await data}
-  <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
+  <!-- The Investments card has its own request, so a slow month doesn't hide it. -->
+  <div class="flex min-w-0 flex-col gap-6">
+    <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
+    {@render after?.()}
+  </div>
 {:then [pace, budget, latest]}
   {@const diff = pace.spent - pace.last_same_point}
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
