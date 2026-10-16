@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
@@ -253,6 +254,45 @@ describe("HoldingsTable", () => {
       expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Done" }));
       expect(screen.queryByLabelText("Price per share in Brokerage")).not.toBeInTheDocument();
+    });
+
+    // A window resized (or a phone turned) while the page is open: the media query changes under the component.
+    function liveStub() {
+      const mqs: { query: string; matches: boolean; fns: (() => void)[] }[] = [];
+      vi.stubGlobal("matchMedia", (query: string) => {
+        const mq = { query, matches: query === PHONE || query === "(max-width: 1279px)", fns: [] as (() => void)[],
+          addEventListener: (_: string, f: () => void) => mq.fns.push(f), removeEventListener: vi.fn() };
+        mqs.push(mq);
+        return mq;
+      });
+      return async (phone: boolean) => {
+        for (const mq of mqs) if (mq.query === PHONE) { mq.matches = phone; mq.fns.forEach((f) => f()); }
+        await tick();
+      };
+    }
+
+    it("switches between the list and the table when the screen changes while the page is open", async () => {
+      const setPhone = liveStub();
+      setup(three());
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      await setPhone(false);
+      expect(screen.getByRole("table")).toBeInTheDocument();
+      expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+      await setPhone(true);
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(items()).toHaveLength(3);
+    });
+
+    it("keeps an open cost basis editor across the switch", async () => {
+      const setPhone = liveStub();
+      setup([holding({ lots: [lot()] })]);
+      await userEvent.click(screen.getByRole("button", { name: /VTI/ }));
+      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
+      await setPhone(false);
+      expect(screen.getByRole("table")).toBeInTheDocument();
+      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
+      await setPhone(true);
+      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
     });
 
     it("keeps cash a plain row, without an editor", () => {
