@@ -23,7 +23,10 @@
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, fmtDate, fmtSigned, monthShort, pct, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
+  import type { Snippet } from "svelte";
 
+  // `after` is drawn under the month's spending, or alone if the rest can't load (Overview's Investments card).
+  let { after }: { after?: Snippet } = $props();
   const month = thisMonth();
   const fresh = Promise.all([
     api<Pace>("/api/month_pace"),
@@ -66,6 +69,7 @@
         <div class="mt-2"><LineChart xs={c.xs} series={c.series} labels zero height={180} fmtY={fmt0} fmtTip={fmt} table={false} /></div>
       </div>
     </Group>
+    {@render after?.()}
 
     {#if budgets.length}
     <Group title="Budgets" inset="3.75rem">
@@ -117,4 +121,5 @@
   </div>
 {:catch}
   <!-- The forecast is the main thing; if this part can't load, it just isn't shown. -->
+  {@render after?.()}
 {/await}

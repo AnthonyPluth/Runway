@@ -219,6 +219,14 @@ def market_state(q: dict | None, now: float | None = None) -> str:
     return "open" if q["open_start"] <= now < q["open_end"] else "closed"
 
 
+def market_hours(now: datetime | None = None) -> str:
+    """'open' on a weekday from 9:30 to 16:00 New York time, else 'closed', from the clock alone (holidays aren't known;
+    a live quote's trading period, market_state, is exact). For a reply that has no quotes."""
+    from zoneinfo import ZoneInfo
+    t = (now or datetime.now(UTC)).astimezone(ZoneInfo("America/New_York"))
+    return "open" if t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0) else "closed"
+
+
 # ------------------------------------------------------------------------------------------------ streaming
 
 STREAM_SECONDS = 5        # fastest re-quote while the market is open (slower with many tickers, to go easy on Yahoo)

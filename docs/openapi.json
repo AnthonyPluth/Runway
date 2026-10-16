@@ -537,6 +537,27 @@
           }
         }
       }
+    },
+    "/api/investments/summary": {
+      "get": {
+        "operationId": "api_investments_summary",
+        "x-handler": "runway/server/api/investments.py:api_investments_summary",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestmentsSummary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1097,6 +1118,110 @@
           "minimum",
           "stale",
           "next_close"
+        ],
+        "additionalProperties": false
+      },
+      "InvestmentMover": {
+        "type": "object",
+        "description": "A holding that moved today: its ticker and its day change as a fraction (0.021 is +2.1%).",
+        "properties": {
+          "ticker": {
+            "type": "string"
+          },
+          "day_change_pct": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "day_change_pct"
+        ],
+        "additionalProperties": false
+      },
+      "InvestmentPosition": {
+        "type": "object",
+        "description": "A non-cash holding, as live prices re-price it: shares held, value now, and its change today in dollars.",
+        "properties": {
+          "ticker": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number"
+          },
+          "day_change": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ticker",
+          "quantity",
+          "value",
+          "day_change"
+        ],
+        "additionalProperties": false
+      },
+      "InvestmentsSummary": {
+        "type": "object",
+        "description": "GET /api/investments/summary, the Overview card's light reply: the total, today's change (dollars, and a\nfraction of yesterday's value), whether the market is open by the clock, the three holdings with the largest day\nchange % (cash left out), the last month's value at today's share counts, and the positions live prices re-price.\nWith no investment accounts `empty` is true and the rest is blank.",
+        "properties": {
+          "empty": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "number"
+          },
+          "day_change": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "day_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "market": {
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "movers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvestmentMover"
+            }
+          },
+          "trend": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvestmentPosition"
+            }
+          }
+        },
+        "required": [
+          "empty",
+          "total",
+          "day_change",
+          "day_change_pct",
+          "market",
+          "movers",
+          "trend",
+          "positions"
         ],
         "additionalProperties": false
       },

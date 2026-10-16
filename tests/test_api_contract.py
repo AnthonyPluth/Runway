@@ -10,12 +10,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 
 from runway.domain import demo, splits
-from runway.storage.models import (Account, AuthSession, CardStatement, PlaidAccount, PlaidItem, RetailCharge, RetailOrder,
+from runway.storage.models import (Account, AuthSession, CardStatement, InvAccount, PlaidAccount, PlaidItem, RetailCharge, RetailOrder,
                                    Transaction)
-from runway.server.api import accounts, budget, budget_suggest, lock, transactions
+from runway.server.api import accounts, budget, budget_suggest, investments, lock, transactions
 from runway.server.common import _current
 from tests.shared import TODAY, DbCase, freeze_today
 from tests.webauthn_support import ORIGIN, Authenticator
@@ -100,6 +100,7 @@ class Replies(DbCase):
         self.test_budget()
         self.test_transactions()
         self.test_lock()
+        self.test_investments_summary()
         self.assertEqual(self.checked, covered(), "check each route the contract covers here")
 
     def test_accounts(self):
@@ -154,6 +155,17 @@ class Replies(DbCase):
         reply = transactions.api_tx_bulk_delete(self.c, {}, {"ids": [more["id"], "demo-checking|nope"]})
         self.assertEqual(reply["deleted"], 1)
         self.check("POST /api/transactions/bulk-delete", reply)
+
+    def test_investments_summary(self):
+        demo.seed_investments(self.c, TODAY)
+        reply = investments.api_investments_summary(self.c, {}, {})
+        self.assertFalse(reply["empty"])
+        self.assertTrue(reply["movers"] and reply["trend"])
+        self.check("GET /api/investments/summary", reply)
+        self.c.execute(delete(InvAccount))   # no investment accounts: the empty reply is the same shape
+        empty = investments.api_investments_summary(self.c, {}, {})
+        self.assertTrue(empty["empty"])
+        self.check("GET /api/investments/summary", empty)
 
     def test_lock(self):
         # Without sign-in there's none; with it, this session's, turned on with a software passkey, locked and unlocked.

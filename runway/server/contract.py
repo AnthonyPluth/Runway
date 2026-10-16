@@ -306,6 +306,37 @@ class TxDeleted(TypedDict):
     deleted: int
 
 
+# Investments
+
+class InvestmentMover(TypedDict):
+    """A holding that moved today: its ticker and its day change as a fraction (0.021 is +2.1%)."""
+    ticker: str
+    day_change_pct: float
+
+
+class InvestmentPosition(TypedDict):
+    """A non-cash holding, as live prices re-price it: shares held, value now, and its change today in dollars."""
+    ticker: str
+    quantity: float
+    value: float
+    day_change: float | None
+
+
+class InvestmentsSummary(TypedDict):
+    """GET /api/investments/summary, the Overview card's light reply: the total, today's change (dollars, and a
+    fraction of yesterday's value), whether the market is open by the clock, the three holdings with the largest day
+    change % (cash left out), the last month's value at today's share counts, and the positions live prices re-price.
+    With no investment accounts `empty` is true and the rest is blank."""
+    empty: bool
+    total: float
+    day_change: float | None
+    day_change_pct: float | None
+    market: Literal["open", "closed"]
+    movers: list[InvestmentMover]
+    trend: list[float]
+    positions: list[InvestmentPosition]
+
+
 # App lock (runway/applock.py)
 
 class LockStatus(TypedDict):
