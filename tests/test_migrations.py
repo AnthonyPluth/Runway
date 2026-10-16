@@ -497,6 +497,35 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
+    def test_0045_moves_recurring_items_off_a_retired_plaid_account(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0044")
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind, hidden, plaid_account_id) VALUES "
+                              "('pl:p1', 'Old copy', 'credit', 1, NULL), ('card', 'Card A', 'credit', 0, 'p1'), "
+                              "('pl:p2', 'Unused', 'credit', 1, NULL), "            # hidden, matched to nothing
+                              "('pl:p3', 'Own', 'credit', 0, 'p3'), "               # its own account, in use
+                              "('pl:p4', 'Old too', 'credit', 1, NULL), ('gone', 'Card C', 'credit', 1, 'p4'), "
+                              "('chk', 'Checking', 'checking', 0, NULL)")
+            c.exec_driver_sql("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES "
+                              "(1, 'Gym', 'pl:p1', -30, 'monthly', '2026-09-05'), (2, 'Club', 'pl:p2', -10, 'monthly', '2026-09-06'), "
+                              "(3, 'Fee', 'pl:p3', -5, 'monthly', '2026-09-07'), (4, 'Box', 'pl:p4', -20, 'monthly', '2026-09-08'), "
+                              "(5, 'Rent', 'chk', -900, 'monthly', '2026-09-01')")
+            c.exec_driver_sql("INSERT INTO transactions(id, account_id, posted, amount, recurring_id) "
+                              "VALUES ('pl:p1|1', 'pl:p1', '2026-08-05', -30, 1)")
+            c.exec_driver_sql("INSERT INTO overrides(key, amount) VALUES ('rec:1:2026-10-05', -35)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            self.assertEqual(dict(conn.execute(select(Recurring.id, Recurring.account_id).order_by(Recurring.id)).fetchall()),
+                             {1: "card", 2: "pl:p2", 3: "pl:p3", 4: "pl:p4", 5: "chk"})
+            self.assertEqual(conn.execute(select(Transaction.account_id, Transaction.recurring_id)).fetchone(), ("pl:p1", 1))
+        with db.engine(self.path).begin() as c:   # and back down, leaving them where they are
+            command.downgrade(db.alembic_config(c), "0044")
+            self.assertEqual(c.exec_driver_sql("SELECT account_id FROM recurring WHERE id = 1").scalar(), "card")
+
     def test_0044_adds_the_key_share_to_app_locks_and_it_goes_with_the_row(self):
         from alembic import command
         db.init(self.path)

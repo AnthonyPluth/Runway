@@ -725,7 +725,8 @@ def forecast_accounts(conn, accounts: list[dict], today: date) -> tuple[list[dic
 def moved_to(conn) -> dict[str, str]:
     """{hidden account id: the account it is now}: an account added from Plaid ("pl:<Plaid's id>") and since matched to
     another of yours is hidden, and that one holds its Plaid id (plaidbank._retire_own_account, migration 0012). The
-    forecast takes recurring items left on the hidden one as on the other, so they aren't silently dropped."""
+    forecast takes recurring items left on the hidden one as on the other, so they aren't silently dropped. (Matching
+    moves them itself, plaidbank._move_recurring, and migration 0045 moved the ones already left: this is in case.)"""
     now = {r["plaid_account_id"]: r["id"] for r in conn.execute(
         select(Account.id, Account.plaid_account_id)
         .where(Account.hidden == 0, Account.plaid_account_id.is_not(None), Account.id.not_like("pl:%")))}
