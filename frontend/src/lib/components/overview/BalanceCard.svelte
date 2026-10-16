@@ -49,7 +49,7 @@
   const allChecking = $derived(fc.accounts.length > 0 && fc.accounts.every((a) => a.kind === "checking"));
   const what = $derived(fc.accounts.length === 1 ? (allChecking ? "Checking" : fc.accounts[0].name) : "Your cash");
   const lowEvents = $derived(fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount));
-  const nextIn = $derived(fc.events.find((e) => e.amount > 0 && e.date > low.date));
+  const nextIn = $derived(fc.events.find((e) => e.amount > 0 && e.date > fc.today));
   const asOf = $derived(balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok));
   const note = $derived(balanceNote(asOf?.text, fc.accounts.reduce((s, a) => s + (a.pending ?? 0), 0)));
   // The balance large, its cents muted.

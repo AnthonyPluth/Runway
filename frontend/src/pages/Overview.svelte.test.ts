@@ -101,6 +101,15 @@ describe("Overview", () => {
     expect(screen.getByText("On track")).toBeInTheDocument();
   });
 
+  it("names the next paycheck even when the lowest point comes after it", async () => {
+    serve(() => fc({ low: { date: "2026-11-10", balance: 500 }, events: [
+      { date: "2026-10-20", name: "Paycheck", amount: 2000, kind: "recurring", key: "p", balance_after: 3000 },
+      { date: "2026-11-10", name: "Rent", amount: -2500, kind: "recurring", key: "r", balance_after: 500 }] }));
+    render(Overview);
+    expect(await screen.findByText("Paycheck · Oct 20")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing scheduled")).not.toBeInTheDocument();
+  });
+
   it("sends you to the forecast settings when there's no account to forecast", async () => {
     serve(() => fc({ accounts: [], total: [], events: [] }));
     render(Overview);

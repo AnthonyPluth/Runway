@@ -26,7 +26,7 @@
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import { Button } from "$lib/components/ui/button";
-    import { parseDate } from "$lib/format";
+  import { parseDate } from "$lib/format";
   import { syncDot, syncStatus } from "$lib/nav.svelte";
   import type { Overview } from "$lib/types";
   import { undoable } from "$lib/undo";

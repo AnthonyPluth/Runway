@@ -3,25 +3,33 @@
   import { gainCls, signed } from "$lib/components/investments/numbers";
   import type { NetWorth } from "$lib/components/networth/types";
   import { apiCall } from "$lib/contract";
-  import { barWidth, fmt0, monthShort, thisMonth } from "$lib/format";
+  import { barWidth, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
+  import type { Pace } from "./pace";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
   // Two tiles under the balance card, each a link: this month's spending against the budgets, and net worth with its
   // last month. Each loads on its own and says nothing if it can't (the card above is the main thing).
-  interface Pace { month: string; prev_month: string; spent: number; last_same_point: number }
+  // (Spending asks for the same pace and budget as "This month" below it: a second request each, kept so the tiles
+  // load and fail on their own.)
   const month = thisMonth();
-  const spending = Promise.all([api<Pace>("/api/month_pace"), apiCall<"GET /api/budget">(`/api/budget?month=${month}`)]);
-  const worth = api<NetWorth>("/api/networth");
+  const loadSpending = () => Promise.all([api<Pace>("/api/month_pace"), apiCall<"GET /api/budget">(`/api/budget?month=${month}`)]);
+  const loadWorth = () => api<NetWorth>("/api/networth");
+  let spending = $state(loadSpending());
+  let worth = $state(loadWorth());
 
   const tile = "tile block min-w-0 transition-colors hover:bg-white/4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
-  // Net worth's line is the history since the start of this month (a point just before it, so the line has a start).
+  // Net worth's line is the history since the start of this month. Its change is measured from the snapshot on or before
+  // the month's first day, and only from that: snapshots are saved when the numbers are viewed, so an older one would
+  // pass an earlier month's change off as this month's.
   function sinceMonthStart(h: NetWorth["history"]) {
     const start = `${month}-01`;
-    const before = h.filter((p) => p.date < start).at(-1);
-    return { points: [...(before ? [before] : []), ...h.filter((p) => p.date >= start)], base: before ?? null };
+    const before = h.filter((p) => p.date <= start).at(-1);
+    return { points: [...(before ? [before] : []), ...h.filter((p) => p.date > start)], base: before ?? null };
   }
+  // Days from a snapshot to the month's first day: past a few, the change is labelled with where it starts from.
+  const gapDays = (d: string) => Math.round((Date.parse(`${month}-01T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 864e5);
   const W = 120, H = 32;
   function line(vals: number[]): string {
     if (vals.length < 2) return "";
@@ -61,14 +69,17 @@
       {/if}
     </a>
   {:catch}
-    <div class="hidden"></div>
+    <div class="tile flex min-w-0 flex-col justify-center gap-1 text-[13px] text-muted-foreground" data-failed="spending">
+      <span>Couldn’t load spending</span>
+      <button type="button" class="self-start font-medium text-primary" onclick={() => (spending = loadSpending())}>Try again</button>
+    </div>
   {/await}
 
   {#await worth}
     <div class="h-32 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
   {:then nw}
     {@const since = sinceMonthStart(nw.history)}
-    {@const change = since.base ? nw.net - since.base.net : nw.change["30d"]}
+    {@const change = since.base ? nw.net - since.base.net : null}
     {@const path = line(since.points.map((p) => p.net))}
     <a href="#networth" class={tile} aria-label={`Net worth, ${fmt0(nw.net)}. Open Net worth`}>
       <span class="flex items-center justify-between text-[13px] text-muted-foreground">Net worth<ChevronRight class="size-4" aria-hidden="true" /></span>
@@ -79,10 +90,13 @@
         </svg>
       {/if}
       <span class={cn("mt-1.5 block text-[13px] font-medium tabular-nums", gainCls(change) || "text-muted-foreground")}>
-        {#if change == null}No change yet{:else}{signed(change)}<span class="font-normal text-muted-foreground"> {since.base ? "this month" : "in 30 days"}</span>{/if}
+        {#if change == null}No change yet this month{:else}{signed(change)}<span class="font-normal text-muted-foreground"> {since.base && since.base.date < `${month}-01` && gapDays(since.base.date) > 3 ? `since ${fmtDate(since.base.date, { month: "short", day: "numeric", year: "numeric" })}` : "this month"}</span>{/if}
       </span>
     </a>
   {:catch}
-    <div class="hidden"></div>
+    <div class="tile flex min-w-0 flex-col justify-center gap-1 text-[13px] text-muted-foreground" data-failed="networth">
+      <span>Couldn’t load net worth</span>
+      <button type="button" class="self-start font-medium text-primary" onclick={() => (worth = loadWorth())}>Try again</button>
+    </div>
   {/await}
 </div>

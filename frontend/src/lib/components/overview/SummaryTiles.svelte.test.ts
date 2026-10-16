@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", async (orig) => ({ ...(await orig()), api: vi.fn() }));
@@ -14,7 +15,7 @@ const cat = (name: string, budget: number, spent: number) => ({ name, parent: nu
 const pace = { month, prev_month: "2026-02", this: [], last: [], spent: 640, last_same_point: 500, last_total: 1200 };
 const budget = (day: number, cats = [cat("Dining", 400, 300), cat("Travel", 600, 340)]) =>
   ({ month, days_in_month: 30, day, categories: cats, income: 0, income_rows: [], uncategorized: 0, pay_accounts: [] });
-const networth = (history = [{ date: "2000-01-01", net: 90000, assets: 0, liabilities: 0 }, { date: `${month}-01`, net: 90500, assets: 0, liabilities: 0 }, { date: `${month}-10`, net: 91250, assets: 0, liabilities: 0 }]) =>
+const networth = (history = [{ date: `${month}-01`, net: 90000, assets: 0, liabilities: 0 }, { date: `${month}-10`, net: 91250, assets: 0, liabilities: 0 }]) =>
   ({ today: `${month}-10`, net: 91250, assets: 0, liabilities: 0, groups: [], excluded: [], history, first_snapshot: null,
     change: { "30d": 1250, "90d": null, "1y": null } });
 const serve = (b: unknown, n: unknown) => vi.mocked(api).mockImplementation((async (path: string) => {
@@ -62,13 +63,34 @@ describe("SummaryTiles", () => {
     expect(container.querySelector("polyline")).not.toBeNull();
   });
 
-  it("leaves out a tile that can't load, and keeps the other", async () => {
+  it("says so when a tile can't load, keeps the other, and tries again", async () => {
+    let down = true;
     vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/networth") return networth();
-      throw new Error("down");
+      if (down) throw new Error("down");
+      return path === "/api/month_pace" ? pace : budget(15);
     }) as never);
     render(SummaryTiles);
     expect(await screen.findByRole("link", { name: /^Net worth/ })).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load spending")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Spending/ })).not.toBeInTheDocument();
+    down = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: /^Spending/ })).toBeInTheDocument();
+  });
+
+  it("shows no change for the month when there's no snapshot from before it", async () => {
+    serve(budget(15), networth([{ date: `${month}-05`, net: 90500, assets: 0, liabilities: 0 }, { date: `${month}-10`, net: 91250, assets: 0, liabilities: 0 }]));
+    render(SummaryTiles);
+    expect(await screen.findByText("No change yet this month")).toBeInTheDocument();
+    expect(screen.queryByText("this month")).not.toBeInTheDocument();
+  });
+
+  it("says where the change starts from when the snapshot is much older than the month", async () => {
+    serve(budget(15), networth([{ date: "2000-01-01", net: 90000, assets: 0, liabilities: 0 }, { date: `${month}-10`, net: 91250, assets: 0, liabilities: 0 }]));
+    render(SummaryTiles);
+    expect(await screen.findByText("+$1,250.00")).toBeInTheDocument();
+    expect(screen.getByText("since Jan 1, 2000")).toBeInTheDocument();
+    expect(screen.queryByText("this month")).not.toBeInTheDocument();
   });
 });
