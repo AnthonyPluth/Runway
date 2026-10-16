@@ -7,7 +7,7 @@
   import * as Sheet from "$lib/components/ui/sheet";
   import { fieldCls, inputCls, selectCls } from "$lib/components/settings/ui";
   import { accountName, type Account } from "$lib/types";
-  import Settings2 from "@lucide/svelte/icons/settings-2";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
   import { forecastSheet } from "./forecastSheet.svelte";
   import { act, errMsg } from "$lib/act";
@@ -49,7 +49,7 @@
 <Sheet.Root bind:open={forecastSheet.open}>
   <Sheet.Trigger aria-label="Forecast settings"
     class="-mx-1.5 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[15px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-    {label}<Settings2 class="size-4" aria-hidden="true" />
+    {label}<ChevronDown class="size-4" aria-hidden="true" />
   </Sheet.Trigger>
   <Sheet.Content>
     <Sheet.Header>

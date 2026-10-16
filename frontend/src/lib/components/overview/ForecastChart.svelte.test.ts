@@ -83,3 +83,18 @@ describe("ForecastChart's readout on a phone", () => {
     expect(tip(container).style.top).not.toBe("0px");
   });
 });
+
+describe("ForecastChart, compact", () => {
+  it("marks the lowest day and writes the last day's balance at the line's end", () => {
+    const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, 1300, 2500] }), compact: true } });
+    expect(container.querySelector("svg")).toHaveAttribute("viewBox", expect.stringMatching(/ 120$/));
+    expect(container.querySelectorAll("[data-low]")).toHaveLength(1);
+    expect(container.querySelector("[data-end]")).toHaveTextContent("$2,500");
+  });
+
+  it("leaves the marks off the full chart", () => {
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    expect(container.querySelector("[data-low]")).toBeNull();
+    expect(container.querySelector("[data-end]")).toBeNull();
+  });
+});

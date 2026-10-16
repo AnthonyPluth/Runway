@@ -4,7 +4,7 @@
 
   // This month so far: spending against the same point last month, the budgets closest to their limit, and the
   // latest transactions.
-  interface Pace { month: string; prev_month: string; this: number[]; last: number[]; spent: number; last_same_point: number; last_total: number }
+  import type { Pace } from "./pace";
   // What was last on screen, drawn at once when Overview is drawn afresh (after a change) until the new numbers arrive.
   let last: [Pace, BudgetMonth, TxList] | null = null;
 </script>
