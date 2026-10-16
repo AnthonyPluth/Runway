@@ -6,7 +6,7 @@
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
-  import { gainCls, pct, pctAbs, signed } from "$lib/components/investments/numbers";
+  import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
   import type { AllocKey, Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
   import RefreshFailed from "$lib/components/networth/RefreshFailed.svelte";
@@ -35,6 +35,7 @@
   let busy = $state(false);
   let live = $state<LiveQuotes | null>(null);
   let shownPeriod = $state(inv.period);
+  let chartMode = $state<"value" | "return">("value");
 
   async function load(period = inv.period) {
     busy = true;
@@ -69,15 +70,27 @@
   // A gain or loss is only colored green or coral (`up`/`down`); the warning tones are kept for what needs a look.
   const tone = (x: number | null | undefined): StatTone | undefined => (x == null || x === 0 ? undefined : x > 0 ? "up" : "down");
   const beat = $derived(perf.benchmark_return != null && perf.return != null ? perf.return - perf.benchmark_return : null);
+  // How far ahead of (or behind) the S&P 500 the period is, in percentage points; level when it rounds to nothing.
+  const pts = $derived(beat == null ? null : Number((beat * 100).toFixed(2)));
+  const vsBench = $derived(pts == null ? null : pts === 0 ? "level with the S&P 500" : `${pts > 0 ? "+" : "−"}${Math.abs(pts).toFixed(2)} pts vs S&P 500`);
+  const periodLabel = (p: string) => (p === "MAX" ? "All" : p);
+  const PERIODS = ["1M", "3M", "YTD", "1Y", "2Y", "MAX"].map((p) => ({ value: p, label: periodLabel(p) }));
+  // The total in large type with its cents in the muted color.
+  const totalParts = $derived.by(() => {
+    const t = d ? fmt(d.total) : "";
+    const k = t.lastIndexOf(".");
+    return k < 0 ? { main: t, cents: "" } : { main: t.slice(0, k), cents: t.slice(k) };
+  });
+  const accountCount = $derived(d ? d.accounts.filter((a) => !a.hidden).length : 0);
+  const change = $derived(perf.gain ?? perf.return ?? 0);
   const stats = $derived.by((): Stat[] => {
     if (!d) return [];
     return [
-      { label: "Total value", value: fmt0(d.total), sub: `${plural(d.accounts.filter((a) => !a.hidden).length, "account")} · ${plural(d.holdings.length, "holding")}` },
       { label: "Today", value: d.day_change == null ? "—" : signed(d.day_change), tone: tone(d.day_change), sub: d.day_change_pct == null ? undefined : `${pct(d.day_change_pct, 2)} since the last close` },
       { label: "Total gain", value: signed(d.unrealized_gain), tone: tone(d.unrealized_gain),
         sub: d.cost_basis && d.unrealized_gain != null ? `${pct(d.unrealized_gain / d.cost_basis)} on ${fmt0(d.cost_basis)} cost basis` : undefined },
-      { label: `Return · ${inv.period}`, value: pct(perf.return), tone: tone(perf.return),
-        sub: `S&P 500 ${pct(perf.benchmark_return)}${beat == null ? "" : pctAbs(beat) === pctAbs(0) ? " · level with it" : beat > 0 ? ` · ahead by ${pctAbs(beat)}` : ` · behind by ${pctAbs(beat)}`}` },
+      { label: `Return · ${periodLabel(inv.period)}`, value: pct(perf.return), tone: tone(perf.return), sub: `S&P 500 ${pct(perf.benchmark_return)}` },
+      { label: "Dividends · 12 mo", value: fmt0(d.income.income_12m), sub: `fees ${fmt(d.income.fees_12m)}` },
     ];
   });
   const lastSync = $derived([status?.last_inv_sync, status?.simplefin_last_sync].filter(Boolean).sort().pop());
@@ -140,17 +153,13 @@
   </Card.Root>
 {:else}
   {#if error}<RefreshFailed {error} onretry={() => load(shownPeriod)} />{/if}
-  <div class="mb-6 flex flex-wrap items-center justify-end gap-3">
-    <div class="flex flex-wrap items-center gap-3">
-      <span class={cn("inline-flex items-center gap-1.5 text-sm", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
-        title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined} data-testid="holdings-updated">
-        {#if !live}Holdings updated {synced}
-        {:else if live.market === "open"}<LiveDot /> Live prices
-        {:else}Market closed · latest prices as of {liveTime}{/if}
-      </span>
-      <Segmented label="Period" bind:value={shownPeriod} onchange={setPeriod} class={busy ? "opacity-70" : ""}
-        options={["1M", "3M", "YTD", "1Y", "2Y"].map((p) => ({ value: p, label: p }))} />
-    </div>
+  <div class="mb-4 flex justify-end">
+    <span class={cn("inline-flex items-center gap-1.5 rounded-full border border-[var(--edge)] bg-card px-3 py-1 text-xs", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
+      title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined} data-testid="holdings-updated">
+      {#if !live}Holdings updated {synced}
+      {:else if live.market === "open"}<LiveDot /> Live prices
+      {:else}Market closed · latest prices as of {liveTime}{/if}
+    </span>
   </div>
 
   {#each status.items.filter((i) => i.error) as i (i.item_id)}
@@ -161,7 +170,23 @@
     </Alert.Root>
   {/each}
 
-  <StatStrip class="mb-6" items={stats} />
+  <section class="mb-6" data-testid="headline">
+    <p class="text-sm text-muted-foreground">Total value · {plural(accountCount, "account")}</p>
+    <p class="text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
+    <div class="mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
+      {#if perf.gain != null || perf.return != null}
+        <span class={cn("inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-medium", gainCls(change))} data-testid="period-chip">
+          {#if change !== 0}<span aria-hidden="true">{change > 0 ? "▲" : "▼"}</span>{/if}
+          {signed(perf.gain)} ({pct(perf.return)}) <span class="font-normal text-muted-foreground">{periodLabel(inv.period)}</span>
+        </span>
+      {/if}
+      {#if vsBench}
+        <span class={cn("inline-flex items-center rounded-full bg-muted px-2.5 py-1", pts ? gainCls(pts) : "text-muted-foreground")} data-testid="vs-bench-chip">{vsBench}</span>
+      {/if}
+    </div>
+  </section>
+
+  <StatStrip class="mb-6 md:grid-cols-4" items={stats} />
   {#if d.cost_missing}
     <p class="-mt-3 mb-6 text-sm text-muted-foreground">
       <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d.cost_missing} holding{d.cost_missing === 1 ? "" : "s"} ({fmt0(d.cost_missing_value)}) need a cost basis</a>
@@ -170,23 +195,33 @@
 
   <Card.Root class="mb-6">
     <Card.Header>
-      <Card.Title>Value</Card.Title>
+      <Card.Title>{chartMode === "value" ? "Value" : "Return vs S&P 500"}</Card.Title>
       <!-- Live prices re-price the totals and holdings; the charts are the last sync's until the next one -->
       {#if live}<Card.Action><Badge variant="secondary" class="font-normal text-muted-foreground" title="Live prices update the totals and holdings above; the charts update with the next sync">Charts as of last sync</Badge></Card.Action>{/if}
     </Card.Header>
     <Card.Content>
+      <Segmented label="Chart" class="mb-3 w-full sm:w-fit" bind:value={chartMode}
+        options={[{ value: "value", label: "Value" }, { value: "return", label: "Return vs S&P 500" }]} />
       {#if charts}
-        <LineChart xs={charts.dates} height={260} fmtY={shortMoney} fmtTip={fmt} estimateUntil={d.history.estimated_before} table="sr" series={[
-          { name: "Value", values: charts.value, cls: "s-main", area: true },
-          { name: "Net deposits", values: charts.invested, cls: "s-muted", step: true },
-        ]} />
-        <h3 class="mt-6 mb-2 font-semibold">Return vs S&amp;P 500</h3>
-        <LineChart xs={charts.dates} height={200} zero fmtY={(v) => pct(v, 0)} fmtTip={(v) => pct(v, 2)} estimateUntil={d.history.estimated_before} table="sr" series={[
-          { name: "Your portfolio", values: charts.twr, cls: "s-main" },
-          { name: "S&P 500", values: charts.bench, cls: "s-alt" },
-        ]} />
+        {#if chartMode === "value"}
+          <div data-testid="chart-value">
+            <LineChart xs={charts.dates} height={200} fmtY={shortMoney} fmtTip={fmt} estimateUntil={d.history.estimated_before} table="sr" series={[
+              { name: "Value", values: charts.value, cls: "s-main", area: true },
+              { name: "Net deposits", values: charts.invested, cls: "s-muted", step: true },
+            ]} />
+          </div>
+        {:else}
+          <div data-testid="chart-return">
+            <LineChart xs={charts.dates} height={200} zero fmtY={(v) => pct(v, 0)} fmtTip={(v) => pct(v, 2)} estimateUntil={d.history.estimated_before} table="sr" series={[
+              { name: "Your portfolio", values: charts.twr, cls: "s-main" },
+              { name: "S&P 500", values: charts.bench, cls: "s-alt" },
+            ]} />
+          </div>
+        {/if}
       {/if}
-      <div class="mt-4 overflow-x-auto">
+      <p class="mt-2 text-sm text-muted-foreground tabular-nums" data-testid="chart-legend-line">You {pct(perf.return)} · S&amp;P 500 {pct(perf.benchmark_return)}</p>
+      <Segmented label="Period" class={cn("mt-3 w-full", busy && "opacity-70")} bind:value={shownPeriod} onchange={setPeriod} options={PERIODS} />
+      <div class="mt-4 hidden overflow-x-auto md:block">
         <table class="w-full text-sm">
           <thead><tr class="text-xs text-muted-foreground"><th class="pb-1 text-left font-medium">Period</th>
             {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-2 text-right font-medium sm:pl-3">{p}</th>{/each}</tr></thead>
@@ -257,7 +292,7 @@
   <Card.Root class="mb-6">
     <Card.Header>
       <Card.Title>Dividends &amp; interest</Card.Title>
-      <Card.Description>{fmt(d.income.income_12m)} in the last 12 months · fees {fmt(d.income.fees_12m)}</Card.Description>
+      <Card.Description>{fmt(d.income.income_12m)} in the last 12 months</Card.Description>
     </Card.Header>
     <Card.Content><BarChart labels={incomeLabels} values={d.income.income} fmtTip={fmt} /></Card.Content>
   </Card.Root>

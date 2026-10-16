@@ -94,7 +94,8 @@ describe("InvestmentsView", () => {
     const { container } = render(InvestmentsView);
     await screen.findByText("Holdings");
     expect(container.querySelector("dl")).not.toBeNull();
-    for (const l of ["Total value", "Today", "Total gain", "Return · 1Y"]) expect(screen.getByText(l, { selector: "dt span" })).toBeInTheDocument();
+    expect(screen.getByTestId("headline")).toHaveTextContent("Total value · 1 account");
+    for (const l of ["Today", "Total gain", "Return · 1Y", "Dividends · 12 mo"]) expect(screen.getByText(l, { selector: "dt span" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 holdings .* need a cost basis/ })).toBeInTheDocument();
     expect(screen.getByText("Checks", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
     expect(screen.queryByText("X-ray")).toBeNull();
@@ -173,7 +174,8 @@ describe("InvestmentsView", () => {
       expect(tile("Total gain")).toHaveAttribute("data-tone", "down");
       expect(within(tile("Total gain")).getByText("−$500.00")).toHaveClass("text-loss");
       expect(tile("Total gain")).toHaveTextContent("−16.7% on $3,000 cost basis");
-      expect(tile("Return · 1Y")).toHaveTextContent("S&P 500 +10.0% · level with it");
+      expect(tile("Return · 1Y")).toHaveTextContent("S&P 500 +10.0%");
+      expect(screen.getByTestId("vs-bench-chip")).toHaveTextContent("level with the S&P 500");
       expect(screen.getByText("−$40.00")).toHaveClass("text-loss");
       expect(screen.getByText("Gain", { selector: "td" })).toBeInTheDocument();
       expect(screen.getByText("33%", { selector: "td" })).toBeInTheDocument();
@@ -211,6 +213,75 @@ describe("InvestmentsView", () => {
       expect(await screen.findByTestId("holdings-updated")).toHaveClass("text-warning");
     });
 
+    const chip = async (ret: number, bench: number) => {
+      const perf = { start: "2026-08-01", return: ret, benchmark_return: bench, gain: 100 };
+      serve((path: string) => path.startsWith("/api/investments?") ? page({ performance: perf }) : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      return screen.getByTestId("vs-bench-chip");
+    };
+    it("says how many points ahead of the S&P 500 the period is", async () => {
+      const c = await chip(0.1106, 0.1);
+      expect(c).toHaveTextContent("+1.06 pts vs S&P 500");
+      expect(c).toHaveClass("text-good");
+      expect(screen.getByTestId("period-chip")).toHaveTextContent("▲ +$100.00 (+11.1%) 1Y");
+    });
+    it("says how many points behind it is, with a real minus", async () => {
+      const c = await chip(0.0394, 0.05);
+      expect(c).toHaveTextContent("−1.06 pts vs S&P 500");
+      expect(c).toHaveClass("text-loss");
+    });
+    it("says level when the gap rounds to nothing", async () => {
+      expect(await chip(0.10004, 0.1)).toHaveTextContent("level with the S&P 500");
+    });
+
+    it("shows the value chart first and the return chart when chosen, in one card", async () => {
+      serve((path: string) => path.startsWith("/api/investments?") ? page() : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      expect(screen.getByTestId("chart-value")).toHaveTextContent("Net deposits");
+      expect(screen.queryByTestId("chart-return")).toBeNull();
+      expect(screen.getByTestId("chart-legend-line")).toHaveTextContent("You +10.0% · S&P 500 +10.0%");
+      await fireEvent.click(screen.getByRole("radio", { name: "Return vs S&P 500" }));
+      expect(screen.getByTestId("chart-return")).toHaveTextContent("Your portfolio");
+      expect(screen.queryByTestId("chart-value")).toBeNull();
+      await fireEvent.click(screen.getByRole("radio", { name: "Value" }));
+      expect(screen.getByTestId("chart-value")).toBeInTheDocument();
+    });
+
+    it("offers 1M, 3M, YTD, 1Y, 2Y and All, and All asks for the whole history (period=MAX)", async () => {
+      serve((path: string) => path.startsWith("/api/investments?") ? page() : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      const period = screen.getByRole("group", { name: "Period" });
+      expect(within(period).getAllByRole("radio").map((r) => r.textContent?.trim())).toEqual(["1M", "3M", "YTD", "1Y", "2Y", "All"]);
+      await fireEvent.click(within(period).getByRole("radio", { name: "All" }));
+      await waitFor(() => expect(inv.period).toBe("MAX"));
+      expect(vi.mocked(api)).toHaveBeenCalledWith("/api/investments?period=MAX");
+      expect(screen.getByText("Return · All", { selector: "dt span" })).toBeInTheDocument();
+    });
+
+    it("keeps the old numbers under “Couldn’t refresh” when the All period fails", async () => {
+      serve((path: string) => {
+        if (path.endsWith("MAX")) throw new Error("Server down");
+        return path.startsWith("/api/investments?") ? page() : { inv_accounts: 1, items: [] };
+      });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      await fireEvent.click(screen.getByRole("radio", { name: "All" }));
+      expect(await screen.findByTestId("refresh-failed")).toHaveTextContent("Couldn’t refresh");
+      expect(inv.period).toBe("1Y");
+      expect(screen.getByTestId("headline-total")).toHaveTextContent("$2,500.00");
+      expect(screen.getByText("Return · 1Y", { selector: "dt span" })).toBeInTheDocument();
+    });
+
+    it("shows dividends over 12 months with the fees under them", async () => {
+      serve((path: string) => path.startsWith("/api/investments?") ? page({ income: { months: [], income: [], fees: [], income_12m: 480, fees_12m: 12.5 } }) : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      expect(tile("Dividends · 12 mo")).toHaveTextContent("Dividends · 12 mo $480 fees $12.50");
+    });
+
     it("keeps the numbers and the period when another period fails to load, with Retry", async () => {
       let fail = false;
       serve((path: string) => {
@@ -226,13 +297,14 @@ describe("InvestmentsView", () => {
       expect(inv.period).toBe("1Y");
       await waitFor(() => expect(screen.getByRole("radio", { name: "1Y" })).toHaveAttribute("data-state", "on"));
       expect(screen.getByText("Return · 1Y", { selector: "dt span" })).toBeInTheDocument();
-      expect(tile("Total value")).toHaveTextContent("$2,500");
+      const total = () => screen.getByTestId("headline-total");
+      expect(total()).toHaveTextContent("$2,500.00");
       fail = false;
       await fireEvent.click(within(banner).getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByTestId("refresh-failed")).toBeNull());
-      expect(tile("Total value")).toHaveTextContent("$2,500");
+      expect(total()).toHaveTextContent("$2,500.00");
       await fireEvent.click(screen.getByRole("radio", { name: "3M" }));
-      await waitFor(() => expect(tile("Total value")).toHaveTextContent("$2,600"));
+      await waitFor(() => expect(total()).toHaveTextContent("$2,600.00"));
       expect(inv.period).toBe("3M");
       expect(screen.getByText("Return · 3M", { selector: "dt span" })).toBeInTheDocument();
     });
