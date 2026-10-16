@@ -232,13 +232,13 @@ describe("card form", () => {
     afterEach(() => { app.state = null; });
 
     it("is hidden without an OpenRouter key", () => {
-      app.state = { connected: true, has_api_key: false } as never;
+      app.state = { connected: true, has_api_key: false, ai_configured: false } as never;
       setup();
       expect(screen.queryByRole("button", { name: "Fill in the rest" })).toBeNull();
     });
 
     it("fills the empty fields, marks them, and saves them only with the card", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup();
       const button = screen.getByRole("button", { name: "Fill in the rest" });
       expect(button).toBeDisabled();
@@ -267,7 +267,7 @@ describe("card form", () => {
     });
 
     it("keeps what you already entered, and Discard puts the form back", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.type(screen.getByLabelText("Annual fee"), "95");
@@ -282,7 +282,7 @@ describe("card form", () => {
     });
 
     it("asking again doesn't suggest the same benefits twice", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
@@ -293,7 +293,7 @@ describe("card form", () => {
     });
 
     it("Discard takes back only what the AI filled, not what you changed afterwards", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup();
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
@@ -310,7 +310,7 @@ describe("card form", () => {
     });
 
     it("on an existing card, saves only when you say so", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
@@ -322,7 +322,7 @@ describe("card form", () => {
     });
 
     it("on an existing card, Save these sends what the form holds, not what the AI first said", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
       await screen.findByTestId("ai-marked");
@@ -336,7 +336,7 @@ describe("card form", () => {
     });
 
     it("shows the pages it came from, and fills the sign-up bonus when adding", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       const withSources = {
         ...suggestion, web: true, bonus: { amount: 100000, spend: 5000, months: 3 },
         sources: ["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr", "javascript:alert(1)"],
@@ -358,7 +358,7 @@ describe("card form", () => {
     });
 
     it("says when the suggestions didn't come from a web search", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, web: false, sources: [] } : { ok: true })) as never);
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
@@ -367,7 +367,7 @@ describe("card form", () => {
     });
 
     it("doesn't fill the public sign-up offer into a card you already have", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, bonus: { amount: 100000, spend: 5000, months: 3 } } : { ok: true })) as never);
       render(CardForm, { c: card({ currency: "cash", annual_fee: 0, rates: [], bonus: null, bonus_spend: null }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest" }));
@@ -376,7 +376,7 @@ describe("card form", () => {
     });
 
     it("shows an error as a toast and leaves the form alone", async () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       vi.mocked(api).mockRejectedValue(new Error("The AI request failed after 45s: timed out"));
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
@@ -434,7 +434,7 @@ describe("card form", () => {
     });
 
     it("says in one visible line, next to the AI button, that only the bank and name are sent", () => {
-      app.state = { connected: true, has_api_key: true } as never;
+      app.state = { connected: true, has_api_key: true, ai_configured: true } as never;
       setup();
       expect(screen.getByTestId("ai-consent")).toHaveTextContent("Sends only the bank and card name.");
       app.state = null;

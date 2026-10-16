@@ -1,0 +1,52 @@
+{
+  "name": "transactions-delete",
+  "page": "transactions",
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-tx] button[aria-label^='Delete ']"
+    },
+    {
+      "screenshot": "all"
+    },
+    {
+      "click": "[data-tx] button[aria-label^='Delete ']"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-slot=confirm-dialog]",
+        "text": "A later bank sync may bring it back."
+      }
+    },
+    {
+      "screenshot": "confirm"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text('Cancel')"
+    },
+    {
+      "goto": "#review"
+    },
+    {
+      "wait_for": "[data-tx] button[aria-label^='Delete ']"
+    },
+    {
+      "screenshot": "review"
+    },
+    {
+      "click": "[data-tx] button[aria-label^='Delete ']"
+    },
+    {
+      "wait_for": "[data-slot=confirm-dialog]"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text('Cancel')"
+    }
+  ],
+  "viewports": [
+    "phone",
+    "desktop"
+  ]
+}

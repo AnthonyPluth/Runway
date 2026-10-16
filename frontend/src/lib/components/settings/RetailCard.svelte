@@ -122,7 +122,7 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
-      {#if app.state?.has_api_key}
+      {#if app.state?.ai_configured}
         <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI</label>
       {/if}
       {#if r.recent.length}<Button variant="outline" size="sm" disabled={matching} onclick={matchAgain}>{matching ? "Working…" : "Match and split again"}</Button>{/if}

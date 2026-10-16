@@ -195,9 +195,10 @@ describe("transaction sheet", () => {
     expect(p.onchanged).toHaveBeenCalled();
   });
 
-  it("doesn't offer to delete a bank's transaction", () => {
+  it("offers to delete a bank’s transaction and explains sync may bring it back", async () => {
     setup(tx({ source: "plaid" }));
-    expect(screen.queryByRole("button", { name: "Delete transaction" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete transaction" }));
+    expect(screen.getByRole("dialog", { name: "Delete Blue Bottle?" })).toHaveTextContent("A later bank sync may bring it back.");
   });
 });
 

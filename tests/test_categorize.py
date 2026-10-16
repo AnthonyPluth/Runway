@@ -1,6 +1,7 @@
 """Categorizing transactions: payees, the AI categorizer, categories and their budgets, and reports."""
 import json
 import unittest
+from unittest import mock
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
@@ -215,6 +216,31 @@ class BrandNameApiTests(LedgerCase):
         self.assertEqual(categorize.kept_bank_names(self.conn), {"Amazon"})
 
 
+class ChatTimeoutTests(unittest.TestCase):
+    def _body(self, key):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        with mock.patch.object(categorize.tls, "urlopen", return_value=reply) as opened:
+            categorize.chat(key, "m", "hi")
+        return json.loads(opened.call_args.args[0].data)
+
+    def test_ollama_is_asked_not_to_think_and_openrouter_is_not(self):
+        self.assertEqual(self._body(categorize.OllamaServer("http://localhost:11434"))["reasoning_effort"], "none")
+        self.assertNotIn("reasoning_effort", self._body("k"))
+
+    def _timeout(self, key):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        with mock.patch.object(categorize.tls, "urlopen", return_value=reply) as opened:
+            categorize.chat(key, "m", "hi")
+        return opened.call_args.kwargs["timeout"]
+
+    def test_ollama_waits_far_longer_than_openrouter(self):
+        self.assertEqual(self._timeout(categorize.OllamaServer("http://localhost:11434")), categorize.OLLAMA_TIMEOUT)
+        self.assertEqual(self._timeout("k"), categorize.OPENROUTER_TIMEOUT)
+        self.assertGreater(categorize.OLLAMA_TIMEOUT, categorize.OPENROUTER_TIMEOUT)
+
+
 class CategorizeTests(LedgerCase):
     def setUp(self):
         super().setUp()
@@ -254,6 +280,38 @@ class CategorizeTests(LedgerCase):
         seen = []
         categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append(m) or "[]")
         self.assertEqual(seen, ["openai/gpt-4o-mini"])
+
+    def test_ollama_is_asked_instead_of_openrouter_and_needs_no_key(self):
+        self.tx("cc", "2026-09-04", -40.0, "MYSTERY MERCHANT 123")
+        db.set_setting(self.conn, sk.OPENROUTER_API_KEY, "k")
+        db.set_setting(self.conn, sk.OLLAMA_URL, "http://localhost:11434")
+        seen = []
+        categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append((k, m)) or "[]")
+        self.assertEqual(seen, [("k", categorize.DEFAULT_MODEL)])   # an address alone changes nothing: the provider is chosen
+        db.set_setting(self.conn, sk.AI_PROVIDER, "ollama")
+        seen.clear()
+        categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append((k, m)) or "[]")
+        self.assertEqual(seen, [("http://localhost:11434", categorize.OLLAMA_MODEL)])
+        self.assertIsInstance(seen[0][0], categorize.OllamaServer)
+        db.set_setting(self.conn, sk.OPENROUTER_API_KEY, None)   # no OpenRouter key: Ollama still answers
+        self.assertTrue(categorize.ai_access(self.conn))
+        db.set_setting(self.conn, sk.OLLAMA_URL, None)   # Ollama chosen but no address: nothing is asked, not OpenRouter
+        db.set_setting(self.conn, sk.OPENROUTER_API_KEY, "k")
+        self.assertIsNone(categorize.ai_access(self.conn))
+
+    def test_openrouter_model_ids_are_not_sent_to_ollama(self):
+        db.set_setting(self.conn, sk.LLM_MODEL, "openai/gpt-4o-mini")
+        db.set_setting(self.conn, sk.CARD_AI_MODEL, "some/card-model")
+        db.set_setting(self.conn, sk.AI_PROVIDER, "ollama")
+        self.assertEqual((categorize.llm_model(self.conn), categorize.card_ai_model(self.conn)), (categorize.OLLAMA_MODEL,) * 2)
+        db.set_setting(self.conn, sk.OLLAMA_MODEL, "qwen2.5")
+        self.assertEqual((categorize.llm_model(self.conn), categorize.card_ai_model(self.conn)), ("qwen2.5", "qwen2.5"))
+        db.set_setting(self.conn, sk.AI_PROVIDER, None)   # back to OpenRouter: its models were kept
+        self.assertEqual((categorize.llm_model(self.conn), categorize.card_ai_model(self.conn)), ("openai/gpt-4o-mini", "some/card-model"))
+
+    def test_ollamas_address_may_be_given_in_any_of_its_forms(self):
+        for given in ("localhost:11434", "http://localhost:11434/", "http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions"):
+            self.assertEqual(categorize.ollama_chat_url(given), "http://localhost:11434/v1/chat/completions", given)
 
     def test_one_question_per_merchant_and_history_reuse(self):
         for d in range(5):
@@ -338,6 +396,23 @@ class CategorizeTests(LedgerCase):
         sug = categorize.suggest_for_review(self.conn, caller=fake, skip=["blue  bottle"])
         self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
         self.assertNotIn("Blue Bottle", asked)
+
+    def test_only_whats_in_review_is_sent_for_suggestions(self):
+        self.tx("cc", "2026-09-01", -9.0, "SQ *BLUE BOTTLE")
+        self.tx("cc", "2026-09-05", -30.0, "Z & H GRILL CORP")
+        self.conn.execute(update(Transaction).values(category=None, needs_review=0))
+        self.conn.execute(update(Transaction).where(Transaction.id == "cc|1").values(needs_review=1))
+        db.set_setting(self.conn, "openrouter_api_key", "k")
+        asked = []
+
+        def fake(key, model, prompt):
+            items = json.loads(prompt.split("Transactions (JSON):\n")[1].split("\n\nReply")[0])
+            asked.extend(it["payee"] for it in items)
+            return json.dumps([{"i": it["i"], "category": "Restaurants", "confidence": 0.9} for it in items])
+
+        sug = categorize.suggest_for_review(self.conn, caller=fake)
+        self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
+        self.assertEqual(asked, ["Z & H Grill Corp"])
 
     def test_sync_can_skip_ai(self):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY")

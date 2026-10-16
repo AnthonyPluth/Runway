@@ -18,7 +18,7 @@
         title={rv.sure ? "Keep the categories it’s at least 90% sure of" : "Keep every category suggested so far"}>
         {rv.sure ? "Accept all ≥ 90%" : "Accept all suggestions"} <span class="tabular-nums text-muted-foreground">{rv.acceptable.length}</span></Button>
     {/if}
-    {#if !app.state?.has_api_key}
+    {#if !app.state?.ai_configured}
       <div class="w-48"><Switch checked={rv.grouped} label="Group by merchant" onchange={(on) => { rv.grouped = on; rv.keyed = ""; }} /></div>
     {/if}
     {#if !rv.grouped}

@@ -157,6 +157,7 @@
       "tests": [
         "tests/test_api_handlers.py",
         "tests/test_api_queries.py",
+        "tests/test_api_validation.py",
         "tests/test_applock.py",
         "tests/test_backup.py",
         "tests/test_categorize.py",
@@ -529,7 +530,7 @@
       "handler": "runway/server/api/transactions.py:api_tx_delete",
       "web": [
         "frontend/src/lib/components/transactions/TxAdd.svelte",
-        "frontend/src/lib/components/transactions/TxDetail.svelte"
+        "frontend/src/lib/components/transactions/TxDelete.svelte"
       ],
       "tests": [
         "tests/test_api_contract.py",
@@ -791,6 +792,7 @@
         "tests/test_api_handlers.py",
         "tests/test_budget_months.py",
         "tests/test_categorize.py",
+        "tests/test_forecast_schedule.py",
         "tests/test_http_server.py",
         "tests/test_routes.py",
         "tests/test_splits.py"

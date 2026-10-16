@@ -8,10 +8,11 @@ from sqlalchemy import delete, func, insert, select, update
 from runway.storage import db
 from runway.domain import forecast, recurring
 from runway.providers import plaidapi
+from runway.server.api import budget
 from runway.storage.models import (Account, Budget, CardStatement, Category, Override, PlaidAccount, Recurring,
                                    RecurringDismissed, Transaction)
 from tests import forecast_support as fs
-from tests.shared import TODAY, LedgerCase
+from tests.shared import TODAY, LedgerCase, freeze_today
 
 
 class DateTests(unittest.TestCase):
@@ -481,6 +482,31 @@ class ForecastEdgeTests(LedgerCase):
         self.assertNotIn("Streaming", [e["name"] for e in fc["events"]])
         self.assertEqual([(e["date"], e["name"]) for e in fc["events"]], [(e["date"], e["name"]) for e in before])
         self.assertEqual(forecast.build(self.conn, TODAY, 5)["charges"], [])
+
+    def test_a_recurring_item_on_a_retired_plaid_account_counts_on_the_account_it_moved_to(self):
+        """An account added from Plaid ("pl:<id>") and later matched to another of yours is hidden, its Plaid id moving
+        to that one (plaidbank._retire_own_account); its recurring items count there, in the forecast and the budget."""
+        freeze_today(self)
+        self.acct("pl:p-cc", "credit", -900.0, pay_from="chk", hidden=1, provider="plaid")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+        self.conn.execute(insert(Recurring).values(id=9, name="Grocery box", account_id="pl:p-cc", amount=-40,
+                                                   frequency="monthly", anchor_date="2026-09-30", category="Groceries"))
+
+        def seen():
+            fc = forecast.build(self.conn, TODAY, 60)
+            expected = {c["name"]: c["expected"] for c in budget.api_budget(self.conn, {}, {})["categories"]}
+            return fc, expected["Groceries"]
+        fc, expected = seen()
+        self.assertEqual([(e["date"], e["account_id"], e["amount"]) for e in fc["charges"]],
+                         [("2026-09-30", "cc", -40.0), ("2026-10-30", "cc", -40.0)])
+        self.assertEqual(expected, 40.0)
+        self.conn.execute(update(Recurring).where(Recurring.id == 9).values(account_id="cc"))
+        self.assertEqual(seen(), (fc, expected))   # just as if it were on that account
+        self.conn.execute(update(Recurring).where(Recurring.id == 9).values(account_id="pl:p-cc"))
+        self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))
+        fc, expected = seen()   # hidden with nothing it moved to: left out, as before
+        self.assertEqual((fc["charges"], expected), ([], 0.0))
 
     def test_recurring_card_charges_count_on_a_new_card(self):
         before = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}

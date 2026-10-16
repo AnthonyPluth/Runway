@@ -25,7 +25,7 @@ export const serve = (list: Tx[] = rows(), total = list.length, extra: Handler =
     if (path.startsWith("/api/transactions?")) return { items: list, total, sum: list.reduce((n, t) => n + t.amount, 0) };
     return {};
   }) as never);
-export const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("ignored=only")).at(-1)!;
+export const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("ignored=only") && !p.includes("limit=20&")).at(-1)!;
 
 export function resetTxPage() {
   endBatch();

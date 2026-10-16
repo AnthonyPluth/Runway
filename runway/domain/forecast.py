@@ -41,7 +41,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
-from sqlalchemy import ColumnElement, and_, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, splits, statements
@@ -194,9 +194,13 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
 
 
 def _pending_counted(today: date) -> ColumnElement[bool]:
-    """Which pending rows to believe: all of Plaid's, and SimpleFIN's from the last simplefin.REFRESH_DAYS only."""
+    """Which pending rows to believe: all of Plaid's, and SimpleFIN's from the last simplefin.REFRESH_DAYS only, and not
+    on an account that has moved to Plaid: nothing refreshes its SimpleFIN rows any more, so a pending one that posted
+    under Plaid's id would be counted twice."""
     T = Transaction
-    return or_(T.id.like(plaidbank.PLAID_IDS), T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())
+    recent = T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat()
+    on_plaid = T.account_id.in_(select(Account.id).where(Account.provider == "plaid"))
+    return or_(T.id.like(plaidbank.PLAID_IDS), and_(recent, not_(on_plaid)))
 
 
 def pending_total(conn, account: dict, today: date) -> float:
@@ -603,7 +607,9 @@ def project(conn, today: date | None = None, horizon_days: int = 90) -> tuple[di
     by_id.update({a["id"]: a for a in cash})
     cash_ids = {a["id"] for a in cash}
     cards = [a for a in accounts if a["kind"] == "credit"]
-    recurring = db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))
+    moved = moved_to(conn)
+    recurring = [dict(r, account_id=moved.get(r["account_id"], r["account_id"]))
+                 for r in db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))]
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
     events = recurring_events(conn, recurring, by_id, overrides, today, end)
 
@@ -716,20 +722,34 @@ def forecast_accounts(conn, accounts: list[dict], today: date) -> tuple[list[dic
     return [dict(a, balance=a["balance"] + pending[a["id"]]) for a in cash], pending
 
 
+def moved_to(conn) -> dict[str, str]:
+    """{hidden account id: the account it is now}: an account added from Plaid ("pl:<Plaid's id>") and since matched to
+    another of yours is hidden, and that one holds its Plaid id (plaidbank._retire_own_account, migration 0012). The
+    forecast takes recurring items left on the hidden one as on the other, so they aren't silently dropped. (Matching
+    moves them itself, plaidbank._move_recurring, and migration 0045 moved the ones already left: this is in case.)"""
+    now = {r["plaid_account_id"]: r["id"] for r in conn.execute(
+        select(Account.id, Account.plaid_account_id)
+        .where(Account.hidden == 0, Account.plaid_account_id.is_not(None), Account.id.not_like("pl:%")))}
+    return {aid: now[aid[3:]] for aid in conn.execute(
+        select(Account.id).where(Account.hidden == 1, Account.id.like("pl:%"))).scalars() if aid[3:] in now}
+
+
 def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overrides: dict[str, float], today: date,
                      end: date) -> list[dict]:
     """The recurring items' occurrences through `end` on the accounts here (`by_id`), as events: what's still due of
-    each, with your one-off edits (`overrides`, rec:<id>:<date>) applied."""
+    each, with your one-off edits (`overrides`, rec:<id>:<date>) applied. An event's category is the item's own, else the
+    one its matched transactions (or its match text's) mostly have."""
     T = Transaction
     most_used = (func.count().desc(), func.max(T.posted).desc())
     rec_overrides = {k: v for k, v in overrides.items() if k.startswith("rec:")}
     events: list[dict] = []
+    histories = rec.matched_by_item(conn, [i["id"] for i in recurring if i["account_id"] in by_id])
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
-        history = rec.matched(conn, item["id"])
+        history = histories[item["id"]]
         amount = rec.expected_amount(item, history)
-        cat_row = conn.execute(
+        cat_row = {"category": item["category"]} if item.get("category") else conn.execute(
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:

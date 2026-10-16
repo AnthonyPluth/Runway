@@ -189,6 +189,14 @@ class PaymentModeTests(LedgerCase):
         i = fc["dates"].index("2026-10-20")
         self.assertAlmostEqual(fc["total"][i - 1] - fc["total"][i], 500 / 31, delta=0.01)
 
+    def test_a_recurring_item_with_a_category_and_no_history_keeps_it(self):
+        # The budget's "expected" is made of the events that have a category: one set on the item counts without matches.
+        self.conn.execute(insert(Recurring).values(name="Property Taxes", account_id="cc", amount=-3000, frequency="dates",
+                                                   dates="10-15", anchor_date="2026-10-15", category="Taxes"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        tax = next(e for e in [*fc["events"], *fc["charges"]] if e.get("name") == "Property Taxes")
+        self.assertEqual(tax["category"], "Taxes")
+
     def test_with_budgets_a_recurring_charge_on_the_card_counts_once(self):
         self.tx("cc", "2025-10-20", -600.0, "STREAMFLIX YEARLY", "Subscriptions")
         self.conn.execute(insert(Recurring).values(name="Streamflix", account_id="cc", amount=-600, frequency="yearly",
@@ -448,6 +456,14 @@ class PendingAtCloseTests(LedgerCase):
         # SimpleFIN doesn't re-read a pending row older than its refresh window: one that dropped off would linger.
         add_tx(self.conn, "cc", "2026-09-20", -700.0, description="OLD HOLD", category="Shopping", pending=1)
         self.assertEqual(self.card(self.build())["pending_before_close"], 2540.0)
+
+    def test_a_simplefin_hold_left_on_a_card_that_moved_to_plaid_isnt_believed(self):
+        # Nothing refreshes it any more, so one that posted under Plaid's id would be counted twice.
+        self.conn.execute(update(Account).where(Account.id == "cc").values(provider="plaid"))
+        add_tx(self.conn, "cc", "2026-10-08", -700.0, description="OLD HOLD", category="Shopping", pending=1)
+        self.post(self.hotel, "2026-10-12", -2500.0, "SEASIDE RESORT", "Travel")
+        c = self.card(self.build(date(2026, 10, 13)))
+        self.assertEqual((c["new_charges"], c["pending_before_close"]), (2540.0, 40.0))
 
     def test_a_pending_credit_at_the_close_isnt_taken_off(self):
         add_tx(self.conn, "cc", "2026-10-09", 300.0, id="cc|pl:refund-1", description="STORE REFUND", category="Refunds", pending=1)

@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, UTC
 from typing import TypeGuard
 
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import bindparam, case, func, or_, select, update
 
 from ..storage import db
 from .. import tls
@@ -134,18 +134,25 @@ YAHOO_TYPES = {"EQUITY": "equity", "ETF": "etf", "MUTUALFUND": "mutual fund", "M
 
 def fill_security_types(conn) -> None:
     """SimpleFIN doesn't say what a security is; borrow the price service's classification."""
-    for r in conn.execute(select(PriceMeta.ticker, PriceMeta.long_name)
-                          .where(PriceMeta.long_name.is_not(None), PriceMeta.long_name != "")).fetchall():
+    names = [{"b_ticker": r["ticker"], "b_name": r["long_name"]} for r in conn.execute(
+        select(PriceMeta.ticker, PriceMeta.long_name).where(PriceMeta.long_name.is_not(None), PriceMeta.long_name != "")).fetchall()]
+    if names:
         conn.execute(update(Security).where(
-            Security.ticker == r["ticker"],
+            Security.ticker == bindparam("b_ticker"),
             or_(Security.name.is_(None), Security.name == "", func.upper(Security.name) == func.upper(Security.ticker)),
-        ).values(name=r["long_name"]))
+        ).values(name=bindparam("b_name")), names)
+    types, cash = [], []
     for r in conn.execute(select(PriceMeta.ticker, PriceMeta.instrument_type).where(PriceMeta.instrument_type.is_not(None))).fetchall():
         t = YAHOO_TYPES.get((r["instrument_type"] or "").upper())
         if t:
-            conn.execute(update(Security).where(Security.ticker == r["ticker"], Security.type.is_(None)).values(type=t))
+            types.append({"b_ticker": r["ticker"], "b_type": t})
             if t == "cash":
-                conn.execute(update(Security).where(Security.ticker == r["ticker"], Security.id.like("sf:%")).values(is_cash=1))
+                cash.append({"b_ticker": r["ticker"]})
+    if types:
+        conn.execute(update(Security).where(Security.ticker == bindparam("b_ticker"), Security.type.is_(None))
+                     .values(type=bindparam("b_type")), types)
+    if cash:
+        conn.execute(update(Security).where(Security.ticker == bindparam("b_ticker"), Security.id.like("sf:%")).values(is_cash=1), cash)
 
 
 # ------------------------------------------------------------------------------------------------ live quotes

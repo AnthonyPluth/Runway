@@ -209,9 +209,15 @@ class AddTests(Ledger):
             with self.subTest(bad=bad), self.assertRaises(ApiError):
                 tx.api_tx_create(self.conn, {}, {**good, **bad})
 
-    def test_only_yours_can_be_deleted(self):
-        with self.assertRaises(ApiError):
-            tx.api_tx_delete(self.conn, {}, {}, "chk|2")
+    def test_synced_transactions_can_be_deleted_whether_reviewed_or_not(self):
+        for needs_review, tid in ((0, "chk|2"), (1, "card|4")):
+            with self.subTest(needs_review=needs_review):
+                self.conn.execute(update(Transaction).where(Transaction.id == tid).values(needs_review=needs_review))
+                tx.api_tx_delete(self.conn, {}, {}, tid)
+                self.assertIsNone(self.row(tid))
+                self.assertNotIn(tid, self.ids())
+
+    def test_deleting_missing_transaction_fails(self):
         with self.assertRaises(ApiError):
             tx.api_tx_delete(self.conn, {}, {}, "chk|manual:nope")
 

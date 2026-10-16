@@ -113,21 +113,21 @@ describe("Transactions page", () => {
       expect(screen.queryByRole("button", { name: "Suggest categories" })).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Settings › Connections" })).toHaveAttribute("href", "#setup/connections");
       unmount();
-      app.state = { connected: true, review_count: 3, has_api_key: true };
+      app.state = { connected: true, review_count: 3, has_api_key: true, ai_configured: true };
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
       expect(screen.getByRole("button", { name: "Suggest categories" })).toBeEnabled();
     });
 
     it("leaves out the AI button when there's nothing to review, and takes it away once the last one is done", async () => {
-      app.state = { connected: true, review_count: 0, has_api_key: true };
+      app.state = { connected: true, review_count: 0, has_api_key: true, ai_configured: true };
       serve([], 0);
       const { unmount } = render(Transactions, { page: "review" });
       expect(await screen.findByText(/All caught up/)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Suggest categories" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Settings › Connections" })).not.toBeInTheDocument();
       unmount();
-      app.state = { connected: true, review_count: 1, has_api_key: true };
+      app.state = { connected: true, review_count: 1, has_api_key: true, ai_configured: true };
       serve([tx({ id: "a", payee: "Alpha", category: null, needs_review: 1 })], 1);
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
@@ -283,7 +283,7 @@ describe("Transactions page", () => {
       });
 
       it("isn't offered when the AI groups by merchant itself", async () => {
-        app.state = { connected: true, review_count: 3, has_api_key: true };
+        app.state = { connected: true, review_count: 3, has_api_key: true, ai_configured: true };
         serve(same(), 3);
         render(Transactions, { page: "review" });
         await screen.findAllByText("Alpha");
