@@ -1,0 +1,40 @@
+{
+  "name": "transactions-bulk-delete",
+  "page": "transactions",
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-tx]"
+    },
+    {
+      "click": "input[aria-label='Select all shown']"
+    },
+    {
+      "wait_for": "[data-editor] button:has-text('Delete')"
+    },
+    {
+      "screenshot": "selected"
+    },
+    {
+      "click": "[data-editor] button:has-text('Delete')"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-slot=confirm-dialog]",
+        "text": "This can’t be undone."
+      }
+    },
+    {
+      "screenshot": "confirm"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text('Cancel')"
+    }
+  ],
+  "viewports": [
+    "desktop",
+    "tablet"
+  ]
+}

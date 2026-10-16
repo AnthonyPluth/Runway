@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { refreshState } from "$lib/app.svelte";
   import { categories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
@@ -9,6 +10,8 @@
   import * as Popover from "$lib/components/ui/popover";
   import { viewport } from "$lib/phone.svelte";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import { toast } from "svelte-sonner";
   import { ruleOffer } from "./remember.svelte";
   import { fmtDate, fmtSigned, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
@@ -20,7 +23,7 @@
   import { act } from "$lib/act";
 
   // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
-  // category, the merchant's name, or accepting the categories they have. The bar for that sticks to the top while you
+  // category, the merchant's name, accepting the categories they have, or deleting them (which always asks). The bar for that sticks to the top while you
   // scroll; on a phone it's just how many, Categorize and More (the rest, in a small popover). Changing
   // CONFIRM_AT or more asks first, saying how many; every change can be undone from its toast.
   // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
@@ -138,13 +141,31 @@
   const markReviewed = () => change({ body: { reviewed: true }, what: "Accepted", title: `Accept ${plural(chosen, "transaction")}?` },
     "They keep their categories and leave To review. You can undo it afterwards.", "Accept", "Accepting…");
   let moreOpen = $state(false);   // the phone bar's More popover
+
+  // Delete the selected: always asks (it can't be undone), with the count. A bank-synced one may come back on a later sync;
+  // that is said when any ticked row is, and for "Select all N" with rows not loaded (we can't see their source).
+  let deleting = $state(false);
+  let gone = $state({ n: 0, mayReturn: false });   // what the dialog says, fixed when it opens (the selection empties as it closes)
+  function askDelete() {
+    gone = { n: chosen, mayReturn: (everything && total > items.length) || items.some((t) => picked[t.id] && t.source !== "manual") };
+    deleting = true;
+  }
+  async function removeChosen(): Promise<boolean> {
+    const filter = everything && every ? every : undefined;
+    return act(async () => {
+      const r = await apiCall<"POST /api/transactions/bulk-delete">("/api/transactions/bulk-delete", { method: "POST", body: filter ? { filter } : { ids: [...ids] } });
+      toast.success(`Deleted ${plural(r.deleted, "transaction")}`);
+      picked = {}; everything = false; bulkCat = ""; rename = "";
+      refreshState(); onchanged();
+    });
+  }
 </script>
 
 <div>
   {#if ids.length && viewport.phone}
     <!-- A phone: one short line, so the list stays in view. -->
     <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex items-center gap-2 rounded-lg border bg-popover p-2 pl-3 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
-      <b class="mr-auto tabular-nums">{chosen} selected</b>
+      <b class="mr-auto whitespace-nowrap tabular-nums">{chosen} selected</b>
       <CategorySelect bind:value={bulkCat} blank="Categorize" label="Category for the selected transactions" class="h-11 w-auto max-w-40 shrink [&>span]:text-foreground"
         onchange={(v) => v && setCategory(v)} />
       <Popover.Root bind:open={moreOpen}>
@@ -164,6 +185,8 @@
           <Button variant="ghost" onclick={() => { moreOpen = false; all(false); }}>Clear selection</Button>
         </Popover.Content>
       </Popover.Root>
+      <Button variant="ghost" aria-label="Delete the selected transactions" title="Delete" class="size-11 shrink-0 p-0 text-destructive hover:text-destructive"
+        onclick={askDelete}><Trash2 class="size-4" aria-hidden="true" /></Button>
     </div>
   {:else if ids.length}
     <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
@@ -181,6 +204,7 @@
       </span>
       {#if canAccept}<Button variant="outline" size="sm" title="Keep their categories and take them out of Review"
         onclick={markReviewed}>Accept</Button>{/if}
+      <Button variant="outline" size="sm" class="text-destructive hover:text-destructive" onclick={askDelete}>Delete</Button>
       <Button variant="link" size="sm" onclick={() => all(false)}>Clear selection</Button>
     </div>
   {/if}
@@ -229,3 +253,6 @@
   <ConfirmDialog bind:open={asking} title={pending.title} description={pending.description} confirmLabel={pending.confirm} busyLabel={pending.busy}
     onconfirm={() => send(pending!)} />
 {/if}
+<ConfirmDialog bind:open={deleting} title={`Delete ${plural(gone.n, "transaction")}?`} destructive confirmLabel="Delete" busyLabel="Deleting…"
+  description={`${gone.n === 1 ? "It leaves" : "They leave"} reports, budgets and the list. This can’t be undone.${gone.mayReturn ? ` A later bank sync may bring ${gone.n === 1 ? "it" : "some"} back.` : ""}`}
+  onconfirm={removeChosen} />

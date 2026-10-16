@@ -91,6 +91,48 @@
         }
       }
     },
+    "/api/transactions/bulk-delete": {
+      "post": {
+        "operationId": "api_tx_bulk_delete",
+        "x-handler": "runway/server/api/transactions.py:api_tx_bulk_delete",
+        "parameters": [
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TxBulkDelete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TxDeleted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/transactions/{id}": {
       "delete": {
         "operationId": "api_tx_delete",
@@ -1743,6 +1785,26 @@
         ],
         "additionalProperties": false
       },
+      "TxBulkDelete": {
+        "type": "object",
+        "description": "POST /api/transactions/bulk-delete: the transactions to delete, by `ids` or every one a list's `filter` (the query\nGET /api/transactions takes) matches. At most 2,000.",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
       "TxCreated": {
         "type": "object",
         "properties": {
@@ -1756,6 +1818,22 @@
         "required": [
           "ok",
           "id"
+        ],
+        "additionalProperties": false
+      },
+      "TxDeleted": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "deleted"
         ],
         "additionalProperties": false
       },

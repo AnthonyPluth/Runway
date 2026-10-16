@@ -81,7 +81,7 @@ WRITE_READABLE = (
     "/api/accounts/{id}/removal", "/api/churning/found", "/api/retail/charges/{id}/candidates", "/api/ai/log", "/api/tracked/{id}",
 )
 # Changes that touch many records at once (or drop an alert for good): destructive, like a delete or a remove.
-MANY = frozenset({"/api/recategorize", "/api/transactions/bulk", "/api/rules/{id}/apply", "/api/ai/apply", "/api/recurring/dismiss"})
+MANY = frozenset({"/api/recategorize", "/api/transactions/bulk", "/api/transactions/bulk-delete", "/api/rules/{id}/apply", "/api/ai/apply", "/api/recurring/dismiss"})
 
 
 def blocked(template: str) -> bool:

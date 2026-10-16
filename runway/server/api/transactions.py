@@ -16,7 +16,7 @@ from ... import validate
 from ...storage.models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
 from ...money import CENT
 from ..common import ApiError, _month_range, query_int, row_id, text
-from ..contract import Ok, Tx, TxCreated, TxList, TxNew
+from ..contract import Ok, Tx, TxBulkDelete, TxCreated, TxDeleted, TxList, TxNew
 
 # A manual transaction's id: its account's, then this and a random part (a bank's are "|<its id>" or "|pl:<its id>").
 MANUAL = "|manual:"
@@ -378,15 +378,15 @@ def api_tx_bulk(conn, _q, body, *_):
     return {"ok": True, "updated": n, "was": was, "offer_rule": offer}
 
 
-def filtered_ids(conn, f: dict) -> list[str]:
+def filtered_ids(conn, f: dict, verb: str = "Change") -> list[str]:
     """The ids of the transactions a list's filters (GET /api/transactions's query, as a dict) match, up to
-    categorize.MAX_BULK; more than that is refused."""
+    categorize.MAX_BULK; more than that is refused (saying `verb`, what was asked to be done with them)."""
     q = {k: [str(v)] for k, v in f.items() if isinstance(k, str) and isinstance(v, (str, int, float)) and not isinstance(v, bool)}
     where, _ = tx_where(conn, q)
     ids = list(conn.execute(select(Transaction.id).where(*where).order_by(Transaction.posted.desc(), Transaction.id)
                             .limit(categorize.MAX_BULK + 1)).scalars())
     if len(ids) > categorize.MAX_BULK:
-        raise ApiError(f"Change at most {categorize.MAX_BULK:,} transactions at once")
+        raise ApiError(f"{verb} at most {categorize.MAX_BULK:,} transactions at once")
     return ids
 
 
@@ -592,13 +592,48 @@ def api_tx_import(conn, _q, body):
     return {"ok": True, "added": len(new), "skipped": len(rows) - len(new), "rows": sorted(out, key=lambda r: r["i"])}
 
 
+_CHUNK = 500
+
+
+def remove(conn, ids: list[str]) -> int:
+    """Delete these transactions (the ones there are), the way one is deleted: their parts go, the order charges that
+    matched them let go, and the transactions themselves. All or nothing: a failure part-way leaves every one in place.
+    Returns how many there were."""
+    found = 0
+    with conn.sa.begin_nested():   # a savepoint, so a failure part-way undoes the chunks already done even if the caller commits
+        for i in range(0, len(ids), _CHUNK):
+            chunk = Transaction.id.in_(ids[i:i + _CHUNK])
+            there = list(conn.execute(select(Transaction.id).where(chunk)).scalars())
+            if not there:
+                continue
+            found += len(there)
+            conn.execute(delete(TxSplit).where(TxSplit.tx_id.in_(there)))
+            conn.execute(update(RetailCharge).where(RetailCharge.tx_id.in_(there)).values(tx_id=None, applied=None, match_source=None))
+            conn.execute(delete(Transaction).where(Transaction.id.in_(there)))
+    return found
+
+
 def api_tx_delete(conn, _q, _b, tx_id) -> Ok:
     """Delete a transaction; a later bank sync may import it again."""
     _tx(conn, tx_id)
-    splits.clear(conn, tx_id)
-    conn.execute(update(RetailCharge).where(RetailCharge.tx_id == tx_id).values(tx_id=None, applied=None, match_source=None))
-    conn.execute(delete(Transaction).where(Transaction.id == tx_id))
+    remove(conn, [tx_id])
     return {"ok": True}
+
+
+def api_tx_bulk_delete(conn, _q, body: TxBulkDelete) -> TxDeleted:
+    """Delete many transactions at once: `ids`, or every one a list's `filter` matches ("Select all 212"), at most
+    categorize.MAX_BULK. All or nothing; ids that are already gone are skipped. A later bank sync may bring some back."""
+    f, ids = body.get("filter"), body.get("ids")
+    if isinstance(f, dict):
+        ids = filtered_ids(conn, f, "Delete")
+    elif not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise ApiError("Select some transactions first")
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        raise ApiError("Select some transactions first")
+    if len(ids) > categorize.MAX_BULK:
+        raise ApiError(f"Delete at most {categorize.MAX_BULK:,} transactions at once")
+    return {"ok": True, "deleted": remove(conn, ids)}
 
 
 def api_tx_brand_name(conn, _q, body, tx_id):

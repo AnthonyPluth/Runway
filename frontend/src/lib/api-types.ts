@@ -313,9 +313,23 @@ export interface Tx {
   source: "manual" | "plaid" | "simplefin";
 }
 
+/**
+ * POST /api/transactions/bulk-delete: the transactions to delete, by `ids` or every one a list's `filter` (the query
+ * GET /api/transactions takes) matches. At most 2,000.
+ */
+export interface TxBulkDelete {
+  ids?: string[];
+  filter?: Record<string, string>;
+}
+
 export interface TxCreated {
   ok: boolean;
   id: string;
+}
+
+export interface TxDeleted {
+  ok: boolean;
+  deleted: number;
 }
 
 /**
@@ -344,6 +358,7 @@ export interface Endpoints {
   "GET /api/accounts": { body: never; reply: AccountItem[] };
   "GET /api/transactions": { body: never; reply: TxList };
   "POST /api/transactions": { body: TxNew; reply: TxCreated };
+  "POST /api/transactions/bulk-delete": { body: TxBulkDelete; reply: TxDeleted };
   "DELETE /api/transactions/{id}": { body: never; reply: Ok };
   "GET /api/lock": { body: never; reply: LockStatus };
   "DELETE /api/lock": { body: never; reply: LockStatus };

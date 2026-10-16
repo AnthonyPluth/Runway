@@ -423,6 +423,22 @@
     },
     {
       "method": "POST",
+      "path": "/api/transactions/bulk-delete",
+      "handler": "runway/server/api/transactions.py:api_tx_bulk_delete",
+      "web": [
+        "frontend/src/lib/components/transactions/TxTable.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_mcp.py",
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/transactions/import",
       "handler": "runway/server/api/transactions.py:api_tx_import",
       "web": [],
