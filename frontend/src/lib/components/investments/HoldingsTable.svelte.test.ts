@@ -20,7 +20,7 @@ const setup = (holdings = [holding()]) => {
   return onchanged;
 };
 
-beforeEach(() => { inv.sort = { key: "value", dir: -1 }; vi.mocked(api).mockClear(); });
+beforeEach(() => { inv.sort = { key: "value", dir: -1 }; inv.holdView = "day"; inv.listSort = { by: "value", dir: -1 }; vi.mocked(api).mockClear(); });
 
 describe("HoldingsTable", () => {
   it("shows each holding's logo when the API gave one, and its letter otherwise", () => {
@@ -106,7 +106,6 @@ describe("HoldingsTable", () => {
   const everyWidth: [string, (q: string) => boolean][] = [
     ["a wide screen (1280px and up)", () => false],
     ["a tablet (768px to 1279px)", (q) => q === "(max-width: 1279px)"],
-    ["a phone", () => true],
   ];
   describe.each(everyWidth)("on %s", (_name, matches) => {
     beforeEach(() => stub(matches));
@@ -186,42 +185,80 @@ describe("HoldingsTable", () => {
   });
 
   describe("on a phone", () => {
-    beforeEach(() => stub(() => true));
+    const PHONE = "(max-width: 767px), (max-height: 500px) and (pointer: coarse)";
+    beforeEach(() => stub((q) => q === PHONE || q === "(max-width: 1279px)"));
     afterEach(() => vi.unstubAllGlobals());
+    const three = () => [
+      holding({ security_id: "1", ticker: "AAA", name: "Alpha", value: 300, allocation: 0.3, day_change_pct: -0.02, gain_pct: 0.1, gain: 10 }),
+      holding({ security_id: "2", ticker: "BBB", name: "Beta", value: 200, allocation: 0.5, day_change_pct: 0.03, gain_pct: -0.2, gain: -10 }),
+      holding({ security_id: "3", ticker: "CCC", name: "Gamma", value: 100, allocation: 0.2, day_change_pct: 0, gain_pct: null, gain: null, cost_known: false }),
+    ];
+    const items = () => screen.getAllByRole("listitem");
+    const order = () => items().map((li) => li.querySelector("b")!.textContent);
+    const pillsOf = () => items().map((li) => li.querySelector("span.rounded-full")!.textContent);
 
-    it("fills the table with Holding and Today, so Total gain and Value are past the edge and scrolled to", () => {
-      setup([one()]);
-      // 100cqw is the container's width: Holding is that less Today (5.5rem), so the two fill it exactly, and the table is
-      // Total gain (5.25rem) and Value (5.5rem) wider than the container.
-      const container = document.getElementById("inv-holdings")!;
-      expect(container.className).toMatch(/phone:\[container-type:inline-size\]/);
-      expect(container.className).toContain("phone:[--hold:calc(100cqw_-_5.5rem)]");
-      expect(screen.getByRole("table")).toHaveClass("phone:w-[calc(100cqw_+_10.75rem)]", "phone:table-fixed");
-      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:w-(--hold)");
-      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:w-22");
-      expect(screen.getByRole("columnheader", { name: /Total gain/ })).toHaveClass("phone:w-21");
-      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:w-22");
+    it("renders a list, not a table, with the ticker, name, value and Today's pill", () => {
+      setup(three());
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(order()).toEqual(["AAA", "BBB", "CCC"]);
+      expect(items()[0]).toHaveTextContent("Alpha");
+      expect(items()[0]).toHaveTextContent("$300.00");
+      expect(pillsOf()).toEqual(["−2.00%", "+3.00%", "0.00%"]);
+      expect(within(items()[0]).getByText("−2.00%")).toHaveClass("bg-loss/15", "text-loss");
+      expect(within(items()[1]).getByText("+3.00%")).toHaveClass("bg-good/15", "text-good");
+      expect(within(items()[2]).getByText("0.00%")).toHaveClass("text-muted-foreground");
     });
 
-    it("keeps the holding in view while the table scrolls, and snaps to a column beside it", () => {
-      setup();
-      expect(screen.getByRole("columnheader", { name: /Holding/ })).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
-      expect(screen.getAllByRole("row")[1].querySelector("td")).toHaveClass("phone:sticky", "phone:left-0", "phone:bg-card");
-      expect(document.getElementById("inv-holdings")!.className).toMatch(/phone:snap-x/);
-      expect(screen.getByRole("columnheader", { name: /Value/ })).toHaveClass("phone:scroll-ml-(--hold)");   // snaps and scrolls to just right of the pinned holding
-      expect(screen.getByRole("columnheader", { name: /Today/ })).toHaveClass("phone:snap-start");
+    it("changes the pill's figure with the switch, and remembers the choice", async () => {
+      setup(three());
+      await userEvent.click(screen.getByRole("button", { name: "Total" }));
+      expect(pillsOf()).toEqual(["+10.0%", "−20.0%", "No cost basis"]);
+      expect(inv.holdView).toBe("total");
+      await userEvent.click(screen.getByRole("button", { name: "Weight" }));
+      expect(pillsOf()).toEqual(["30%", "50%", "20%"]);
+      expect(inv.holdView).toBe("weight");
+      expect(order()).toEqual(["AAA", "BBB", "CCC"]);   // still by value
     });
 
-    it("keeps the shares line and the cost basis button under the holding's name", () => {
-      setup([one()]);
-      const cell = screen.getAllByRole("row")[1].querySelector("td")!;
-      expect(cell).toHaveTextContent("10 × $250.00");
-      expect(within(cell).getByTitle("Edit cost basis")).toBeInTheDocument();
+    it("shows 'No cost basis' under Total for a holding without one, and the gain on the second line otherwise", async () => {
+      setup(three());
+      await userEvent.click(screen.getByRole("button", { name: "Total" }));
+      expect(within(items()[2]).getByText("No cost basis")).toHaveClass("text-muted-foreground");
+      expect(items()[0]).toHaveTextContent("Alpha · +10.0%");
     });
 
-    it("shows a dash in the gain column when the cost basis is unknown", () => {
-      setup([holding({ value: 2500, gain: null, gain_pct: null })]);
-      expect(within(screen.getAllByRole("row")[1]).getByText("—", { selector: "td.text-center span" })).toBeInTheDocument();
+    it("sorts by the figure on a second tap of the active choice, descending then ascending", async () => {
+      setup(three());
+      await userEvent.click(screen.getByRole("button", { name: "Weight" }));
+      await userEvent.click(screen.getByRole("button", { name: /Weight/ }));
+      expect(order()).toEqual(["BBB", "AAA", "CCC"]);
+      await userEvent.click(screen.getByRole("button", { name: /Weight/ }));
+      expect(order()).toEqual(["CCC", "AAA", "BBB"]);
+      await userEvent.click(screen.getByRole("button", { name: "Total" }));   // another choice: back to value
+      expect(order()).toEqual(["AAA", "BBB", "CCC"]);
+    });
+
+    it("puts a holding with no figure last, whichever way the list runs", async () => {
+      setup(three());
+      await userEvent.click(screen.getByRole("button", { name: "Total" }));
+      await userEvent.click(screen.getByRole("button", { name: /Total/ }));
+      expect(order()).toEqual(["AAA", "BBB", "CCC"]);
+      await userEvent.click(screen.getByRole("button", { name: /Total/ }));
+      expect(order()).toEqual(["BBB", "AAA", "CCC"]);
+    });
+
+    it("opens the cost basis editor from a row, and closes it with Done", async () => {
+      setup([holding({ lots: [lot()] })]);
+      await userEvent.click(screen.getByRole("button", { name: /VTI/ }));
+      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(screen.queryByLabelText("Price per share in Brokerage")).not.toBeInTheDocument();
+    });
+
+    it("keeps cash a plain row, without an editor", () => {
+      setup([holding({ is_cash: true, ticker: null, name: "Cash", gain: null, gain_pct: null })]);
+      expect(screen.queryByTitle("Edit cost basis")).not.toBeInTheDocument();
+      expect(items()[0]).toHaveTextContent("Cash");
     });
   });
 
