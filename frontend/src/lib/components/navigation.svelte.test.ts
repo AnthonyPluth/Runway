@@ -20,22 +20,22 @@ describe("Sidebar", () => {
     route.page = "budget";
     render(Sidebar);
     const nav = screen.getByRole("navigation", { name: "Main" });
-    for (const name of ["Overview", "Transactions", "Budget", "Recurring", "Reports", "Net worth", "Churning"])
+    for (const name of ["Overview", "Transactions", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning"])
       expect(within(nav).getByRole("link", { name })).toHaveAttribute("href", expect.stringMatching(/^#/));
     expect(within(nav).getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "#setup");
   });
 
-  it("lists Recurring right under Budget, and Investments only under Net worth", () => {
+  it("lists Investments right after Budget", () => {
     app.state = state();
     render(Sidebar);
     const nav = screen.getByRole("navigation", { name: "Main" });
     expect(within(nav).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(
-      ["Overview", "Transactions", "Budget", "Recurring", "Reports", "Net worth", "Churning"]);
+      ["Overview", "Transactions", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning"]);
   });
 
-  it.each([["networth", "investments", "Net worth"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["recurring", "", "Recurring"]])(
+  it.each([["investments", "", "Investments"], ["networth", "investments", "Investments"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["recurring", "", "Recurring"]])(
     "keeps %s/%s lit as %s", (page, sub, label) => {
       app.state = state();
       route.page = page; route.sub = sub;
@@ -114,8 +114,25 @@ describe("MobileNav", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(within(bar).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(["Overview", "Transactions", "Budget", "Reports"]);
+    expect(within(bar).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(["Overview", "Transactions", "Budget", "Invest"]);
+    expect(within(bar).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["#overview", "#transactions", "#budget", "#investments"]);
     expect(within(bar).getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it.each([["investments", ""], ["networth", "investments"]])("lights the Invest tab on %s/%s", (page, sub) => {
+    app.state = state();
+    route.page = page; route.sub = sub;
+    render(MobileNav);
+    const lit = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link").filter((l) => l.hasAttribute("aria-current"));
+    expect(lit.map((l) => l.textContent!.trim())).toEqual(["Invest"]);
+  });
+
+  it("floats as a pill, inset from the sides and lifted off the bottom", () => {
+    app.state = state();
+    render(MobileNav);
+    const bar = screen.getByRole("navigation", { name: "Main" });
+    expect(bar).toHaveClass("inset-x-4", "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]");
+    expect(bar.firstElementChild).toHaveClass("h-[66px]", "rounded-full", "backdrop-blur-xl");
   });
 
   it("dots More when the sync needs attention, so it's seen without opening the sheet", async () => {
@@ -150,7 +167,7 @@ describe("MobileNav", () => {
     render(MobileNav);
     await userEvent.click(screen.getByRole("button", { name: "More" }));
     const sheet = screen.getByRole("dialog", { name: "More pages" });
-    for (const name of ["Net worth", "Churning", "Settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
+    for (const name of ["Reports", "Net worth", "Churning", "Settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
     expect(within(sheet).queryByRole("link", { name: "Investments" })).not.toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "Recurring" })).toHaveAttribute("href", "#recurring");
     expect(sheet).toHaveTextContent("Runway 1.4.0");

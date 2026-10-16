@@ -20,8 +20,8 @@
   for (const [file, load] of Object.entries(modules)) {
     LOADERS[file.slice("./pages/".length, -".svelte".length).toLowerCase()] = load;
   }
-  // Routes that open another page: Review is a tab of Transactions, and #setup is Settings. (#investments, now a tab of
-  // Net worth, and the old #budget/recurring are resolved to their new routes in lib/app.svelte.ts.)
+  // Routes that open another page: Review is a tab of Transactions, and #setup is Settings. (The old #budget/recurring is
+  // resolved to its new route in lib/app.svelte.ts.)
   const ALIASES: Record<string, string> = { review: "transactions", setup: "settings" };
   // Anything else (an old bookmark, a typo) opens Overview.
   const loaded: Record<string, Page> = $state({});
@@ -52,7 +52,7 @@
 
 <div class="flex min-h-dvh flex-col desktop:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+5.5rem)] desktop:p-8">
+  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+7rem)] desktop:p-8">
     <div class="mx-auto max-w-7xl">
       {#if app.sessionExpired}
         <!-- Above the page, which stays drawn underneath, so an open edit isn't lost; signing in is up to you. -->
@@ -97,4 +97,4 @@
   <div class="fixed inset-0 z-[100] flex items-center justify-center bg-background" aria-hidden="true"><img src="/logo.svg" width="56" height="56" alt="" /></div>
 {/if}
 {/if}
-<Toaster theme="dark" position="bottom-center" mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 5rem)" }} />
+<Toaster theme="dark" position="bottom-center" mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 6.5rem)" }} />

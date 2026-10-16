@@ -7,9 +7,9 @@ sidebar:
 
 The [home page](/Runway/) has the short list. This is what each part does and where its settings live.
 
-Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
+Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Investments**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
-**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a tab bar at the bottom (Recurring, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, wide tables that keep their main columns (the rest fold under each row or are left out), and buttons big enough to tap. On a touch screen, actions that a mouse shows on hover (Split, a row's checkbox) are always there.
+**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a floating tab bar at the bottom (Overview, Transactions, Budget, Invest and More; Recurring, Reports, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, wide tables that keep their main columns (the rest fold under each row or are left out), and buttons big enough to tap. On a touch screen, actions that a mouse shows on hover (Split, a row's checkbox) are always there.
 
 Settings has these tabs: **Accounts**, **Connections** (SimpleFIN, Plaid, the browser extension for Amazon, Target, Costco and Carta, and the optional services: OpenRouter, Realie, Finnhub and Logo.dev), **Categories**, **Rules**, **Notifications** and **Data** (this device's app lock, backup and restore, AI assistants and the version). Until a bank is connected, Settings opens on Connections.
 
@@ -91,7 +91,7 @@ On the Recurring page, right under Budget (the old Budget → Bills & income lin
 
 ## Investments
 
-On Net worth → Investments.
+In the sidebar (**Investments**, after Budget; **Invest** in the phone's tab bar), at `#investments`, and on Net worth → Investments.
 
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a comparison with the S&P 500, gain per holding and allocation.
 - **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Connections) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
