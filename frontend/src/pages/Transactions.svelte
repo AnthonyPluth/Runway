@@ -2,6 +2,7 @@
   import { loadAccounts, staleAccounts, type LoadedAccount } from "$lib/accounts";
   import { loadRecurring, staleRecurring } from "$lib/components/recurring/load";
   import { api } from "$lib/api";
+  import { apiCall } from "$lib/contract";
   import { app, refreshState } from "$lib/app.svelte";
   import { catLabel, catPath, categories, loadCategories, staleCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -9,6 +10,8 @@
   import AiButton from "$lib/components/AiButton.svelte";
   import AiSuggest from "$lib/components/transactions/AiSuggest.svelte";
   import ReviewGroups from "$lib/components/transactions/ReviewGroups.svelte";
+  import FilterChips from "$lib/components/transactions/FilterChips.svelte";
+  import ReviewCard from "$lib/components/transactions/ReviewCard.svelte";
   import TxTable from "$lib/components/transactions/TxTable.svelte";
   import TxSheet from "$lib/components/transactions/TxSheet.svelte";
   import Plus from "@lucide/svelte/icons/plus";
@@ -68,14 +71,52 @@
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
   let upcoming = $state<UpcomingEvent[]>([]);
   let upcomingError = $state(false);
+  // The host's day, from the same answer ("Today" is its local time, not the browser's); it's asked again at the
+  // browser's midnight, so a page left open doesn't keep yesterday's.
+  let hostToday = $state("");
+  let rolled = $state(0);
+  $effect(() => {
+    if (review) return;
+    void rolled;
+    const now = new Date(), next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime() + 1000;
+    const timer = setTimeout(() => { rolled++; loadUpcoming(); }, next);
+    return () => clearTimeout(timer);
+  });
   function loadUpcoming() {
     if (review) return;
-    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc, { charges: true }) as UpcomingEvent[]; upcomingError = false; },
+    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc, { charges: true }) as UpcomingEvent[]; upcomingError = false; hostToday = fc.today || hostToday; },
       () => { upcoming = []; upcomingError = true; });   // not the old ones: they'd look current
   }
   loadUpcoming();
 
   let selecting = $state(false);
+
+  // The review card (All only): what is waiting for review, loaded on its own so the filters of the list below don't
+  // narrow it. A decision takes the transaction out of it at once; an undo loads it again (reloadWas).
+  let queue = $state<Tx[]>([]);
+  let queueTotal = $state(0);
+  async function loadQueue() {
+    if (review) return;
+    try {
+      const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: "0" })}`);
+      queue = r.items.filter((t) => t.needs_review); queueTotal = r.total;
+    } catch { queue = []; queueTotal = 0; }   // the card is an extra: without it the list and the Review tab still work
+  }
+  loadQueue();
+  /** The next batch of the queue, added to the end: what's loaded is still the first of it (a decided one has left the
+   *  server's queue too), so the next starts after them. */
+  async function moreQueue() {
+    if (review) return;
+    try {
+      const r = await apiCall<"GET /api/transactions">(`/api/transactions?${new URLSearchParams({ review: "1", limit: "20", offset: String(queue.length) })}`);
+      const have = new Set(queue.map((t) => t.id));
+      queue = [...queue, ...r.items.filter((t) => t.needs_review && !have.has(t.id))]; queueTotal = r.total;
+    } catch { /* the card goes on with what it has; the Review tab has the rest */ }
+  }
+  // Something changed in the list (a row accepted, a bulk change, an undo): the card follows.
+  const changed = () => { loadQueue(); return txs.load(); };
+  // Pending: the pending rows among those loaded (the list has no such filter on the server).
+  let pendingOnly = $state(false);
 
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = txs.applied, q = a.q.trim().toLowerCase();
@@ -121,8 +162,11 @@
 
   /** Loads again only the transactions a change touched (its reply's `was`: the order's other charges too), given the
    *  categories it was from and to (txList.reloadRows). */
-  const reloadWas = (was: Was[], category?: string) => txs.reloadRows(was.map((w) => w.id),
-    [category, ...was.flatMap((w) => [w.category, ...(w.splits ?? []).map((s) => s.category)])]);
+  const reloadWas = (was: Was[], category?: string) => {
+    loadQueue();
+    return txs.reloadRows(was.map((w) => w.id),
+      [category, ...was.flatMap((w) => [w.category, ...(w.splits ?? []).map((s) => s.category)])]);
+  };
 
   /** Keep the category it has and take it out of Review (whoever set it). */
   function accept(t: Tx): Promise<boolean> {
@@ -130,8 +174,18 @@
     return decide(t, () => api<{ was: Was[] }>(`/api/transactions/${encodeURIComponent(t.id)}/accept`, { method: "POST" }), (r) => {
       undoBatched(`Accepted ${category}`, async () => { await restoreTx(r.was); await reloadWas(r.was); }, { description: t.payee || t.description || undefined });
       refreshState();
-      if (!review) { t.needs_review = 0; t.category_source = "manual"; }
+      if (!review) { t.needs_review = 0; t.category_source = "manual"; loadQueue(); }
     });
+  }
+
+  /** The review card's Accept: the category it shows, through the existing accept (the one it has) or save (another). */
+  async function decideCard(t: Tx, category: string): Promise<boolean> {
+    const ok = category !== (t.category ?? "") ? await save(t, category) : await accept(t);
+    if (!ok) return false;
+    queue = queue.filter((x) => x.id !== t.id); queueTotal = Math.max(0, queueTotal - 1);
+    if (queue.length < 3 && queueTotal > queue.length) moreQueue();   // what's loaded is running out
+    txs.reloadRows([t.id]);
+    return true;
   }
 
   // The category filter the list was loaded with, when it's a category: a split transaction's part in it is what shows.
@@ -232,16 +286,23 @@
     {#if app.state?.ai_configured}<AiLog bind:this={aiLog} />{/if}
   {/if}
 
+  <div class="relative mb-3 w-full">
+    <Search class="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+    <Input type="search" placeholder="Search" aria-label="Search transactions" title="Merchant, bank’s text, category, note or amount" class="h-11 w-full rounded-full pl-10"
+      value={txs.f.q} oninput={(e) => txs.search(e.currentTarget.value)} />
+  </div>
+  {#if !review}
+    <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} reviewCount={app.state?.review_count || 0} bind:pending={pendingOnly}
+      onall={() => { pendingOnly = false; txs.clearFilters(); }} onaccount={txs.load} />
+  {/if}
+
   <div class="mb-3 flex flex-wrap items-center gap-2">
-    <div class="relative w-full sm:w-64">
-      <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <Input type="search" placeholder="Search" aria-label="Search transactions" title="Merchant, bank’s text, category, note or amount" class="h-10 pl-8"
-        value={txs.f.q} oninput={(e) => txs.search(e.currentTarget.value)} />
-    </div>
+    {#if review}
     <NativeSelect aria-label="Account" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-48" bind:value={txs.f.account} onchange={txs.load}>
       <option value="">All accounts</option>
       {#each accounts.filter((a) => a.kind !== "investment") as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
     </NativeSelect>
+    {/if}
     <NativeSelect aria-label="Category" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-52" bind:value={txs.f.category} onchange={txs.load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
@@ -257,6 +318,9 @@
   </div>
 
   {#if review}<ReviewBar {rv} />{/if}
+  {#if !review && queue.length}
+    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} onsubmit={decideCard} onmore={moreQueue} />
+  {/if}
 
   {#if !review && txs.list}
     <!-- How many, and what they add up to (as the day totals count: transfers aren't money in or out). Not up to date
@@ -313,14 +377,19 @@
       <ReviewGroups items={txs.list.items} onapplied={rv.groupApplied} onchanged={txs.load} />
     {:else}
       {#key txs.loads}
-        <TxTable items={txs.list.items} total={txs.list.total} {review} {recurring} {only} family={txs.list.family} oneAccount={!!txs.applied.account} every={txs.everyFilter}
-          bind:selecting focused={rv.keyed} onsave={save} onaccept={accept} onchanged={txs.load} onmore={txs.more} onopen={openTx} />
+        {@const visible = pendingOnly ? txs.list.items.filter((t) => t.pending) : txs.list.items}
+        {#if pendingOnly && !visible.length}
+          <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">No pending transactions among these.</Card.Content></Card.Root>
+        {:else}
+        <TxTable items={visible} total={pendingOnly ? visible.length : txs.list.total} {review} {recurring} {only} family={txs.list.family} oneAccount={!!txs.applied.account} every={txs.everyFilter}
+          bind:selecting focused={rv.keyed} onsave={save} onaccept={accept} onchanged={changed} onmore={txs.more} onopen={openTx} today={hostToday} />
+        {/if}
       {/key}
     {/if}
     </div>
   {/if}
 
-  <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={txs.applied.account} {recurring} family={txs.list?.family} onsave={saveFromSheet} onchanged={txs.load}
+  <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={txs.applied.account} {recurring} family={txs.list?.family} onsave={saveFromSheet} onchanged={changed}
     onpatched={(x) => { if (sheetTx && x.id === sheetTx.id) sheetTx = { ...sheetTx, ...x }; }} />
 
   {#if app.state?.logodev_configured}
