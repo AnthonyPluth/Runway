@@ -97,7 +97,7 @@
       <div class="min-w-0">
         <dt class="text-[12px] text-muted-foreground">Lowest point</dt>
         <dd class={cn("text-[17px] font-semibold tabular-nums", lowBad && "text-destructive")}>{fmt0Down(low.balance)}</dd>
-        <dd class="truncate text-[13px] text-muted-foreground">{lowWhen(fc)}{#if lowName} · {lowName}{/if}</dd>
+        <dd class="truncate text-[13px] text-muted-foreground">{lowWhen(fc)}{#if lowName}{" · "}{lowName}{/if}</dd>
       </div>
     </dl>
   {/if}
