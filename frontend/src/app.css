@@ -9,8 +9,8 @@
    hoverable:group-hover:opacity-100`), so on a touch screen, which can't hover, they're simply always there. */
 @custom-variant hoverable (@media (hover: hover));
 
-/* Inter, bundled with Runway (runway/static/fonts, SIL Open Font License): a variable font with an optical-size axis, so
-   big headlines get its tighter display cut on their own. Geist stays behind it for the symbols Inter's Latin set lacks. */
+/* Geist and Inter, both bundled with Runway (runway/static/fonts, SIL Open Font License). Geist leads; Inter, a variable
+   font with an optical-size axis, sits behind it for any glyph Geist lacks. */
 @font-face { font-family: "Inter"; src: url("/fonts/Inter-latin-Variable.woff2") format("woff2-variations"); font-weight: 100 900; font-style: normal; font-display: swap;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: "Inter"; src: url("/fonts/Inter-latin-ext-Variable.woff2") format("woff2-variations"); font-weight: 100 900; font-style: normal; font-display: swap;
@@ -52,39 +52,40 @@
 
 /* Dark: near-black behind, slightly raised surfaces with a hairline edge, blue for actions. */
 .dark {
+  --radius: 1rem;   /* cards land around 20px, controls 10-14px */
   color-scheme: dark;   /* the browser's own controls (number arrows, scrollbars, menus) drawn light on dark, not black */
-  --background: #0b0b0c;
+  --background: #0b0c0e;
   --foreground: #ffffff;
-  --card: #18181a;
+  --card: #15171b;
   --card-foreground: #ffffff;
-  --popover: #2c2c2e;
+  --popover: #23262c;
   --popover-foreground: #ffffff;
-  --primary: #0a84ff;
-  --primary-foreground: #ffffff;
-  --secondary: #2c2c2e;
+  --primary: #6e9bff;
+  --primary-foreground: #0b0c0e;
+  --secondary: #1d2025;
   --secondary-foreground: #ffffff;
-  --muted: #2c2c2e;
-  --muted-foreground: #8e8e93;
-  --accent: #2c2c2e;
+  --muted: #1d2025;
+  --muted-foreground: #9aa0aa;
+  --accent: #1d2025;
   --accent-foreground: #ffffff;
-  --destructive: #ff453a;
-  --border: rgb(84 84 88 / 55%);
-  --input: rgb(118 118 128 / 28%);
-  --ring: #0a84ff;
-  --chart-1: #0a84ff;
-  --chart-2: #30d158;
-  --chart-3: #ff9f0a;
-  --chart-4: #bf5af2;
-  --chart-5: #ff375f;
-  --sidebar: #0b0b0c;
+  --destructive: #ff8a7a;
+  --border: rgb(255 255 255 / 7%);
+  --input: rgb(255 255 255 / 12%);
+  --ring: #6e9bff;
+  --chart-1: #6e9bff;
+  --chart-2: #3fc6b4;
+  --chart-3: #ffb23e;
+  --chart-4: #b49cff;
+  --chart-5: #ff8a7a;
+  --sidebar: #0b0c0e;
   --sidebar-foreground: #ffffff;
-  --sidebar-accent: #1c1c1e;
+  --sidebar-accent: #1d2025;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: rgb(84 84 88 / 40%);
+  --sidebar-border: rgb(255 255 255 / 7%);
 }
 
 @theme inline {
-  --font-sans: "Inter", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -127,7 +128,7 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; font-optical-sizing: auto; font-feature-settings: "cv11", "ss03"; -webkit-font-smoothing: antialiased; }
+  body { @apply bg-background text-foreground; font-optical-sizing: auto; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
   /* No pinch or double-tap zoom: the page is laid out for the phone already, and a zoomed-in dashboard is a mistake to
      back out of, not a feature. The viewport meta in index.html says the same; Safari in a tab ignores that and honours
      this. Scrolling is untouched. Text still follows the phone's text size. */
@@ -149,8 +150,8 @@ input[type="date"]::-webkit-date-and-time-value { min-width: 0; min-height: 1.4e
   --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-8: #e66767; --cat-other: #6b6a66;
   --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0; --nw-6: #9085e9;
   --flow-in: #30d158; --flow-out: #0a84ff;
-  --good: #30d158; --warning: #f0b84b; --low: #f08a4b;
-  --loss: #e66767;   /* a loss on Investments: the chart palette's coral, softer than a pure red */
+  --good: #5be49b; --warning: #ffb23e; --low: #f08a4b;
+  --loss: #ff8a7a;   /* a loss: coral, softer than a pure red */
   --edge: rgb(255 255 255 / 7%);   /* the hairline around cards and grouped lists */
 }
 
@@ -167,8 +168,8 @@ input[type="date"]::-webkit-date-and-time-value { min-width: 0; min-height: 1.4e
   button.cell:hover, a.cell:hover { background: rgb(255 255 255 / 4%); }
   button.cell:active, a.cell:active { background: rgb(255 255 255 / 8%); }
   .tile { background: var(--card); border: 1px solid var(--edge); border-radius: 0.875rem; padding: 0.75rem 1rem; }
-  /* A small caps label over a section, spaced out. */
-  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  /* A section title, in sentence case. */
+  .eyebrow { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--muted-foreground); }
 }
 /* Cards: a faint hairline edge instead of a heavy outline. */
 [data-slot="card"] { border-color: var(--edge); box-shadow: none; }
