@@ -233,14 +233,18 @@ describe("Transactions: the card follows the list, and the queue past 20", () =>
   it("a decision on the card keeps the fresh queue answer that follows it (its total included)", async () => {
     const all = many(2);
     let calls = 0;
+    let release!: (v: unknown) => void;
+    // The refresh the accept starts is slow: the card has already moved on (by its own count) when it lands.
     serve(all, 2, (path, o) => {
-      if (path.includes("review=1") && path.includes("limit=20")) return ++calls === 1 ? { items: all, total: 2 } : { items: [all[1]], total: 5 };
+      if (path.includes("review=1") && path.includes("limit=20")) return ++calls === 1 ? { items: all, total: 2 } : new Promise((r) => { release = r; });
       if (path.endsWith("/accept") && o?.method === "POST") return { ok: true, was: wasOf(path.split("/")[3]) };
       return undefined;
     });
     render(Transactions);
     await waitFor(() => expect(card()).not.toBeNull());
     await userEvent.click(within(card()!).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(within(card()!).getByText("To review · 1 of 1")).toBeInTheDocument());
+    release({ items: [all[1]], total: 5 });
     // The server's answer, not just the local count down, is what the card shows.
     await waitFor(() => expect(within(card()!).getByText("To review · 1 of 5")).toBeInTheDocument());
     expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument();
