@@ -15,8 +15,10 @@
   // category and moves to the next; Skip moves on without changing anything (it comes round again). `onsubmit` is the
   // page's: the existing accept (the suggestion kept) or category save (another picked); true when it was saved,
   // when the transaction leaves `items`.
-  let { items, total, rows, onsubmit }: {
+  let { items, total, rows, onsubmit, onmore }: {
     items: Tx[]; total: number; rows: Tx[]; onsubmit: (t: Tx, category: string) => Promise<boolean>;
+    /** Adds the next batch of the queue to `items` (there are more than are loaded). */
+    onmore?: () => Promise<void>;
   } = $props();
 
   let at = $state(0);
@@ -31,7 +33,11 @@
   const name = $derived(t ? (t.payee || t.description || "") : "");
   const initial = $derived(shown?.bank?.initial || ((name.replace(/^[^A-Za-z0-9]+/, "")[0]) || "?").toUpperCase());
 
-  function skip() { if (items.length > 1) at = (at + 1) % items.length; }
+  async function skip() {
+    // At the last one loaded, with more waiting: load them before moving on, so it doesn't wrap to the first.
+    if (onmore && items.length < total && at % items.length === items.length - 1) { busy = true; try { await onmore(); } finally { busy = false; } }
+    if (items.length > 1) at = ((at % items.length) + 1) % items.length;
+  }
   async function accept() {
     if (!t || !chosen || busy) return;
     busy = true;

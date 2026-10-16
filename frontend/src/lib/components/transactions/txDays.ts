@@ -1,9 +1,10 @@
-import { fmtDate, isoDay } from "$lib/format";
+import { fmtDate, isoDay, parseDate } from "$lib/format";
 import type { Tx } from "./types";
 
 /** A day's heading: "Today", "Yesterday", then the date (with the year when it isn't this year's). `today` is the
- *  machine's local day, as everywhere in the app. */
-export function dayLabel(day: string, today: Date = new Date()): string {
+ *  host's day (the server's, as the forecast counts it: a YYYY-MM-DD) or, until that's known, the browser's. */
+export function dayLabel(day: string, today: Date | string = new Date()): string {
+  if (typeof today === "string") today = parseDate(today);
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (day === isoDay(today)) return "Today";
   if (day === isoDay(yesterday)) return "Yesterday";

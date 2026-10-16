@@ -31,9 +31,11 @@
   // `every`: the list's filters (as GET /api/transactions takes them), so a change can reach every transaction they match,
   // not just the ones loaded ("Select all 212").
   // `focused`: the row the keyboard is on (Review). `onaccept`: keep a row's category and take it out of Review.
-  let { items, total, review, recurring, only = "", family, oneAccount = false, every, selecting = $bindable(false), focused = "", onsave, onaccept, onchanged, onmore, onopen }: {
+  let { items, total, review, recurring, only = "", family, oneAccount = false, every, selecting = $bindable(false), focused = "", today = "", onsave, onaccept, onchanged, onmore, onopen }: {
     items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; only?: string; family?: string[]; oneAccount?: boolean;
     every?: Record<string, string>; selecting?: boolean; focused?: string;
+    /** The host's day (YYYY-MM-DD), for "Today" and "Yesterday"; the browser's until it's known. */
+    today?: string;
     onsave: (t: Tx, category: string) => Promise<boolean | void>; onaccept?: (t: Tx) => void; onchanged: () => void; onmore?: () => Promise<void>;
     /** Open a transaction's details (the sheet). */
     onopen?: (t: Tx) => void;
@@ -50,8 +52,7 @@
 
   // Days, newest first, each with what came in and went out that day (and whether a transfer was left out of it).
   const days = $derived(groupDays(items, counted, leftOut));
-  const today = new Date();
-  const label = (d: string) => dayLabel(d, today);
+  const label = (d: string) => dayLabel(d, today || new Date());
 
   // Load more when the end of the list comes into view (the button does the same by hand). One that fails says so, with
   // a Retry, and isn't tried again on its own until you do.

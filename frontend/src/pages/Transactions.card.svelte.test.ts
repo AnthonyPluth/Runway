@@ -149,3 +149,70 @@ describe("Transactions: the filter chips", () => {
     expect(txFilters.transactions.q).toBe("zu");
   });
 });
+
+describe("Transactions: the card follows the list, and the queue past 20", () => {
+  const many = (n: number): Tx[] => Array.from({ length: n }, (_, i) => tx({ id: `q${i}`, payee: `Merchant ${i}`, category: "Coffee", needs_review: 1, posted: "2026-03-10" }));
+  /** The server's queue: a decided one leaves it; `limit` and `offset` are honoured. */
+  const server = (all: Tx[], extra: (path: string, o?: { method?: string }) => unknown = () => undefined) => {
+    let left = [...all];
+    const asked: string[] = [];
+    serve(all, all.length, (path, o) => {
+      const custom = extra(path, o);
+      if (custom !== undefined) return custom;
+      if (path.includes("review=1") && path.includes("limit=20")) {
+        asked.push(path);
+        const p = new URLSearchParams(path.split("?")[1]);
+        return { items: left.slice(Number(p.get("offset")), Number(p.get("offset")) + 20), total: left.length };
+      }
+      if (path.endsWith("/accept") && o?.method === "POST") { const id = path.split("/")[3]; left = left.filter((t) => t.id !== id); return { ok: true, was: wasOf(id) }; }
+      return undefined;
+    });
+    return asked;
+  };
+
+  it("Skip at the last one loaded asks for the next batch instead of wrapping", async () => {
+    const asked = server(many(22));
+    render(Transactions);
+    await waitFor(() => expect(card()).not.toBeNull());
+    for (let i = 0; i < 19; i++) await userEvent.click(within(card()!).getByRole("button", { name: "Skip" }));
+    expect(within(card()!).getByText("Merchant 19")).toBeInTheDocument();
+    await userEvent.click(within(card()!).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(within(card()!).getByText("Merchant 20")).toBeInTheDocument());
+    expect(within(card()!).getByText("To review · 21 of 22")).toBeInTheDocument();
+    expect(asked.at(-1)).toContain("offset=20");
+  });
+
+  it("keeps the card when what's loaded is all decided but more is waiting", async () => {
+    const all = many(2);
+    let first = true;
+    // The first answer holds one of the two (as if only that much had loaded).
+    const asked = server(all, (path) => {
+      if (first && path.includes("review=1") && path.includes("limit=20")) { first = false; return { items: [all[0]], total: 2 }; }
+      return undefined;
+    });
+    render(Transactions);
+    await waitFor(() => expect(card()).not.toBeNull());
+    await userEvent.click(within(card()!).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument());
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it("a row accepted in the list takes the card's copy away too", async () => {
+    const all = many(2);
+    server(all);
+    render(Transactions);
+    await waitFor(() => expect(card()).not.toBeNull());
+    await userEvent.click(screen.getAllByRole("button", { name: /^Accept Coffee for Merchant 0/ })[0]);
+    await waitFor(() => expect(within(card()!).queryByText("Merchant 0")).not.toBeInTheDocument());
+    expect(within(card()!).getByText("Merchant 1")).toBeInTheDocument();
+  });
+
+  it("calls a day Today and Yesterday by the host's day (from the server), not the browser's", async () => {
+    serve([tx({ id: "x", payee: "Xray", posted: "2026-03-10" }), tx({ id: "y", payee: "Yank", posted: "2026-03-09" })], 2, (path) =>
+      path.startsWith("/api/overview") ? { events: [], today: "2026-03-10" } : path.includes("limit=20&") ? { items: [], total: 0 } : undefined);
+    render(Transactions);
+    await screen.findByText("Xray");
+    await waitFor(() => expect(screen.getByRole("region", { name: "Today" })).toBeInTheDocument());
+    expect(screen.getByRole("region", { name: "Yesterday" })).toBeInTheDocument();
+  });
+});

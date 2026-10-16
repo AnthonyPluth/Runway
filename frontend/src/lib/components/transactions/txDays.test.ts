@@ -49,3 +49,11 @@ describe("alternatives", () => {
     expect(alternatives(t, rows, cats)).toEqual(["Dining", "Groceries"]);
   });
 });
+
+describe("dayLabel with the host's day", () => {
+  it("takes it as a YYYY-MM-DD, whatever the browser's day is", () => {
+    expect(dayLabel("2026-03-10", "2026-03-10")).toBe("Today");
+    expect(dayLabel("2026-03-09", "2026-03-10")).toBe("Yesterday");
+    expect(dayLabel("2026-03-10", "2026-03-11")).toBe("Yesterday");
+  });
+});
