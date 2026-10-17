@@ -52,4 +52,12 @@ describe("StatStrip", () => {
     expect(dl.className).not.toMatch(/(^|\s)md:/);
     expect(screen.getByText("1")).toHaveClass("@lg:text-[26px]");
   });
+
+  it("on a phone only, gives an odd last tile the whole row", () => {
+    const { container } = render(StatStrip, { items: [{ label: "A", value: "1" }, { label: "B", value: "2" }, { label: "C", value: "3" }] });
+    const dl = container.querySelector("dl")!;
+    expect(dl).toHaveClass("phone:[&>:last-child:nth-child(odd)]:col-span-2");
+    // Every added class is behind the phone variant, so tablet and desktop lay out as before.
+    expect(dl.className.split(/\s+/).filter((c) => c.includes("col-span"))).toEqual(["phone:[&>:last-child:nth-child(odd)]:col-span-2"]);
+  });
 });
