@@ -9,9 +9,11 @@ export const MAX_GROUPS = 6;
 export function foldAllocation(items: { name: string; value: number; share: number }[]): AllocRow[] {
   const sorted = [...items].sort((a, b) => b.share - a.share);
   if (sorted.length <= MAX_GROUPS) return sorted;
-  const rest = sorted.slice(MAX_GROUPS - 1);
+  // A group the data itself calls "Other" goes into the remainder, so there is only one row of that name.
+  const named = sorted.filter((r) => r.name !== "Other");
+  const rest = [...named.slice(MAX_GROUPS - 1), ...sorted.filter((r) => r.name === "Other")];
   return [
-    ...sorted.slice(0, MAX_GROUPS - 1),
+    ...named.slice(0, MAX_GROUPS - 1),
     { name: "Other", value: rest.reduce((s, r) => s + r.value, 0), share: rest.reduce((s, r) => s + r.share, 0), other: true },
   ];
 }

@@ -168,7 +168,7 @@ describe("InvestmentsView", () => {
     describe("allocation, checks and accounts", () => {
       const names = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Group ${i + 1}`, value: (n - i) * 100, share: (n - i) / 100 }));
       const load = async (over: object) => {
-        serve((path: string) => path.startsWith("/api/investments?") ? page(over) : { inv_accounts: 1, items: [] });
+        serve((path: string) => path.startsWith("/api/investments?") ? page(over) : { inv_accounts: 1, items: [], simplefin_seen: [] });
         render(InvestmentsView);
         await screen.findByText("Holdings");
       };
@@ -224,9 +224,29 @@ describe("InvestmentsView", () => {
         expect(screen.queryByTestId("check-card")).toBeNull();
       });
 
+      it("links each account by the id Settings knows it by: a Plaid account's account_id, a SimpleFIN one's id without sf:", async () => {
+        const acct = (over: object) => ({ item_id: "i", name: "Acct", hidden: 0, hidden_in_accounts: 0, institution_name: null, tracked: 0, drift: null, balance: 10, ...over });
+        await load({ accounts: [
+          acct({ id: "inv_1", source: "plaid", account_id: "plaid_acc_1", name: "Plaid one" }),
+          acct({ id: "sf:ACT-9", source: "simplefin", name: "SimpleFIN one" }),
+          acct({ id: "inv_2", source: "plaid", account_id: null, name: "Unmatched" }),
+        ] });
+        expect(screen.getAllByTestId("account-row").map((r) => r.getAttribute("href"))).toEqual([
+          "#setup/accounts?account=plaid_acc_1", "#setup/accounts?account=ACT-9", "#setup/accounts"]);
+      });
+
+      it("falls back to the value of an account's lots when it has no balance", async () => {
+        const lot = { account_id: "a1", security_id: "s1", account_name: "", quantity: 4, value: 1000, cost_basis: null, reported_cost_basis: null, per_share: null, manual: false };
+        await load({
+          holdings: [holding({ quantity: 4, day_change: 8, lots: [lot] })],
+          accounts: [{ id: "a1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: null, tracked: 0, drift: null, balance: null }],
+        });
+        expect(screen.getByTestId("account-row")).toHaveTextContent("$1,000.00");
+      });
+
       it("lists each visible account with its value and today's change, signed, linking to it", async () => {
         const lot = (account_id: string, quantity: number) => ({ account_id, security_id: "s1", account_name: "", quantity, value: quantity * 250, cost_basis: null, reported_cost_basis: null, per_share: null, manual: false });
-        const acct = (id: string, name: string, balance: number, hidden = 0) => ({ id, item_id: "i", name, hidden, hidden_in_accounts: 0, source: "plaid", institution_name: "Fidelity", tracked: 0, drift: null, balance });
+        const acct = (id: string, name: string, balance: number, hidden = 0) => ({ id, account_id: `plaid_${id}`, item_id: "i", name, hidden, hidden_in_accounts: 0, source: "plaid", institution_name: "Fidelity", tracked: 0, drift: null, balance });
         await load({
           holdings: [holding({ quantity: 10, day_change: 12, lots: [lot("a1", 5), lot("a2", 5)] }), holding({ security_id: "s2", quantity: 4, day_change: -8, lots: [lot("a2", 4)] })],
           accounts: [acct("a1", "Roth IRA", 1250), acct("a2", "Brokerage", 2500), acct("a3", "Old 401k", 100, 1)],
@@ -235,7 +255,7 @@ describe("InvestmentsView", () => {
         expect(rows).toHaveLength(2);
         expect(rows[0]).toHaveTextContent("Roth IRA");
         expect(rows[0]).toHaveTextContent("$1,250.00");
-        expect(rows[0]).toHaveAttribute("href", "#setup/accounts?account=a1");
+        expect(rows[0]).toHaveAttribute("href", "#setup/accounts?account=plaid_a1");
         expect(within(rows[0]).getByTestId("account-day")).toHaveTextContent("+$6.00 today");
         expect(within(rows[0]).getByTestId("account-day")).toHaveClass("text-good");
         expect(within(rows[1]).getByTestId("account-day")).toHaveTextContent("−$2.00 today");

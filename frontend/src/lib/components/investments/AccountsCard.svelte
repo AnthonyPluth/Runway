@@ -9,6 +9,10 @@
   // Each visible investment account: its value and today's change, linking to the account in Settings → Accounts.
   let { accounts, holdings }: { accounts: InvAccount[]; holdings: Holding[] } = $props();
   const shown = $derived(accounts.filter((a) => !a.hidden));
+  // Settings → Accounts knows an account by its own id: SimpleFIN's is the position id without "sf:", Plaid's the account_id it is matched to (none: the list without a row to open).
+  const settingsId = (a: InvAccount) => (a.source === "simplefin" ? a.id.slice(3) : a.account_id);
+  const link = (a: InvAccount) => { const id = settingsId(a); return id ? `#setup/accounts?account=${encodeURIComponent(id)}` : "#setup/accounts"; };
+  // The value is the account's balance (which can include cash); today's change comes only from the holdings' lots, so the two can cover different amounts. With no balance, the lots' values stand in.
   const value = (a: InvAccount) => a.balance ?? holdings.reduce((s, h) => s + h.lots.filter((l) => l.account_id === a.id).reduce((t, l) => t + l.value, 0), 0);
 </script>
 
@@ -20,7 +24,7 @@
         {#each shown as a (a.id)}
           {@const day = accountDayChange(a, holdings)}
           <li class="border-t border-border first:border-t-0">
-            <a href={`#setup/accounts?account=${encodeURIComponent(a.id)}`} class="flex min-h-11 items-center gap-3 py-2 hover:underline" data-testid="account-row">
+            <a href={link(a)} class="flex min-h-11 items-center gap-3 py-2 hover:underline" data-testid="account-row">
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-sm">{a.name || a.official_name || "Account"}</span>
                 {#if a.institution_name}<span class="block truncate text-xs text-muted-foreground">{a.institution_name}{a.mask ? ` ···${a.mask}` : ""}</span>{/if}
