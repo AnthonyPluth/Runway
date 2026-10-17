@@ -558,6 +558,37 @@
           }
         }
       }
+    },
+    "/api/investments/holding/{id}": {
+      "get": {
+        "operationId": "api_investments_holding",
+        "x-handler": "runway/server/api/investments.py:api_investments_holding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1118,6 +1149,266 @@
           "minimum",
           "stale",
           "next_close"
+        ],
+        "additionalProperties": false
+      },
+      "HoldingDetail": {
+        "type": "object",
+        "description": "GET /api/investments/holding/{id}?period=1M|3M|YTD|1Y|2Y|MAX (default 1Y): one holding's page. `total` is the\nwhole portfolio's value (the holding's share of it is `holding.allocation`), `dividends_12m` the dividends it paid\nover the last 12 months. 404 when none of your holdings is this security (cash has no page).",
+        "properties": {
+          "holding": {
+            "$ref": "#/components/schemas/InvestmentHolding"
+          },
+          "total": {
+            "type": "number"
+          },
+          "period": {
+            "type": "string"
+          },
+          "history": {
+            "$ref": "#/components/schemas/HoldingHistory"
+          },
+          "dividends_12m": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "holding",
+          "total",
+          "period",
+          "history",
+          "dividends_12m"
+        ],
+        "additionalProperties": false
+      },
+      "HoldingHistory": {
+        "type": "object",
+        "description": "A holding's closes over the period, oldest first, with the close on its first day and the change since (dollars,\nand a fraction of that close). Empty, with nothing for the rest, when no prices are kept for it.",
+        "properties": {
+          "dates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "start_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "change": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "change_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "dates",
+          "prices",
+          "start_price",
+          "change",
+          "change_pct"
+        ],
+        "additionalProperties": false
+      },
+      "HoldingLot": {
+        "type": "object",
+        "description": "One account's share of a holding: its shares and value, the cost basis (yours if `manual`, else what the\ninstitution reports as `reported_cost_basis`) and the price paid per share.",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "security_id": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number"
+          },
+          "cost_basis": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reported_cost_basis": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "per_share": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "manual": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account_id",
+          "security_id",
+          "account_name",
+          "quantity",
+          "value",
+          "cost_basis",
+          "reported_cost_basis",
+          "per_share",
+          "manual"
+        ],
+        "additionalProperties": false
+      },
+      "InvestmentHolding": {
+        "type": "object",
+        "description": "A holding as /api/investments describes it: the same fund in several accounts is one holding with a lot in\neach. `allocation`, `gain_pct` and `day_change_pct` are fractions (0.021 is 2.1%); gain and day change are null\nwhen unknown (no cost basis, no previous close).",
+        "properties": {
+          "security_id": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "ticker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "asset_class": {
+            "type": "string"
+          },
+          "sector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_cash": {
+            "type": "boolean"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number"
+          },
+          "cost_basis": {
+            "type": "number"
+          },
+          "cost_known": {
+            "type": "boolean"
+          },
+          "cost_manual": {
+            "type": "boolean"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldingLot"
+            }
+          },
+          "allocation": {
+            "type": "number"
+          },
+          "gain": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "gain_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "day_change": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "day_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "logo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "security_id",
+          "group",
+          "ticker",
+          "name",
+          "type",
+          "asset_class",
+          "sector",
+          "is_cash",
+          "quantity",
+          "value",
+          "cost_basis",
+          "cost_known",
+          "cost_manual",
+          "accounts",
+          "price",
+          "lots",
+          "allocation",
+          "gain",
+          "gain_pct",
+          "day_change",
+          "day_change_pct",
+          "logo"
         ],
         "additionalProperties": false
       },

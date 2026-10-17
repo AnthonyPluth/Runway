@@ -337,6 +337,69 @@ class InvestmentsSummary(TypedDict):
     positions: list[InvestmentPosition]
 
 
+class HoldingLot(TypedDict):
+    """One account's share of a holding: its shares and value, the cost basis (yours if `manual`, else what the
+    institution reports as `reported_cost_basis`) and the price paid per share."""
+    account_id: str
+    security_id: str
+    account_name: str
+    quantity: float
+    value: float
+    cost_basis: float | None
+    reported_cost_basis: float | None
+    per_share: float | None
+    manual: bool
+
+
+class InvestmentHolding(TypedDict):
+    """A holding as /api/investments describes it: the same fund in several accounts is one holding with a lot in
+    each. `allocation`, `gain_pct` and `day_change_pct` are fractions (0.021 is 2.1%); gain and day change are null
+    when unknown (no cost basis, no previous close)."""
+    security_id: str
+    group: str
+    ticker: str | None
+    name: str | None
+    type: str | None
+    asset_class: str
+    sector: str | None
+    is_cash: bool
+    quantity: float
+    value: float
+    cost_basis: float
+    cost_known: bool
+    cost_manual: bool
+    accounts: list[str]
+    price: float | None
+    lots: list[HoldingLot]
+    allocation: float
+    gain: float | None
+    gain_pct: float | None
+    day_change: float | None
+    day_change_pct: float | None
+    logo: str | None
+
+
+class HoldingHistory(TypedDict):
+    """A holding's closes over the period, oldest first, with the close on its first day and the change since (dollars,
+    and a fraction of that close). Empty, with nothing for the rest, when no prices are kept for it."""
+    dates: list[str]
+    prices: list[float]
+    start_price: float | None
+    change: float | None
+    change_pct: float | None
+
+
+class HoldingDetail(TypedDict):
+    """GET /api/investments/holding/{id}?period=1M|3M|YTD|1Y|2Y|MAX (default 1Y): one holding's page. `total` is the
+    whole portfolio's value (the holding's share of it is `holding.allocation`), `dividends_12m` the dividends it paid
+    over the last 12 months. 404 when none of your holdings is this security (cash has no page)."""
+    holding: InvestmentHolding
+    total: float
+    period: str
+    history: HoldingHistory
+    dividends_12m: float
+
+
 # App lock (runway/applock.py)
 
 class LockStatus(TypedDict):
