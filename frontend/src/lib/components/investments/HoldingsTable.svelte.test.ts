@@ -92,6 +92,14 @@ describe("HoldingsTable", () => {
     expect(screen.getByText("edited")).toBeInTheDocument();
   });
 
+  it("links a holding's name to its page, and leaves cash without a link", () => {
+    setup([holding({ security_id: "s1" }), holding({ security_id: "s9", group: "s9", ticker: "CUR:USD", name: "US Dollar", is_cash: true })]);
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "#investments/holding/s1");
+    expect(links[0]).toHaveTextContent("VTI Vanguard Total Market");
+  });
+
   it("hides a ticker that is really an exchange-qualified code", () => {
     setup([holding({ ticker: "NASDAQ:VTI" })]);
     expect(screen.getAllByRole("row")[1].querySelector("b")).toHaveTextContent("");
@@ -248,12 +256,22 @@ describe("HoldingsTable", () => {
       expect(order()).toEqual(["BBB", "AAA", "CCC"]);
     });
 
-    it("opens the cost basis editor from a row, and closes it with Done", async () => {
-      setup([holding({ lots: [lot()] })]);
-      await userEvent.click(screen.getByRole("button", { name: /VTI/ }));
-      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Done" }));
-      expect(screen.queryByLabelText("Price per share in Brokerage")).not.toBeInTheDocument();
+    it("opens the holding's page from a row, noting where the list was scrolled to", async () => {
+      setup([holding({ security_id: "s/1", lots: [lot()] })]);
+      const link = screen.getByRole("link", { name: /VTI/ });
+      expect(link).toHaveAttribute("href", "#investments/holding/s%2F1");
+      expect(screen.queryByLabelText("Price per share in Brokerage")).not.toBeInTheDocument();   // no editor on the row any more
+      vi.stubGlobal("scrollY", 420);
+      link.addEventListener("click", (e) => e.preventDefault());   // (jsdom would try to navigate)
+      await userEvent.click(link);
+      expect(inv.scrollY).toBe(420);
+    });
+
+    it("puts the list back where it was when the page is shown again", () => {
+      inv.scrollY = 300;
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+      setup(three());
+      expect(inv.scrollY).toBe(0);
     });
 
     // A window resized (or a phone turned) while the page is open: the media query changes under the component.
@@ -286,18 +304,17 @@ describe("HoldingsTable", () => {
     it("keeps an open cost basis editor across the switch", async () => {
       const setPhone = liveStub();
       setup([holding({ lots: [lot()] })]);
-      await userEvent.click(screen.getByRole("button", { name: /VTI/ }));
-      expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
       await setPhone(false);
-      expect(screen.getByRole("table")).toBeInTheDocument();
+      await userEvent.click(screen.getByTitle("Edit cost basis"));
       expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
       await setPhone(true);
       expect(screen.getByLabelText("Price per share in Brokerage")).toBeInTheDocument();
     });
 
-    it("keeps cash a plain row, without an editor", () => {
+    it("keeps cash a plain row, without a link or an editor", () => {
       setup([holding({ is_cash: true, ticker: null, name: "Cash", gain: null, gain_pct: null })]);
       expect(screen.queryByTitle("Edit cost basis")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
       expect(items()[0]).toHaveTextContent("Cash");
     });
   });

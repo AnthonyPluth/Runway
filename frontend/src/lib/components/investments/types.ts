@@ -1,4 +1,8 @@
 // The shapes of the Investments page's API replies (runway/server.py, runway/domain/portfolio.py).
+import type { HoldingDetail } from "$lib/api-types";
+
+/** GET /api/investments/holding/{id}: one holding's page (runway/server/contract.py's HoldingDetail). */
+export type HoldingPage = Omit<HoldingDetail, "holding"> & { holding: Holding };
 
 /** One account's share of a holding (the same fund in two accounts is one holding with two lots). */
 interface Lot {
