@@ -8,7 +8,7 @@
 
   // A row of figures in tiles: the value big, its label and an optional note under it. Sized by the strip's own width, not the screen's (a
   // container query), so a tablet with a navigation rail still fits as many tiles as the text allows: two columns while it's
-  // narrow (on a phone an odd last tile takes the whole row, so no half row is left empty), compact tiles in a row from 32rem up. A tone colors the value; `bad` and `warn` also tint the tile's edge and put a dot before
+  // narrow (on a phone, while it's still two columns, an odd last tile takes the whole row, so no half row is left empty), compact tiles in a row from 32rem up. A tone colors the value; `bad` and `warn` also tint the tile's edge and put a dot before
   // the label, so a warning stands out. `up` and `down` only color it green or coral, for a figure that's simply a gain
   // or a loss. `subTone` colors just the note (a gain or loss under a figure). `class` and `subClass` style a tile or its
   // note (e.g. a tile shown only from md up, and its figure as a note under another tile on a phone).
@@ -19,7 +19,7 @@
 </script>
 
 <div class="@container">
-<dl class={cn("grid grid-cols-2 gap-3 phone:[&>:last-child:nth-child(odd)]:col-span-2 @lg:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]", className)}>
+<dl class={cn("grid grid-cols-2 gap-3 phone:@max-lg:[&>:last-child:nth-child(odd)]:col-span-2 @lg:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]", className)}>
   {#each items as it (it.label)}
     <div class={cn("flex min-w-0 flex-col rounded-[14px] border bg-card px-4 py-3.5", (it.tone && edge[it.tone]) || "border-[var(--edge)]", it.class)} data-tone={it.tone}>
       <dt class="order-2 mt-1 flex items-center gap-1.5 text-[13px] leading-snug text-muted-foreground">
