@@ -24,6 +24,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
   - `{"scroll_to": selector}` scrolls it to the middle of the window (and, inside a table that scrolls sideways, to its left edge), so the `-top` screenshot after it shows it.
   - `{"wait_for": selector}` waits for it to appear; `{"expect_text": {"selector": …, "text": …}}` fails unless it contains the text.
     `expect_text` reads the text once the selector exists and does not wait for the text to arrive: for content a page loads after it renders (a `{#await}` block), `wait_for` a `text=…` selector first, or a slow runner reads the page before it is filled in.
+  - `{"expect_above": {"selector": …, "above": …}}` fails unless the first match is whole inside the window and ends above the first match of `above` (the floating navigation, say): that is, it is on the first screen.
   - `{"reload": true}` opens the app again (a launch), not just another route.
   - `{"authenticator": "verified"}` or `"unverified"` (signed-in flows only): the virtual authenticator's Face ID works, or fails.
   - `{"screenshot": "name"}` saves `flow-<flow name>-<name>-<viewport>.png` (full page) and `…-<viewport>-top.png` (the top of the page, the size of the viewport).

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { byDue, dueIn, dueLabel, lateBy, monthlyTotal, perMonth } from "./schedule";
-import type { RecurringItem } from "./types";
+import { byDue, dueIn, dueLabel, lateBy, monthlyTotal, perMonth, previewGuidance } from "./schedule";
+import type { RecurringItem, RecurringValues } from "./types";
 
 const nb = (s: string) => s.replace(/ /g, "\u00a0");
 const item = (extra: Partial<RecurringItem> = {}): RecurringItem => ({
@@ -58,5 +58,25 @@ describe("what items come to in a month", () => {
       item({ amount: -600, frequency: "yearly" }), item({ amount: -999, active: 0 }), item({ amount: -400, frequency: "once" })];
     expect(monthlyTotal(list)).toBeCloseTo(1200 + 60 * 52 / 12 + 50);
     expect(monthlyTotal([item({ amount: 1500, frequency: "biweekly" })])).toBeCloseTo(3250);
+  });
+});
+
+describe("what a draft needs before its dates are previewed", () => {
+  const draft = (extra: Partial<RecurringValues> = {}): RecurringValues => ({
+    name: "", account_id: "a1", amount: -50, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-03-31", match: "",
+    amount_min: "", amount_max: "", end_date: "", category: "", ...extra,
+  });
+
+  it("asks for nothing once the schedule is complete (the name isn't part of it)", () => {
+    expect(previewGuidance(draft())).toBeNull();
+    expect(previewGuidance(draft({ frequency: "semimonthly", dates: "1, 15" }))).toBeNull();
+  });
+
+  it("says what is missing or wrong with the schedule", () => {
+    expect(previewGuidance(draft({ amount: null }))).toBe("Enter an amount, like 120.00.");
+    expect(previewGuidance(draft({ anchor_date: "" }))).toBe("Pick a date.");
+    expect(previewGuidance(draft({ frequency: "dates" }))).toBe("List the dates, like Apr 15, Oct 15.");
+    expect(previewGuidance(draft({ frequency: "semimonthly" }))).toBe("List the days of the month, like 1, 15.");
+    expect(previewGuidance(draft({ end_date: "2026-01-01" }))).toBe("It ends before it starts.");
   });
 });

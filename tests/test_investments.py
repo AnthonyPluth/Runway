@@ -12,7 +12,7 @@ from runway.storage import db
 from runway.providers import plaid, prices
 from runway.domain import planner, portfolio
 from runway.storage.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta,
-                                   Security, Transaction)
+                                   ManualPosition, Security, Transaction)
 from tests.shared import DbCase, TODAY, fetch, freeze_today, own_database, serve
 
 
@@ -876,6 +876,16 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-6702", 1))   # ...and never counted
         self.assertIn("et-6702", portfolio._visible_ids(self.c))
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
+
+    def test_an_account_with_funds_entered_by_hand_says_when_they_were_last_saved(self):
+        for id_ in ("sf:a", "sf:b", "sf:c"):
+            self.c.execute(insert(InvAccount).values(id=id_, item_id="sf", name=id_, balance=1, source="simplefin"))
+        for sec, day in (("s1", "2026-03-01"), ("s2", "2026-05-02")):
+            self.c.execute(insert(ManualPosition).values(account_id="sf:a", security_id=sec, shares=1, updated=day))
+        by_id = {a["id"]: a for a in portfolio.overview(self.c, "1Y", TODAY)["accounts"]}
+        self.assertEqual(by_id["sf:a"]["tracked_updated"], "2026-05-02")   # the latest save
+        self.assertEqual(by_id["sf:a"]["tracked"], 2)
+        self.assertIsNone(by_id["sf:b"]["tracked_updated"])                # nothing entered: no date, not today's
 
     def test_a_simplefin_401k_at_a_plaid_institution_is_not_a_twin_and_is_shown(self):
         self.c.execute(insert(PlaidItem).values(item_id="fid", access_token="t", institution_name="Fidelity Investments",

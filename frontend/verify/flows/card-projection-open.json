@@ -9,5 +9,6 @@
     { "wait_for": "[data-projected] [role=button][aria-expanded=true]" },
     { "expect_text": { "selector": "[data-projected]:has([role=button][aria-expanded=true])", "text": "Charged so far" } },
     { "screenshot": "open" }
-  ]
+  ],
+  "viewports": ["tablet", "desktop"]
 }

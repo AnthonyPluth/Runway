@@ -13,35 +13,49 @@
   import MonthPicker from "$lib/components/MonthPicker.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
+  import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
   import Group from "$lib/components/ui/group/Group.svelte";
-  import { fmt0, monthShort, plural, thisMonth } from "$lib/format";
+  import { fmt0, monthLabel, monthShort, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import { tablet } from "$lib/rail.svelte";
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
 
+  // `month` is the month asked for; `b` is what's drawn, and its own `month` is the one on screen. They differ while
+  // another month loads or after it failed: the old figures stay, labelled, and can't be edited.
   let month = $state(budgetMonth ?? thisMonth());
   let b = $state<BudgetMonth | null>(null);
-  let error = $state("");
+  let failure = $state<{ month: string; message: string } | null>(null);
+  let loading = $state(false);
 
   // Load the month again after every change; what's on screen stays until the new numbers arrive
   // (and only the latest request draws, if you click through months quickly).
   let seq = 0;
   async function refresh() {
-    const n = ++seq;
+    const n = ++seq, asked = month;
+    loading = true;   // a failure stays up (and edits stay off) until a load succeeds
     try {
       await loadCategories();
-      const r = await apiCall<"GET /api/budget">(`/api/budget?month=${month}`);
-      if (n === seq) { b = r; error = ""; }
-    } catch (err) { if (n === seq) error = errMsg(err); }
+      const r = await apiCall<"GET /api/budget">(`/api/budget?month=${asked}`);
+      if (n === seq) { b = r; failure = null; loading = false; budgetMonth = r.month; }
+    } catch (err) { if (n === seq) { failure = { month: asked, message: errMsg(err) }; loading = false; } }
   }
   refresh();
 
   function pick(m: string) {
-    month = budgetMonth = m;
+    month = m;
+    // Back to the month on screen: the other month's answer is ignored and its failure dropped; only a failed reload
+    // of this very month still needs one.
+    if (b && m === b.month && failure?.month !== m) { seq++; failure = null; loading = false; return; }
     refresh();
   }
+
+  const shown = $derived(b?.month ?? month);
+  const elsewhere = $derived(!!b && b.month !== month);   // another month is asked for than the one drawn
+  // Budget changes are off while the figures may not be the month's: another month is pending or failed, or a reload
+  // of this one failed. They come back once a load succeeds or you return to the month on screen.
+  const locked = $derived(!!b && (elsewhere || !!failure));
 
   // A subcategory's budget can raise its parent's (the parent's covers its subcategories'): the toast says so.
   async function saveBudget(category: string, amount: string) {
@@ -117,23 +131,46 @@
   <div class="group/family px-4 py-1">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
       <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} {income} {pace} payAccounts={bm.pay_accounts} account={income ? null : accountOf(c, bm)}
-        onsave={saveBudget} onchanged={refresh} />
+        {locked} onsave={saveBudget} onchanged={refresh} />
     {/each}
   </div>
 {/snippet}
 
 <!-- On a tablet (lib/rail.svelte.ts) the month leads and the actions follow beside it when they fit, else on a row of their own (never
      squeezed or overlapping); the markup is in that order, so focus and reading order match what's drawn. Elsewhere: actions, then month. -->
-{#snippet suggest()}<BudgetSuggest month={b?.month ?? month} onchanged={refresh} />{/snippet}
-{#snippet picker()}<MonthPicker month={b?.month ?? month} onchange={pick} />{/snippet}
+{#snippet suggest()}<BudgetSuggest month={shown} {locked} onchanged={refresh} />{/snippet}
+{#snippet picker()}<MonthPicker month={shown} onchange={pick} />{/snippet}
 <div class="mb-6 flex flex-wrap items-center justify-end gap-4 rail:justify-between rail:gap-y-3">
   {#if tablet.rail}{@render picker()}{@render suggest()}{:else}{@render suggest()}{@render picker()}{/if}
 </div>
 
-{#if error && !b}
+{#if b && (elsewhere || failure)}
+  <div class="mb-6 space-y-2">
+    {#if loading}
+      <div role="status" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm">
+        <span>{elsewhere ? "Loading" : "Refreshing"} {monthLabel(month)}…</span>
+        {#if elsewhere}<Button variant="outline" size="sm" onclick={() => pick(b!.month)}>Back to {monthLabel(b.month)}</Button>{/if}
+      </div>
+    {:else if failure}
+      <Alert.Root variant="destructive" class="flex flex-wrap items-center justify-between gap-3">
+        <Alert.Description>
+          <p>{failure.month === b.month ? `Couldn’t refresh ${monthLabel(b.month)}. Showing the last figures loaded.`
+            : `Couldn’t load ${monthLabel(failure.month)}. Showing ${monthLabel(b.month)}.`}</p>
+        </Alert.Description>
+        <div class="flex gap-2">
+          {#if elsewhere}<Button variant="outline" size="sm" onclick={() => pick(b!.month)}>Back to {monthLabel(b.month)}</Button>{/if}
+          <Button variant="outline" size="sm" onclick={refresh}>Retry</Button>
+        </div>
+      </Alert.Root>
+    {/if}
+    {#if elsewhere}<p class="text-sm text-muted-foreground">Showing {monthLabel(b.month)}</p>{/if}
+  </div>
+{/if}
+
+{#if failure && !b}
   <Card.Root>
     <Card.Content>
-      <p class="text-sm">Something went wrong: {error}</p>
+      <p class="text-sm">Something went wrong: {failure.message}</p>
       <Button class="mt-3" variant="outline" onclick={refresh}>Try again</Button>
     </Card.Content>
   </Card.Root>
@@ -177,7 +214,7 @@
       {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace)}{/each}
       {#if v.unusedTops.length || v.incomeUnbudgeted.length}
         <div class="flex min-h-12 items-center gap-2.5 px-2 py-2">
-          <select bind:value={newCat} aria-label="Category to budget"
+          <select bind:value={newCat} disabled={locked} aria-label="Category to budget"
             class="h-10 min-w-0 cursor-pointer sm:h-9 rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
             {#snippet choice(c: BudgetCategory)}
@@ -190,7 +227,7 @@
           </select>
           <span class="group/money relative ml-auto inline-flex items-center">
             <span aria-hidden="true" class="pointer-events-none absolute left-2 hidden text-sm text-muted-foreground group-focus-within/money:inline">$</span>
-            <input type="number" min="0" step="10" placeholder="Budget" aria-label="Budget for the chosen category" {@attach commas} onchange={addBudget}
+            <input type="number" min="0" step="10" placeholder="Budget" aria-label="Budget for the chosen category" disabled={locked} {@attach commas} onchange={addBudget}
               class="h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 pl-2 sm:h-8 focus:pl-5 text-sm tabular-nums outline-none placeholder:text-primary hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24" />
           </span>
         </div>

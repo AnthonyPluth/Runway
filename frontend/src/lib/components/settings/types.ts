@@ -55,6 +55,8 @@ export interface PlaidAccount {
 export interface PlaidItem {
   item_id: string; institution_name?: string | null; env?: string; created_at?: string | null; last_sync?: string | null;
   error?: string | null; products: string[]; bank: boolean; duplicates?: { item_id: string; shared: number }[];
+  /** Each kind of sync that reads the connection, with its own last time (the investments side is the holdings sync). */
+  sides?: Partial<Record<"bank" | "investments", { last_sync: string | null; error: string | null }>>;
   accounts: PlaidAccount[];
   candidates?: { id: string; name: string; display_name?: string | null; balance?: number | null; linked_to?: string | null }[];
 }

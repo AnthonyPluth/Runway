@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import ForecastSettings from "./ForecastSettings.svelte";
-import { forecastSheet, openForecastSettings } from "./forecastSheet.svelte";
+import { forecastSheet, openForecastSettings, setupReview } from "./forecastSheet.svelte";
 
 const accounts = [
   { id: "chk", name: "Everyday Checking", kind: "checking" },
@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/accounts" ? accounts : path === "/api/state" ? { connected: true, primary_account: "sav", horizon_days: 60 } : {}));
   app.state = { connected: true, primary_account: "chk", horizon_days: 90 };
 });
-afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
+afterEach(() => { cleanup(); forecastSheet.open = false; setupReview.open = false; document.body.style.pointerEvents = ""; });
 
 const open = async () => {
   const user = userEvent.setup();
@@ -39,6 +39,13 @@ describe("ForecastSettings", () => {
     expect(screen.queryByRole("option", { name: "Rewards Visa" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Primary account")).toHaveValue("chk");
     expect(screen.getByLabelText("Default forecast length (days)")).toHaveValue(90);
+  });
+
+  it("brings back the setup review and closes itself", async () => {
+    const user = await open();
+    await user.click(screen.getByRole("button", { name: "Review your setup" }));
+    expect(setupReview.open).toBe(true);
+    expect(forecastSheet.open).toBe(false);
   });
 
   it("saves the primary account", async () => {

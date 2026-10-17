@@ -26,7 +26,8 @@ CATEGORIZE = mcp_access.Access(frozenset({"read", "categorize:write"}), None, No
 ANY = mcp_access.Access(frozenset({"read", "write"}), None, None)
 
 # Every change "write" allows (mcp_access.writable_routes over ROUTES). A route added to server/routes.py is allowed
-# unless it's BLOCKED, and fails this list until someone has looked at whether an assistant should have it.
+# unless it's BLOCKED, and fails this list until someone has looked at whether an assistant should have it. The previews
+# (POST /api/recurring/preview, POST /api/rules/preview) only read: they save nothing, so an assistant may use them.
 ALLOWED = [
     "DELETE /api/overrides", "DELETE /api/recurring/{id}", "DELETE /api/rules/{id}", "DELETE /api/transactions/{id}",
     "POST /api/accounts/{id}", "POST /api/accounts/{id}/remove", "POST /api/accounts/{id}/restore", "POST /api/accounts/{id}/statements",
@@ -45,7 +46,7 @@ ALLOWED = [
     "POST /api/churning/wishlist/{id}/remove", "POST /api/equity/companies", "POST /api/equity/companies/{id}",
     "POST /api/equity/companies/{id}/grants", "POST /api/equity/companies/{id}/remove", "POST /api/equity/grants/{id}",
     "POST /api/equity/grants/{id}/remove", "POST /api/investments/cost", "POST /api/investments/plan", "POST /api/overrides",
-    "POST /api/recategorize", "POST /api/recurring", "POST /api/recurring/dismiss", "POST /api/recurring/suggestions/dismiss",
+    "POST /api/recategorize", "POST /api/recurring", "POST /api/recurring/dismiss", "POST /api/recurring/preview", "POST /api/recurring/suggestions/dismiss",
     "POST /api/recurring/suggestions/restore", "POST /api/recurring/{id}", "POST /api/recurring/{id}/amount",
     "POST /api/recurring/{id}/match", "POST /api/retail/charges/{id}/apply", "POST /api/retail/charges/{id}/link",
     "POST /api/retail/charges/{id}/restore", "POST /api/retail/charges/{id}/unlink", "POST /api/retail/items/{id}",

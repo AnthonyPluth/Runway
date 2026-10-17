@@ -1,7 +1,7 @@
 // When recurring items come: how far off the next one is (or how late), the order to list them in, and what they
 // come to in a month.
 import { fmtDate, parseDate, plural } from "$lib/format";
-import type { RecurringItem } from "./types";
+import { validate, type RecurringItem, type RecurringValues } from "./types";
 
 /** Whole days from `from` to `to` (YYYY-MM-DD, local dates): negative when `to` is earlier. */
 export const daysBetween = (from: string, to: string) => Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / 864e5);
@@ -49,3 +49,10 @@ export function perMonth(frequency: string, dates?: string | null): number {
 /** What a list of items comes to in a month (unsigned), at the amounts the forecast expects; paused ones don't count. */
 export const monthlyTotal = (items: RecurringItem[]) =>
   items.reduce((sum, r) => sum + (r.active ? Math.abs(r.expected_amount ?? r.amount) * perMonth(r.frequency, r.dates) : 0), 0);
+
+/** What a draft still needs before its next dates can be worked out (null: enough to ask for them). The first thing
+ * missing or wrong among the fields the schedule reads; the dates themselves come from the server (the forecast's own). */
+export function previewGuidance(v: RecurringValues): string | null {
+  const e = validate(v);
+  return e.dates ?? e.anchor_date ?? e.amount ?? e.end_date ?? null;
+}

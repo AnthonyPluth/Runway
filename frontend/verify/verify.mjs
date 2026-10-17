@@ -31,9 +31,9 @@ export function findChromium(env = process.env, exists = existsSync, list = read
  *  that fits in a pull request (`make pr-screenshots`). */
 export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
-/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | screenshot | reload | authenticator } ] }:
+/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
-const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string",
+const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string",
   reload: "boolean", authenticator: "string" };
 // The virtual authenticator's states an `authenticator` step sets (a signed_in flow's): Face ID that works, or that fails.
 const AUTHENTICATOR = ["verified", "unverified"];
@@ -88,6 +88,14 @@ async function runStep(page, step, shot) {
     await el.waitFor({ timeout });
     const got = await el.innerText();
     if (!got.includes(step.expect_text.text)) throw new Error(`expected "${step.expect_text.text}" in ${step.expect_text.selector}, found "${got.slice(0, 80)}"`);
+  } else if ("expect_above" in step) {   // the first match is whole inside the window and ends above the other (the floating navigation)
+    const { selector, above } = step.expect_above;
+    await page.locator(selector).first().waitFor({ timeout });
+    const box = await page.locator(selector).first().boundingBox(), limit = await page.locator(above).first().boundingBox();
+    const height = page.viewportSize()?.height ?? 0;
+    if (!box || !limit || box.y < 0 || box.y + box.height > Math.min(height, limit.y)) {
+      throw new Error(`expected ${selector} (${box ? `${Math.round(box.y)}–${Math.round(box.y + box.height)}` : "not shown"}) above ${above} (${limit ? Math.round(limit.y) : "not shown"}) on the first screen`);
+    }
   } else if ("screenshot" in step) {
     await shot(step.screenshot);
   } else if ("reload" in step) {   // opening the app again (a launch), not just another route
