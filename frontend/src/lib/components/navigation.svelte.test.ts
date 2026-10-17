@@ -219,6 +219,12 @@ describe("MobileNav", () => {
     };
     const tabbables = (sheet: HTMLElement) => Array.from(sheet.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
 
+    it("stays a bottom sheet at md widths, where a phone turned sideways is", async () => {
+      const { sheet } = await openMore();
+      expect(sheet).toHaveClass("md:inset-x-0", "md:h-auto", "md:rounded-t-2xl");
+      expect(sheet).not.toHaveClass("md:right-0", "md:w-[440px]", "md:inset-y-0");
+    });
+
     it("moves focus into the sheet when it opens", async () => {
       const { sheet } = await openMore();
       await vi.waitFor(() => expect(sheet).toContainElement(document.activeElement as HTMLElement));

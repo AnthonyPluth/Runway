@@ -1,20 +1,21 @@
 {
   "name": "more-sheet-focus",
   "page": "overview",
-  "viewports": ["phone"],
+  "viewports": ["phone", "landscape"],
   "steps": [
     { "goto": "#overview" },
     { "click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')" },
-    { "wait_for": "[role=dialog]" },
+    { "wait_for": "[role=dialog][data-state=open]" },
     { "expect_inert": "nav[aria-label=Main]:has(button[aria-haspopup=dialog])" },
-    { "screenshot": "open" },
     { "tab": { "count": 16, "stay_in": "[role=dialog]" } },
     { "tab": { "count": 16, "shift": true, "stay_in": "[role=dialog]" } },
-    { "press": { "selector": "[role=dialog]", "key": "Escape" } },
+    { "press": { "selector": "[role=dialog][data-state=open]", "key": "Escape" } },
     { "expect_focus": "nav button[aria-haspopup=dialog]" },
     { "click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')" },
-    { "wait_for": "[role=dialog]" },
-    { "click": "[role=dialog] button:has-text('Close')" },
-    { "expect_focus": "nav button[aria-haspopup=dialog]" }
+    { "wait_for": "[role=dialog][data-state=open]" },
+    { "click": "[role=dialog][data-state=open] button:has-text('Close')" },
+    { "expect_focus": "nav button[aria-haspopup=dialog]" },
+    { "click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')" },
+    { "wait_for": "[role=dialog][data-state=open]" }
   ]
 }

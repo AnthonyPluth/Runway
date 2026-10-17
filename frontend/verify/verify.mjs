@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const VIEWPORTS = { phone: { width: 390, height: 844 }, tablet: { width: 768, height: 1024 }, desktop: { width: 1280, height: 800 } };
+// Only a flow that lists it runs here (not every page): a phone turned sideways, which app.css still counts as a phone (short, touch-driven).
+export const LANDSCAPE = { landscape: { width: 844, height: 390 } };
 export const PAGES = ["overview", "transactions", "budget", "investments", "recurring", "networth", "reports", "churning", "setup"];
 
 /** The browser to launch: the Chromium preinstalled under PLAYWRIGHT_BROWSERS_PATH (or /opt/pw-browsers) when there is
@@ -52,7 +54,7 @@ export function flowProblems(flow) {
   }
   if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
-  for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS)) out.push(`unknown viewport ${v}`);
+  for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS) && !(v in LANDSCAPE)) out.push(`unknown viewport ${v}`);
   return out;
 }
 
@@ -238,7 +240,7 @@ async function main() {
   const results = [];
 
   async function visit(label, viewport, work, signedIn = false, authenticator = {}) {
-    const ctx = await browser.newContext({ viewport: VIEWPORTS[viewport] });
+    const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     const page = await ctx.newPage();
     if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
     const where = `${label} @ ${viewport}`;
