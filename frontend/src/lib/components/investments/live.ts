@@ -56,27 +56,29 @@ export function livePrices(onQuotes: (live: LiveQuotes) => void): () => void {
   return () => { stopped = true; halt(); document.removeEventListener("visibilitychange", onVisible); };
 }
 
+/** Re-price one holding with its live quote (none: it is left as it was, and not live). */
+export function repriceHolding(h: Holding, q: Quote | undefined, market: string, now = Date.now() / 1000): void {
+  h.live = false;
+  if (!q || h.is_cash || !h.quantity) return;
+  // "Live" = trading now and quoted in the last 20 minutes. Mutual funds only get one price a day, after the close.
+  h.live = market === "open" && (q.type || "").toUpperCase() !== "MUTUALFUND" && !!q.time && now - q.time < 1200;
+  h.live_time = q.time ?? undefined;
+  h.price = q.price;
+  h.value = h.quantity * q.price;
+  if (q.prev_close) {
+    h.day_change = h.quantity * (q.price - q.prev_close);
+    h.day_change_pct = q.price / q.prev_close - 1;
+  }
+  if (h.gain != null && h.cost_basis) {
+    h.gain = h.value - h.cost_basis;
+    h.gain_pct = h.gain / h.cost_basis;
+  }
+}
+
 /** Re-price holdings with live quotes and recompute the page totals. */
 export function applyLiveQuotes(d: Investments, quotes: Record<string, Quote>, market: string): void {
   const now = Date.now() / 1000;
-  for (const h of d.holdings) {
-    const q = h.ticker ? quotes[h.ticker] : undefined;
-    h.live = false;
-    if (!q || h.is_cash || !h.quantity) continue;
-    // "Live" = trading now and quoted in the last 20 minutes. Mutual funds only get one price a day, after the close.
-    h.live = market === "open" && (q.type || "").toUpperCase() !== "MUTUALFUND" && !!q.time && now - q.time < 1200;
-    h.live_time = q.time ?? undefined;
-    h.price = q.price;
-    h.value = h.quantity * q.price;
-    if (q.prev_close) {
-      h.day_change = h.quantity * (q.price - q.prev_close);
-      h.day_change_pct = q.price / q.prev_close - 1;
-    }
-    if (h.gain != null && h.cost_basis) {
-      h.gain = h.value - h.cost_basis;
-      h.gain_pct = h.gain / h.cost_basis;
-    }
-  }
+  for (const h of d.holdings) repriceHolding(h, h.ticker ? quotes[h.ticker] : undefined, market, now);
   d.total = d.holdings.reduce((a, h) => a + h.value, 0);
   for (const h of d.holdings) h.allocation = d.total ? h.value / d.total : 0;
   const moved = d.holdings.filter((h): h is Holding & { day_change: number } => h.day_change != null);

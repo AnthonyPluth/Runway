@@ -138,6 +138,77 @@ export interface EnteredStatement {
   next_close: string;
 }
 
+/**
+ * GET /api/investments/holding/{id}?period=1M|3M|YTD|1Y|2Y|MAX (default 1Y): one holding's page. `total` is the
+ * whole portfolio's value (the holding's share of it is `holding.allocation`), `dividends_12m` the dividends it paid
+ * over the last 12 months. 404 when none of your holdings is this security (cash has no page).
+ */
+export interface HoldingDetail {
+  holding: InvestmentHolding;
+  total: number;
+  period: string;
+  history: HoldingHistory;
+  dividends_12m: number;
+}
+
+/**
+ * A holding's closes over the period, oldest first, with the close on its first day and the change since (dollars,
+ * and a fraction of that close). Empty, with nothing for the rest, when no prices are kept for it.
+ */
+export interface HoldingHistory {
+  dates: string[];
+  prices: number[];
+  start_price: number | null;
+  change: number | null;
+  change_pct: number | null;
+}
+
+/**
+ * One account's share of a holding: its shares and value, the cost basis (yours if `manual`, else what the
+ * institution reports as `reported_cost_basis`) and the price paid per share.
+ */
+export interface HoldingLot {
+  account_id: string;
+  security_id: string;
+  account_name: string;
+  quantity: number;
+  value: number;
+  cost_basis: number | null;
+  reported_cost_basis: number | null;
+  per_share: number | null;
+  manual: boolean;
+}
+
+/**
+ * A holding as /api/investments describes it: the same fund in several accounts is one holding with a lot in
+ * each. `allocation`, `gain_pct` and `day_change_pct` are fractions (0.021 is 2.1%); gain and day change are null
+ * when unknown (no cost basis, no previous close).
+ */
+export interface InvestmentHolding {
+  security_id: string;
+  group: string;
+  ticker: string | null;
+  name: string | null;
+  type: string | null;
+  asset_class: string;
+  sector: string | null;
+  is_cash: boolean;
+  quantity: number;
+  value: number;
+  cost_basis: number;
+  cost_known: boolean;
+  cost_manual: boolean;
+  accounts: string[];
+  price: number | null;
+  lots: HoldingLot[];
+  allocation: number;
+  gain: number | null;
+  gain_pct: number | null;
+  day_change: number | null;
+  day_change_pct: number | null;
+  logo: string | null;
+}
+
 /** A holding that moved today: its ticker and its day change as a fraction (0.021 is +2.1%). */
 export interface InvestmentMover {
   ticker: string;
@@ -403,4 +474,5 @@ export interface Endpoints {
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
   "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
   "GET /api/investments/summary": { body: never; reply: InvestmentsSummary };
+  "GET /api/investments/holding/{id}": { body: never; reply: HoldingDetail };
 }
