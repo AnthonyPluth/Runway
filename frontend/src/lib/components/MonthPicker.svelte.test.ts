@@ -15,6 +15,17 @@ describe("MonthPicker", () => {
     expect(onchange).toHaveBeenLastCalledWith("2026-02");
   });
 
+  it("keeps its size by default and lets a page grow its box and month label", () => {
+    const { container, unmount } = render(MonthPicker, { month: "2026-01", onchange: vi.fn() });
+    expect(screen.getByText("January 2026")).toHaveClass("min-w-36");
+    expect(container.firstElementChild!.className).not.toMatch(/flex-1/);
+    expect(screen.getByText("January 2026").className).not.toMatch(/flex-1/);
+    unmount();
+    const grown = render(MonthPicker, { month: "2026-01", onchange: vi.fn(), class: "phone:flex-1", labelClass: "phone:min-w-0 phone:flex-1" });
+    expect(grown.container.firstElementChild).toHaveClass("phone:flex-1", "inline-flex");
+    expect(screen.getByText("January 2026")).toHaveClass("min-w-36", "phone:min-w-0", "phone:flex-1");
+  });
+
   it("steps across year ends", () => {
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
     expect(shiftMonth("2026-01", -13)).toBe("2024-12");

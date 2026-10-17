@@ -142,6 +142,17 @@ describe("Budget page", () => {
     tablet.rail = false;
   });
 
+  it("keeps the header on one row with a full-width month picker on a phone, and wraps as before elsewhere", async () => {
+    serve(month());
+    render(Budget);
+    const prev = await screen.findByRole("button", { name: "Previous month" });
+    const picker = prev.parentElement!;
+    expect(picker).toHaveClass("phone:flex-1");
+    expect(screen.getByText("March 2026")).toHaveClass("min-w-36", "phone:flex-1", "phone:min-w-0");
+    const row = picker.parentElement!;
+    expect(row).toHaveClass("flex-wrap", "gap-4", "phone:flex-nowrap", "phone:gap-2");
+  });
+
   it("goes to the previous and next month", async () => {
     serve((path) => month({ month: path.split("=")[1] }));
     render(Budget);

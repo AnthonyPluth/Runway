@@ -139,8 +139,8 @@
 <!-- On a tablet (lib/rail.svelte.ts) the month leads and the actions follow beside it when they fit, else on a row of their own (never
      squeezed or overlapping); the markup is in that order, so focus and reading order match what's drawn. Elsewhere: actions, then month. -->
 {#snippet suggest()}<BudgetSuggest month={shown} {locked} onchanged={refresh} />{/snippet}
-{#snippet picker()}<MonthPicker month={shown} onchange={pick} />{/snippet}
-<div class="mb-6 flex flex-wrap items-center justify-end gap-4 rail:justify-between rail:gap-y-3">
+{#snippet picker()}<MonthPicker month={shown} onchange={pick} class="phone:flex-1" labelClass="phone:min-w-0 phone:flex-1" />{/snippet}
+<div class="mb-6 flex flex-wrap items-center justify-end gap-4 phone:flex-nowrap phone:gap-2 rail:justify-between rail:gap-y-3">
   {#if tablet.rail}{@render picker()}{@render suggest()}{:else}{@render suggest()}{@render picker()}{/if}
 </div>
 

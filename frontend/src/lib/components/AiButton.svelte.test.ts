@@ -21,6 +21,11 @@ describe("AiButton", () => {
     expect(screen.getByRole("button", { name: "Ask again" })).toHaveClass("size-10", "sm:w-auto");
   });
 
+  it("is 44px on a phone, and the same size as before elsewhere", () => {
+    render(AiButton, { label: "Ask again", onclick: vi.fn() });
+    expect(screen.getByRole("button", { name: "Ask again" })).toHaveClass("size-10", "phone:max-sm:size-11", "sm:h-8");
+  });
+
   it("swaps to the busy label and can't be clicked while busy", async () => {
     const onclick = vi.fn();
     render(AiButton, { label: "Suggest categories", busyLabel: "Suggesting…", busy: true, onclick });

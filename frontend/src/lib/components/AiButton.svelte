@@ -15,7 +15,7 @@
   const text = $derived(busy && busyLabel ? busyLabel : label);
 </script>
 
-<Button variant="outline" size="sm" class={cn("size-10 sm:h-8 sm:w-auto", className)} aria-label={text} aria-busy={busy || undefined}
+<Button variant="outline" size="sm" class={cn("size-10 phone:max-sm:size-11 sm:h-8 sm:w-auto", className)} aria-label={text} aria-busy={busy || undefined}
   {title} disabled={disabled || busy} {onclick}>
   <Sparkles class={cn("size-4", busy && "animate-pulse motion-reduce:animate-none")} aria-hidden="true" /><span class="hidden sm:inline">{text}</span>
 </Button>
