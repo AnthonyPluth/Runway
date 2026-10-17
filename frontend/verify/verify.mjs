@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const VIEWPORTS = { phone: { width: 390, height: 844 }, tablet: { width: 768, height: 1024 }, desktop: { width: 1280, height: 800 } };
+// Only a flow that lists it runs here (not every page): a phone turned sideways, which app.css still counts as a phone (short, touch-driven).
+export const LANDSCAPE = { landscape: { width: 844, height: 390 } };
 export const PAGES = ["overview", "transactions", "budget", "investments", "recurring", "networth", "reports", "churning", "setup"];
 
 /** The browser to launch: the Chromium preinstalled under PLAYWRIGHT_BROWSERS_PATH (or /opt/pw-browsers) when there is
@@ -31,9 +33,9 @@ export function findChromium(env = process.env, exists = existsSync, list = read
  *  that fits in a pull request (`make pr-screenshots`). */
 export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
-/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | screenshot | reload | authenticator } ] }:
+/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
-const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string",
+const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string", tab: "object", expect_focus: "string", expect_inert: "string",
   reload: "boolean", authenticator: "string" };
 // The virtual authenticator's states an `authenticator` step sets (a signed_in flow's): Face ID that works, or that fails.
 const AUTHENTICATOR = ["verified", "unverified"];
@@ -52,7 +54,7 @@ export function flowProblems(flow) {
   }
   if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
-  for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS)) out.push(`unknown viewport ${v}`);
+  for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS) && !(v in LANDSCAPE)) out.push(`unknown viewport ${v}`);
   return out;
 }
 
@@ -96,6 +98,20 @@ async function runStep(page, step, shot) {
     if (!box || !limit || box.y < 0 || box.y + box.height > Math.min(height, limit.y)) {
       throw new Error(`expected ${selector} (${box ? `${Math.round(box.y)}–${Math.round(box.y + box.height)}` : "not shown"}) above ${above} (${limit ? Math.round(limit.y) : "not shown"}) on the first screen`);
     }
+  } else if ("tab" in step) {   // the real keyboard: Tab (or Shift+Tab) `count` times, each landing inside `stay_in`
+    const { count = 1, shift = false, stay_in: within } = step.tab;
+    for (let i = 1; i <= count; i++) {
+      await page.keyboard.press(shift ? "Shift+Tab" : "Tab");
+      if (!within) continue;
+      const inside = await page.evaluate((sel) => !!globalThis.document.activeElement?.closest(sel), within);
+      if (!inside) throw new Error(`${shift ? "Shift+Tab" : "Tab"} ${i} left ${within}, onto ${await page.evaluate(() => globalThis.document.activeElement?.outerHTML.slice(0, 80))}`);
+    }
+  } else if ("expect_focus" in step) {   // the focused element matches the selector
+    await page.waitForFunction((sel) => !!globalThis.document.activeElement?.matches(sel), step.expect_focus, { timeout })
+      .catch(async () => { throw new Error(`expected focus on ${step.expect_focus}, found ${await page.evaluate(() => globalThis.document.activeElement?.outerHTML.slice(0, 80))}`); });
+  } else if ("expect_inert" in step) {   // the element, or something around it, is inert
+    const inert = await page.locator(step.expect_inert).first().evaluate((el) => !!el.closest("[inert]"), undefined, { timeout });
+    if (!inert) throw new Error(`expected ${step.expect_inert} to be inert`);
   } else if ("screenshot" in step) {
     await shot(step.screenshot);
   } else if ("reload" in step) {   // opening the app again (a launch), not just another route
@@ -232,7 +248,7 @@ async function main() {
   const results = [];
 
   async function visit(label, viewport, work, signedIn = false, authenticator = {}) {
-    const ctx = await browser.newContext({ viewport: VIEWPORTS[viewport] });
+    const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     const page = await ctx.newPage();
     if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
     const where = `${label} @ ${viewport}`;

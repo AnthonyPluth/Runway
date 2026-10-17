@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn(), session: {} }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
@@ -12,6 +12,13 @@ import MobileNav from "./MobileNav.svelte";
 import Sidebar from "./Sidebar.svelte";
 
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString(), ...extra });
+// A tap on the dimmed page behind a sheet. Bits UI judges "outside" by where the pointer is, which jsdom has no layout for.
+const clickBackdrop = async () => {
+  const overlay = document.querySelector<HTMLElement>("[data-slot=sheet-overlay]")!;
+  await fireEvent.pointerDown(overlay, { clientX: 5, clientY: 5, button: 0 });
+  await fireEvent.pointerUp(overlay, { clientX: 5, clientY: 5, button: 0 });
+  await fireEvent.click(overlay);
+};
 beforeEach(() => { app.state = null; route.page = "overview"; route.sub = ""; });
 
 describe("Sidebar", () => {
@@ -199,11 +206,112 @@ describe("MobileNav", () => {
     expect(within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link").some((l) => l.hasAttribute("aria-current"))).toBe(false);
   });
 
+  describe("More sheet focus", () => {
+    // jsdom has no layout, so every element looks hidden to the focus trap's tabbable check; give each a box.
+    beforeEach(() => { vi.spyOn(Element.prototype, "getClientRects").mockImplementation(() => [{}] as unknown as DOMRectList); });
+    afterEach(() => { vi.restoreAllMocks(); });
+    const openMore = async () => {
+      app.state = state({ version: "1.4.0", user: { name: "Ann", email: "ann@x.com" } });
+      render(MobileNav);
+      const more = screen.getByRole("button", { name: "More" });
+      await userEvent.click(more);
+      return { more, sheet: await screen.findByRole("dialog", { name: "More pages" }) };
+    };
+    const tabbables = (sheet: HTMLElement) => Array.from(sheet.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
+
+    it("stays a bottom sheet at md widths, where a phone turned sideways is", async () => {
+      const { sheet } = await openMore();
+      expect(sheet).toHaveClass("md:inset-x-0", "md:h-auto", "md:rounded-t-2xl");
+      expect(sheet).not.toHaveClass("md:right-0", "md:w-[440px]", "md:inset-y-0");
+    });
+
+    it("moves focus into the sheet when it opens", async () => {
+      const { sheet } = await openMore();
+      await vi.waitFor(() => expect(sheet).toContainElement(document.activeElement as HTMLElement));
+    });
+
+    it("traps Tab going forward, past the last control and round again", async () => {
+      const { sheet } = await openMore();
+      await vi.waitFor(() => expect(sheet).toContainElement(document.activeElement as HTMLElement));
+      const seq: string[] = [];
+      for (let i = 0; i < tabbables(sheet).length * 2 + 2; i++) {
+        seq.push((document.activeElement?.textContent || document.activeElement?.tagName || "").trim().slice(0, 12));
+        await userEvent.tab();
+        expect(sheet, `steps ${seq.join(" > ")}`).toContainElement(document.activeElement as HTMLElement);
+      }
+    });
+
+    it("traps Shift+Tab going backward, past the first control and round again", async () => {
+      const { sheet } = await openMore();
+      await vi.waitFor(() => expect(sheet).toContainElement(document.activeElement as HTMLElement));
+      const seq: string[] = [];
+      for (let i = 0; i < tabbables(sheet).length * 2 + 2; i++) {
+        seq.push((document.activeElement?.textContent || document.activeElement?.tagName || "").trim().slice(0, 12));
+        await userEvent.tab({ shift: true });
+        expect(sheet, `steps ${seq.join(" > ")}`).toContainElement(document.activeElement as HTMLElement);
+      }
+    });
+
+    it("makes the bottom tabs inert while open, and live again after", async () => {
+      const { sheet } = await openMore();
+      const bar = screen.getByRole("navigation", { name: "Main", hidden: true });
+      expect(bar).toHaveAttribute("inert");
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => expect(sheet).not.toBeInTheDocument());
+      expect(bar).not.toHaveAttribute("inert");
+    });
+
+    it("returns focus to More on Escape", async () => {
+      const { more } = await openMore();
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(more).toHaveFocus());
+    });
+
+    it("returns focus to More on the Close button", async () => {
+      const { more, sheet } = await openMore();
+      await userEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(more).toHaveFocus());
+    });
+
+    it("closes from the backdrop and returns focus to More", async () => {
+      const { more } = await openMore();
+      await clickBackdrop();
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(more).toHaveFocus());
+    });
+
+    it("closes on choosing a page without pulling focus back to More", async () => {
+      const { more, sheet } = await openMore();
+      await vi.waitFor(() => expect(sheet).toContainElement(document.activeElement as HTMLElement));
+      route.page = "reports";
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await new Promise((r) => setTimeout(r, 50));
+      expect(more).not.toHaveFocus();
+    });
+
+    it("can be opened and closed repeatedly without leaving the page locked", async () => {
+      const { more } = await openMore();
+      for (let i = 0; i < 3; i++) {
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        await vi.waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+        await userEvent.click(more);
+        await screen.findByRole("dialog", { name: "More pages" });
+      }
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+      expect(document.querySelectorAll("[data-bits-focus-guard], [data-focus-guard]")).toHaveLength(0);
+    });
+  });
+
   it("closes the sheet from the backdrop", async () => {
     app.state = state();
     render(MobileNav);
     await userEvent.click(screen.getByRole("button", { name: "More" }));
-    await userEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await clickBackdrop();
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

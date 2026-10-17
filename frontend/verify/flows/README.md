@@ -16,7 +16,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
 }
 ```
 
-- `page` is the route the flow starts on (default `overview`); `viewports` defaults to all three.
+- `page` is the route the flow starts on (default `overview`); `viewports` defaults to all three; `landscape` (844×390, touch: a phone turned sideways) runs only when a flow lists it.
 - `"signed_in": true` runs the flow signed in: against a second demo server with sign-in on (runway/verify.py), with a session made for it and a virtual platform authenticator (Chrome's DevTools WebAuthn) standing in for Face ID or Touch ID. The app lock's flow (`app-lock.json`) needs it. Each viewport is a new browser on the same session, so a flow that changes something about the session puts it back at the end.
 - A step has one action, and an optional `timeout` in milliseconds (default 10000). Selectors are [Playwright selectors](https://playwright.dev/docs/other-locators) (CSS, `text=…`, `role=…`).
   - `{"goto": "#route"}` opens a route of the app (or a full URL).
@@ -27,6 +27,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
   - `{"expect_above": {"selector": …, "above": …}}` fails unless the first match is whole inside the window and ends above the first match of `above` (the floating navigation, say): that is, it is on the first screen.
   - `{"reload": true}` opens the app again (a launch), not just another route.
   - `{"authenticator": "verified"}` or `"unverified"` (signed-in flows only): the virtual authenticator's Face ID works, or fails.
+  - Keyboard: `{"tab": {"count": 16, "shift": false, "stay_in": "[role=dialog]"}}` presses Tab (Shift+Tab with `shift`) `count` times and fails if focus ever leaves `stay_in`; `{"expect_focus": selector}` fails unless the focused element matches it; `{"expect_inert": selector}` fails unless it is inert (itself or an ancestor).
   - `{"screenshot": "name"}` saves `flow-<flow name>-<name>-<viewport>.png` (full page) and `…-<viewport>-top.png` (the top of the page, the size of the viewport).
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
 

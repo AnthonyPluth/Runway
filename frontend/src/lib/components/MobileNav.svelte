@@ -1,16 +1,20 @@
 <script lang="ts">
+  import { tick, untrack } from "svelte";
   import { app, route } from "$lib/app.svelte";
   import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import * as Sheet from "$lib/components/ui/sheet";
   import SyncButton from "$lib/components/SyncButton.svelte";
   import { cn } from "$lib/utils";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import LogOut from "@lucide/svelte/icons/log-out";
   import Settings from "@lucide/svelte/icons/settings";
-  import X from "@lucide/svelte/icons/x";
 
   // On a phone (lib/phone.svelte.ts): a floating tab bar along the bottom with the four pages you use most, and More for
   // the rest (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring and
   // Reports are in the sidebar's main group but go in More here: more tabs wouldn't fit a phone's width.
+  // The shared sheet turns into a right-hand panel from 768px (md:). A phone turned sideways is wider than that but still a phone
+  // (app.css `desktop:`), and this sheet only shows there, so keep the bottom sheet at every width.
+  const SHEET = "gap-0 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:top-auto md:bottom-0 md:inset-x-0 md:h-auto md:max-h-[90dvh] md:w-auto md:max-w-none md:rounded-t-2xl md:rounded-b-none md:border-t md:border-l-0 md:pb-[calc(env(safe-area-inset-bottom)+1rem)] md:data-[state=open]:slide-in-from-bottom md:data-[state=open]:slide-in-from-right-0 md:data-[state=closed]:slide-out-to-bottom md:data-[state=closed]:slide-out-to-right-0";
   const IN_MORE = ["recurring", "reports"];
   const TABS = MAIN_NAV.filter((x) => !IN_MORE.includes(x.page));
   const MORE: NavItem[] = [...MAIN_NAV.filter((x) => IN_MORE.includes(x.page)), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
@@ -21,24 +25,23 @@
   const sync = $derived(syncStatus(s));
   const inMore = $derived(MORE.some((x) => x.page === current));
   let open = $state(false);
+  let moreBtn = $state<HTMLButtonElement | null>(null);
+  // Set when a route change closes the sheet: focus then follows the new page, not back onto More.
+  let leaving = false;
   // Going to a page closes the sheet.
-  $effect(() => { void route.page; open = false; });
+  $effect(() => { void route.page; untrack(() => { if (open) leaving = true; open = false; }); });
 </script>
 
-<svelte:window onkeydown={(e) => { if (open && e.key === "Escape") open = false; }} />
-
-{#if open}
-  <button type="button" class="fixed inset-0 z-40 cursor-default bg-black/60 desktop:hidden" aria-label="Close" onclick={() => (open = false)}></button>
-  <div role="dialog" aria-modal="true" aria-label="More pages"
-    class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] shadow-2xl desktop:hidden">
-    <div class="mb-2 flex items-center justify-between">
-      <span class="text-sm font-semibold">More</span>
-      <button type="button" class="flex size-8 cursor-pointer items-center justify-center rounded-full hover:bg-muted" aria-label="Close" onclick={() => (open = false)}><X class="size-4" /></button>
+<Sheet.Root bind:open>
+  <Sheet.Content class={SHEET} aria-describedby={undefined}
+    onCloseAutoFocus={(e) => { e.preventDefault(); const skip = leaving; leaving = false; if (!skip) tick().then(() => moreBtn?.focus()); }}>
+    <div class="mb-2 flex min-h-11 items-center pr-12">
+      <Sheet.Title class="text-sm">More pages</Sheet.Title>
     </div>
     <nav class="grid grid-cols-2 gap-2" aria-label="More pages">
       {#each MORE as item (item.page)}
         <a href={`#${item.page}`} aria-current={current === item.page ? "page" : undefined}
-          class={cn("flex items-center gap-2.5 rounded-xl border bg-card px-3 py-3 text-sm", current === item.page && "border-primary/50 bg-muted font-medium")}>
+          class={cn("flex min-h-11 items-center gap-2.5 rounded-xl border bg-card px-3 py-3 text-sm", current === item.page && "border-primary/50 bg-muted font-medium")}>
           <item.icon class="size-5 text-muted-foreground" aria-hidden="true" />{item.label}
         </a>
       {/each}
@@ -46,7 +49,7 @@
     <div class="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
       <div class="flex min-w-0 flex-1 flex-col" role="status" title={sync.title}>
         {#if sync.href}
-          <a href={sync.href} class={cn("flex items-center gap-2 underline underline-offset-4", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
+          <a href={sync.href} class={cn("flex min-h-11 items-center gap-2 underline underline-offset-4", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
             <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
           </a>
         {:else}
@@ -54,17 +57,17 @@
         {/if}
         {#if sync.detail}<span class="truncate pl-3.5">{sync.detail}</span>{/if}
       </div>
-      <SyncButton class="size-8 border border-border" />
+      <SyncButton class="size-11 border border-border" />
       {#if s?.version}<span class="shrink-0 pt-2">Runway {s.version}</span>{/if}
     </div>
     {#if user}
-      <a href="/auth/logout" onclick={signOut} class="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LogOut class="size-4" />Sign out {user.email ?? ""}</a>
+      <a href="/auth/logout" onclick={signOut} class="mt-3 flex min-h-11 items-center gap-2 text-sm text-muted-foreground"><LogOut class="size-4" />Sign out {user.email ?? ""}</a>
     {/if}
-  </div>
-{/if}
+  </Sheet.Content>
+</Sheet.Root>
 
 <!-- A floating pill: inset from the sides and lifted off the bottom, translucent over the page with a blur behind it. -->
-<nav aria-label="Main" class="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 desktop:hidden">
+<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 desktop:hidden">
   <div class="mx-auto grid h-[66px] max-w-lg grid-cols-5 items-stretch gap-0 rounded-full border bg-popover/80 p-0.5 min-[380px]:gap-0.5 min-[380px]:p-1 shadow-lg backdrop-blur-xl">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
@@ -77,7 +80,7 @@
         {/if}
       </a>
     {/each}
-    <button type="button" aria-expanded={open} onclick={() => (open = !open)}
+    <button type="button" bind:this={moreBtn} aria-expanded={open} aria-haspopup="dialog" onclick={() => (open = !open)}
       class={cn("flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", open || inMore ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
       <span class="relative"><Ellipsis class="size-5" aria-hidden="true" />
         <!-- A sync problem shows here too, so it's seen without opening the sheet. -->

@@ -38,6 +38,11 @@ describe("flowProblems", () => {
     expect(flowProblems({ ...ok, signed_in: "yes" })).toEqual(["signed_in is true or false"]);
   });
 
+  it("accepts the keyboard steps: tab, expect_focus and expect_inert", () => {
+    expect(flowProblems({ ...ok, steps: [{ tab: { count: 3, shift: true, stay_in: "[role=dialog]" } }, { expect_focus: "button" }, { expect_inert: "nav" }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ tab: 3 }] })).toEqual(["step 1: tab takes a object"]);
+  });
+
   it("rejects a viewport it doesn't know", () => expect(flowProblems({ ...ok, viewports: ["watch"] })).toEqual(["unknown viewport watch"]));
 
   it("rejects a page the app doesn't have, so a typo can't pass for a clean run", () => {
