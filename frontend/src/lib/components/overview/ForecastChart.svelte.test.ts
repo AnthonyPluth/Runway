@@ -92,6 +92,11 @@ describe("ForecastChart, compact", () => {
     expect(container.querySelector("[data-end]")).toHaveTextContent("$2,500");
   });
 
+  it("keeps the value axis on the compact chart", () => {
+    const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, 1300, 2500] }), compact: true } });
+    expect(container.querySelectorAll("line[stroke='var(--border)']").length).toBeGreaterThan(0);
+  });
+
   it("leaves the marks off the full chart", () => {
     const { container } = render(ForecastChart, { props: { fc: fc() } });
     expect(container.querySelector("[data-low]")).toBeNull();

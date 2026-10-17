@@ -5,13 +5,13 @@
   import type { ForecastEvent, Overview } from "$lib/types";
 
   // The projected balance, day by day: what each day brings (hover or drag for a day's readout).
-  // `compact` is the Overview card's version: about 120px tall, no value axis, the lowest day marked and the last
+  // `compact` is the Overview card's version: about 120px tall, the value axis kept, the lowest day marked and the last
   // day's balance written at the line's end.
   let { fc, compact = false }: { fc: Overview; compact?: boolean } = $props();
 
   let width = $state(0);
   const H = $derived(compact ? 120 : 280);
-  const m = $derived(compact ? { top: 20, right: 8, bottom: 22, left: 8 } : { top: 30, right: 8, bottom: 28, left: 52 });
+  const m = $derived(compact ? { top: 20, right: 8, bottom: 22, left: 52 } : { top: 30, right: 8, bottom: 28, left: 52 });
   const W = $derived(Math.max(320, width));
   const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const series = $derived(fc.total);
@@ -102,7 +102,7 @@
           <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
         </linearGradient>
       </defs>
-      {#if !compact}<YAxis {ticks} {y} left={m.left} right={W - m.right} />{/if}
+      <YAxis {ticks} {y} left={m.left} right={W - m.right} />
       {#each months as ml (ml.i)}
         <text x={x(ml.i)} y={H - (compact ? 4 : 8)} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{ml.label}</text>
       {/each}
