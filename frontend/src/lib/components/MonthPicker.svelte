@@ -15,12 +15,13 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
   // One month with arrows either side, for Budget and Cash flow. Styled like the segmented controls next to it; the
-  // arrows are 44px on a phone, a size a finger can hit.
-  let { month, onchange, class: className }: { month: string; onchange: (month: string) => void; class?: string } = $props();
+  // arrows are 44px on a phone, a size a finger can hit. `class` styles the box and `labelClass` the month between the
+  // arrows, so a page can let a phone's picker fill its row (Budget does; Cash flow keeps the default).
+  let { month, onchange, class: className, labelClass }: { month: string; onchange: (month: string) => void; class?: string; labelClass?: string } = $props();
 </script>
 
 <div class={cn("inline-flex h-9 items-center rounded-lg bg-muted p-[3px] phone:h-auto", className)}>
   <Button variant="ghost" size="icon" class="size-8 phone:size-11" aria-label="Previous month" onclick={() => onchange(shiftMonth(month, -1))}><ChevronLeft /></Button>
-  <span class="min-w-36 rounded-md bg-background px-3 py-1 text-center text-sm font-medium shadow-sm dark:bg-input/30" aria-live="polite">{monthLabel(month)}</span>
+  <span class={cn("min-w-36 rounded-md bg-background px-3 py-1 text-center text-sm font-medium shadow-sm dark:bg-input/30", labelClass)} aria-live="polite">{monthLabel(month)}</span>
   <Button variant="ghost" size="icon" class="size-8 phone:size-11" aria-label="Next month" onclick={() => onchange(shiftMonth(month, 1))}><ChevronRight /></Button>
 </div>
