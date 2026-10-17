@@ -130,9 +130,10 @@ api-contract:
 api-contract-check:
 	$(PYTHON) tools/api_contract.py --check
 
-# Pushes make verify's `*-top.png` screenshots to the pr-screenshots branch (pr-$(PR)/) and prints the markdown for the
-# PR's comment (tools/pr_screenshots.py). `make pr-screenshots PR=12 FILES="artifacts/verify/budget-phone-top.png …"` picks
-# files; trailers for the commit go in $PR_SCREENSHOTS_TRAILERS. Demo data only: the repository is public.
+# Copies make verify's `*-top.png` screenshots into screenshots/pr-$(PR)/, commits them on the current branch (not pushed)
+# and prints the markdown for the PR's comment, linked to that commit (tools/pr_screenshots.py). `make pr-screenshots PR=12
+# FILES="artifacts/verify/budget-phone-top.png …"` picks files; trailers for the commit go in $PR_SCREENSHOTS_TRAILERS.
+# Demo data only: the repository is public.
 pr-screenshots:
 	@test -n "$(PR)" || { echo "usage: make pr-screenshots PR=<pull request number> [FILES=\"…\"]" >&2; exit 2; }
 	@$(PYTHON) tools/pr_screenshots.py $(PR) $(FILES)
