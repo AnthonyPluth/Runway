@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { api } from "$lib/api";
-  import { autosave } from "$lib/autosave";
   import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
   import { barWidth, fmt, pct as share } from "$lib/format";
   import { cn } from "$lib/utils";
-  import { commas } from "$lib/commas";
   import Pencil from "@lucide/svelte/icons/pencil";
-  import { tick } from "svelte";
+  import { onMount } from "svelte";
+  import { keepScroll } from "$lib/app.svelte";
+  import CostBasisEditor from "./CostBasisEditor.svelte";
   import LiveDot from "./LiveDot.svelte";
   import LogoPicker from "$lib/components/transactions/LogoPicker.svelte";
   import TickerIcon from "./TickerIcon.svelte";
@@ -15,7 +13,7 @@
   import { inv, type HoldView, type SortKey } from "./state.svelte";
   import type { Holding } from "./types";
 
-  // Every holding: a table (sortable by any column) from 768px up, a list on a phone, with the price paid per share editable in place.
+  // Every holding: a table (sortable by any column) from 768px up, a list on a phone, with the price paid per share editable in place (a phone's list opens the holding's page instead).
   let { holdings, onchanged }: { holdings: Holding[]; onchanged: () => void } = $props();
 
   function watch(query: string) {
@@ -37,6 +35,14 @@
   const phone = watch("(max-width: 767px), (max-height: 500px) and (pointer: coarse)");
 
   const keyOf = (h: Holding) => h.group || h.security_id;
+  // A holding's page (#investments/holding/<id>). Leaving for it notes where the list was scrolled to, and coming back
+  // puts the list there again (the page is drawn afresh, so it starts at the top).
+  const holdingHref = (h: Holding) => `#investments/holding/${encodeURIComponent(h.security_id)}`;
+  const leaving = () => { inv.scrollY = window.scrollY; };
+  onMount(() => {
+    if (inv.scrollY > 0) keepScroll(inv.scrollY);
+    inv.scrollY = 0;
+  });
   // While the cost basis editor is open the rows keep their order, so live prices don't move the row you're editing.
   let open = $state<string | null>(null);
   let frozen: string[] = [];
@@ -86,29 +92,17 @@
     return hasCost(h) ? { text: pct(h.gain_pct), tone: tone(h.gain_pct, 1) } : { text: "No cost basis", tone: "muted" };
   }
 
-  // Cost basis editor: one input per account holding the security (the institution's number is the default).
-  let changed = false;
-  let typed = $state<Record<number, string>>({});
-  async function openEditor(h: Holding) {
+  // Cost basis editor, opened from the table's cost basis column. (A phone's list opens the holding's page instead, which has it.)
+  function openEditor(h: Holding) {
     frozen = rows.map(keyOf);
     open = keyOf(h);
-    changed = false;
-    typed = Object.fromEntries(h.lots.map((l, i) => [i, l.manual && l.per_share != null ? String(+l.per_share.toFixed(4)) : ""]));
-    await tick();
-    document.querySelector<HTMLInputElement>("#inv-holdings .cb-in")?.focus();
   }
-  function finish() {
+  function finish(changed = false) {
     open = null; frozen = [];
     if (changed) onchanged();
   }
   const toggleEditor = (h: Holding) => (open === keyOf(h) ? finish() : openEditor(h));
   const editable = (h: Holding) => !(h.is_cash || h.asset_class === "Not reported");
-  const saveLot = (h: Holding, i: number) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
-    const l = h.lots[i];
-    await api("/api/investments/cost", { method: "POST", body: { account_id: l.account_id, security_id: l.security_id || h.security_id, per_share: f.value } });
-    changed = true;
-    if (h.lots.length === 1) finish();   // one account: done as soon as it's saved
-  };
   // Every width has the same order: Holding, Today, Total gain, Value, then the columns that only a wide screen has room for
   // (under 1280px they are folded into the holding's cell).
   const COLS: [SortKey, string, string][] = [
@@ -148,24 +142,6 @@
   {/if}
 {/snippet}
 
-{#snippet editor(x: Holding)}
-              <p class="text-sm" title="Your average if you bought at different prices. Runway multiplies it by the shares you hold."><b>Price paid per share for {x.ticker || x.name || ""}</b></p>
-              <p class="text-xs text-muted-foreground">Leave it empty to go back to the institution’s figure</p>
-              {#each x.lots as l, i (l.account_id)}
-                <div class="mt-3 flex flex-wrap items-end gap-3">
-                  <label class="flex flex-col gap-1 text-sm">{l.account_name} · {qty(Number(l.quantity))} shares
-                    <span class="relative inline-block">
-                      <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-                      <input type="number" min="0" step="0.0001" {@attach commas} class="cb-in h-9 w-40 rounded-md border border-input bg-transparent pr-2 pl-6 text-sm dark:bg-input/30"
-                        value={typed[i]} oninput={(e) => (typed[i] = e.currentTarget.value)} use:autosave={saveLot(x, i)} aria-label={`Price per share in ${l.account_name}`}
-                        placeholder={l.reported_cost_basis && l.quantity ? `reported ${(l.reported_cost_basis / l.quantity).toFixed(2)}` : "not reported"} />
-                    </span>
-                  </label>
-                  <span class="pb-2 text-sm text-muted-foreground">{typed[i] && l.quantity ? `= ${fmt(Number(typed[i]) * l.quantity)} cost basis` : ""}</span>
-                </div>
-              {/each}
-              <Button variant="link" size="sm" class="mt-2 px-0" onclick={finish}>Done</Button>
-{/snippet}
 
 {#snippet listBody(x: Holding)}
   {@const p = pillOf(x, inv.holdView)}
@@ -194,16 +170,16 @@
         <li class="border-t border-border first:border-t-0" data-holding={keyOf(x)}>
           <div class="flex items-center gap-3 py-2.5">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted [&_img]:mt-0 [&_span]:mt-0">{@render logo(x)}</div>
-            {#if editable(x)}
-              <button type="button" class="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-3 text-left" aria-expanded={open === keyOf(x)} title="Edit cost basis" onclick={() => toggleEditor(x)}>
+            {#if !x.is_cash}
+              <a href={holdingHref(x)} class="flex min-h-10 min-w-0 flex-1 items-center gap-3 text-left" onclick={leaving}>
                 {@render listBody(x)}
-              </button>
+              </a>
             {:else}
               <div class="flex min-w-0 flex-1 items-center gap-3">{@render listBody(x)}</div>
             {/if}
           </div>
           {#if open === keyOf(x)}
-            <div class="mb-2 rounded-lg bg-muted/40 p-3" data-editor>{@render editor(x)}</div>
+            <div class="mb-2 rounded-lg bg-muted/40 p-3" data-editor><CostBasisEditor holding={x} ondone={finish} /></div>
           {/if}
         </li>
       {/each}
@@ -230,7 +206,12 @@
             <div class="flex gap-2.5">
               {@render logo(x)}
               <div class="min-w-0">
-                <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
+                {#if x.is_cash}
+                  <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
+                {:else}
+                  <!-- The name opens the holding's page -->
+                  <div><a href={holdingHref(x)} class="hover:underline focus-visible:underline" onclick={leaving}><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</a></div>
+                {/if}
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
                 {#if narrow.on}
                 <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
@@ -266,7 +247,7 @@
         </tr>
         {#if open === keyOf(x)}
           <tr class="bg-muted/40" data-editor>
-            <td colspan="8" class="p-3">{@render editor(x)}</td>
+            <td colspan="8" class="p-3"><CostBasisEditor holding={x} ondone={finish} /></td>
           </tr>
         {/if}
       {/each}

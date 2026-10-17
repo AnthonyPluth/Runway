@@ -45,6 +45,11 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "networth", sub: "investments" });
   });
 
+  it("keeps everything after the page as the sub-page, so a holding's page is #investments/holding/<id>", async () => {
+    await go("#investments/holding/sec%2F1?period=3M");
+    expect(route).toMatchObject({ page: "investments", sub: "holding/sec%2F1", query: "period=3M" });
+  });
+
   it("opens Recurring at #recurring, and the old #budget/recurring there too", async () => {
     await go("#recurring");
     expect(route).toMatchObject({ page: "recurring", sub: "" });

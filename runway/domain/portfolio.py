@@ -813,6 +813,37 @@ def summary(conn, today: date | None = None, now: datetime | None = None) -> dic
                           for h in hold if not h["is_cash"] and h["ticker"] and h["quantity"]]}
 
 
+def holding_detail(conn, security_id: str, period: str = "1Y", today: date | None = None) -> dict | None:
+    """One holding's page: the row /api/investments gives it, the portfolio total it is a share of, its closes over the
+    period (from the prices already kept; `start_price` is the close on the period's first day, or the earliest one kept)
+    and what it paid out in dividends over the last 12 months. None when no holding of yours has this security (cash
+    has no page)."""
+    today = today or date.today()
+    hold = holdings(conn)
+    h = next((x for x in hold if not x["is_cash"] and security_id in {x["security_id"], *(lot["security_id"] for lot in x["lots"])}), None)
+    if h is None:
+        return None
+    start = period_start(period, today)
+    ds, vals = _PriceBook(conn, start).series(h["ticker"])
+    i = max(0, bisect.bisect_right(ds, start.isoformat()) - 1)   # the close in force on the first day
+    dates, closes = ds[i:], [round(v, 4) for v in vals[i:]]
+    price = h["price"] if h["price"] is not None else (closes[-1] if closes else None)
+    start_price = closes[0] if closes else None
+    change = round(price - start_price, 4) if price is not None and start_price is not None else None
+    since = (today - timedelta(days=365)).isoformat()
+    sec_ids = {lot["security_id"] for lot in h["lots"]} | {h["security_id"]}
+    # Plaid's sign: money paid out to you is negative (as _is_income reads it), so a dividend is a negative amount. Only
+    # "dividend" subtypes count: not interest, capital gains or a return of capital, and not a reversal (a positive amount).
+    paid = sum(-(t["amount"] or 0.0) for t in db.rows(conn.execute(
+        select(InvTransaction.amount, InvTransaction.subtype)
+        .where(InvTransaction.account_id.in_(_visible_ids(conn)), InvTransaction.security_id.in_(sec_ids), InvTransaction.date >= since)))
+        if "dividend" in (t["subtype"] or "").lower() and (t["amount"] or 0) < 0)
+    return {"holding": h, "total": round(sum(x["value"] for x in hold), 2), "period": period,
+            "history": {"dates": dates, "prices": closes, "start_price": start_price, "change": change,
+                        "change_pct": round(change / start_price, 6) if change is not None and start_price else None},
+            "dividends_12m": round(paid, 2)}
+
+
 def overview(conn, period: str = "1Y", today: date | None = None) -> dict:
     today = today or date.today()
     hold = holdings(conn)
