@@ -8,6 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
+import { tablet } from "$lib/rail.svelte";
 import type { BudgetCategory, BudgetMonth } from "$lib/components/budget/types";
 import { toast } from "svelte-sonner";
 import Budget from "./Budget.svelte";
@@ -128,6 +129,17 @@ describe("Budget page", () => {
     render(Budget);
     expect(await screen.findByText("No budgets yet. Set one below.")).toBeInTheDocument();
     expect(screen.getByText("Set a budget below")).toBeInTheDocument();
+  });
+
+  it.each([[true, "month first"], [false, "actions first"]])("puts the header's controls in focus order to match what's drawn (tablet: %s, %s)", async (rail) => {
+    tablet.rail = rail;
+    serve(month());
+    render(Budget);
+    await screen.findByText("March 2026");
+    const suggest = screen.getByRole("button", { name: /Suggest budgets/ });
+    const prev = screen.getByRole("button", { name: "Previous month" });
+    expect(Boolean(suggest.compareDocumentPosition(prev) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(rail);
+    tablet.rail = false;
   });
 
   it("goes to the previous and next month", async () => {

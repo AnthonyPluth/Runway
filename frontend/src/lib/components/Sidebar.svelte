@@ -20,7 +20,7 @@
   // On a tablet (lib/rail.svelte.ts) the sidebar is a 72px rail of icons and Menu opens a sheet with the full labels, the account and
   // sync details and sign-out. The sheet closes on going to a page, and when the screen stops being a tablet's.
   let menu = $state(false);
-  $effect(() => { void route.page; menu = false; });
+  $effect(() => { void route.page; void route.sub; menu = false; });
   $effect(() => { if (!tablet.rail) menu = false; });
 
   // In the rail a link's label is its tooltip: out of view until hover or keyboard focus, but still its accessible name.
@@ -58,7 +58,7 @@
     <!-- A problem links to Settings › Connections, with the bank's message on a line of its own (not only on hover). -->
     <div class="flex min-w-0 flex-col text-xs text-muted-foreground" title={sync.title} role="status">
       {#if sync.href}
-        <a href={sync.href} class={cn("flex items-center gap-1.5 underline-offset-4 hover:underline", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
+        <a href={sync.href} onclick={() => (menu = false)} class={cn("flex items-center gap-1.5 underline-offset-4 hover:underline", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
           <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
         </a>
       {:else}

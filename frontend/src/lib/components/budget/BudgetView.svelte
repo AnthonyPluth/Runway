@@ -17,6 +17,7 @@
   import Group from "$lib/components/ui/group/Group.svelte";
   import { fmt0, monthShort, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
+  import { tablet } from "$lib/rail.svelte";
   import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
 
@@ -121,10 +122,12 @@
   </div>
 {/snippet}
 
-<!-- The month leads; the actions follow beside it when they fit, else on a row of their own (never squeezed or overlapping). -->
-<div class="mb-6 flex flex-wrap items-center justify-end gap-4 rail:justify-between rail:gap-y-3 rail:[&>:last-child]:order-first">
-  <BudgetSuggest month={b?.month ?? month} onchanged={refresh} />
-  <MonthPicker month={b?.month ?? month} onchange={pick} />
+<!-- On a tablet (lib/rail.svelte.ts) the month leads and the actions follow beside it when they fit, else on a row of their own (never
+     squeezed or overlapping); the markup is in that order, so focus and reading order match what's drawn. Elsewhere: actions, then month. -->
+{#snippet suggest()}<BudgetSuggest month={b?.month ?? month} onchanged={refresh} />{/snippet}
+{#snippet picker()}<MonthPicker month={b?.month ?? month} onchange={pick} />{/snippet}
+<div class="mb-6 flex flex-wrap items-center justify-end gap-4 rail:justify-between rail:gap-y-3">
+  {#if tablet.rail}{@render picker()}{@render suggest()}{:else}{@render suggest()}{@render picker()}{/if}
 </div>
 
 {#if error && !b}

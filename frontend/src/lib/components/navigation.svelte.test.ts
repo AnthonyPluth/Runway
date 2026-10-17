@@ -186,6 +186,26 @@ describe("Sidebar as a tablet rail", () => {
     expect(sheet).not.toHaveClass("md:data-[state=open]:slide-in-from-right", "md:right-0");
   });
 
+  it("closes the menu when you follow the sync warning, even from Settings", async () => {
+    app.state = state({ sync_warnings: ["Chase: log in again"] });
+    route.page = "setup"; route.sub = "";
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: /^Menu/ }));
+    const link = within(screen.getByRole("dialog")).getByRole("link", { name: "Synced · 1 bank needs attention" });
+    link.addEventListener("click", (e) => e.preventDefault());   // (no hash change left over for the next test)
+    await userEvent.click(link);
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes the menu when only the part after the slash changes", async () => {
+    app.state = state();
+    route.page = "setup"; route.sub = "";
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: "Menu" }));
+    route.sub = "connections";
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("closes the menu when you go to a page", async () => {
     app.state = state();
     render(Sidebar);
