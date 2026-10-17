@@ -148,6 +148,39 @@ def api_recurring_add(conn, _q, body):
     return {"ok": True, "id": cur.lastrowid, "linked": linked}
 
 
+PREVIEW_COUNT = 3
+
+
+def api_recurring_preview(_conn, _q, body):
+    """The next few dates a draft recurring item would come (the forecast's own occurrences, moved off weekends and bank
+    holidays, up to its end date): `dates`, up to PREVIEW_COUNT from today on, or the one date of a one-time item. Nothing
+    is saved; a draft without a valid schedule is an error."""
+    freq = text(body.get("frequency"), "frequency") or "monthly"
+    if freq not in FREQS:
+        raise ApiError("Unknown frequency")
+    anchor = _v.day(text(body.get("anchor_date"), "anchor_date"), "date", True)
+    amount = _v.amount(body.get("amount"), "amount", cents=False, required=True)
+    try:
+        end = date.fromisoformat(body["end_date"]).isoformat() if body.get("end_date") else None
+    except (TypeError, ValueError):
+        raise ApiError("Pick an end date (YYYY-MM-DD)") from None
+    if end and end < anchor:
+        raise ApiError("It ends before it starts")
+    listed = None
+    if freq in ("dates", "semimonthly"):
+        try:
+            spec = forecast.parse_dates(text(body.get("dates"), "dates"), freq)
+        except ValueError:
+            raise ApiError("List the dates like 04-15, 10-15 (or Apr 15, Oct 15)" if freq == "dates"
+                           else "List the days of the month like 1, 15") from None
+        listed = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
+    item = {"frequency": freq, "anchor_date": anchor, "dates": listed, "end_date": end, "amount": amount}
+    # (start, end] with start a day before today, so today counts; a one-time item shows its date even once it has passed.
+    start = (min(date.today(), date.fromisoformat(anchor)) if freq == "once" else date.today()) - timedelta(days=1)
+    found = forecast.occurrences(item, start, start + timedelta(days=1200))
+    return {"dates": [d.isoformat() for d in found[:1 if freq == "once" else PREVIEW_COUNT]]}
+
+
 def _range_for_new_amount(old, vals: dict) -> dict:
     """When the amount changes (say "use $2,100" on a $5,000 paycheck) and its range, left as it was, no longer holds the
     new amount, the range moves with it, keeping its proportions; otherwise the new payments would never match."""

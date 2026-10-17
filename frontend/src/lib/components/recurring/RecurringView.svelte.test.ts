@@ -304,20 +304,108 @@ describe("Recurring page", () => {
     it("starts on money out and today's date, with the amount asking for a plain positive number", async () => {
       await open();
       expect(screen.getByRole("radio", { name: "Money out" })).toBeChecked();
-      expect(screen.getByLabelText(/Repeats from/)).toHaveValue(isoDay());
+      expect(screen.getByLabelText(/A scheduled date/)).toHaveValue(isoDay());
       expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveAttribute("placeholder", "120.00");
       expect(screen.getByRole("textbox", { name: /Name/ })).toHaveAttribute("aria-required", "true");
     });
 
-    it("keeps account, amount to forecast, merchant text and the end date under More options, says what's in it, and puts the help in tooltips", async () => {
+    it("keeps amount to forecast, merchant text and the end date under More options, says what's in it, and puts the help in tooltips", async () => {
       await open();
       expect(screen.getByText("More options")).toBeInTheDocument();
-      expect(screen.getByText("Checking · always the amount above · matches the name")).toBeInTheDocument();
+      expect(screen.getByText("always the amount above · matches the name")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: /Merchant text/ })).toHaveAttribute("placeholder", "Text in the bank’s description");
       expect(screen.getByRole("textbox", { name: /Merchant text/ })).not.toHaveAttribute("title");
       expect(screen.getByLabelText("Ends on")).toHaveValue("");
       expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveAttribute("title", expect.stringMatching(/^Use the recent payments/));
-      expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
+    });
+
+    it("shows the account in the main fields, not under More options", async () => {
+      await open();
+      const account = screen.getByRole("combobox", { name: /Account/ });
+      expect(account).toHaveValue("a1");
+      expect(account.closest("details")).toBeNull();
+    });
+
+    it("words the name placeholder for the direction picked", async () => {
+      await open();
+      const name = screen.getByRole("textbox", { name: /Name/ });
+      expect(name).toHaveAttribute("placeholder", "e.g. Rent");
+      await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
+      expect(name).toHaveAttribute("placeholder", "e.g. Paycheck");
+      await userEvent.click(screen.getByRole("radio", { name: "Money out" }));
+      expect(name).toHaveAttribute("placeholder", "e.g. Rent");
+    });
+
+    it("explains the scheduled date in view, and calls a one-time item's just Date", async () => {
+      await open();
+      expect(screen.getByLabelText(/A scheduled date/)).toHaveAccessibleDescription(/Choose a date this payment occurs\. Future dates follow this schedule\./);
+      expect(screen.getByText("Choose a date this payment occurs. Future dates follow this schedule.")).toBeVisible();
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "once");
+      expect(screen.getByLabelText(/^Date/)).toBeInTheDocument();
+      expect(screen.queryByText(/Choose a date this payment occurs/)).not.toBeInTheDocument();
+    });
+
+    describe("next dates preview", () => {
+      const previews = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/recurring/preview");
+      const fill = async (amount = "50") => {
+        await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), amount);
+        await userEvent.clear(screen.getByLabelText(/A scheduled date/));
+        await userEvent.type(screen.getByLabelText(/A scheduled date/), "2026-03-31");
+      };
+
+      it("says what's missing instead of showing dates while the draft is incomplete, and asks for nothing", async () => {
+        await open({ "/api/recurring/preview": { dates: ["2026-04-01"] } });
+        expect(screen.getByText(/Dates show once the schedule is complete\. Enter an amount, like 120\.00\./)).toBeInTheDocument();
+        await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "50");
+        await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "semimonthly");
+        expect(screen.getByText(/List the days of the month, like 1, 15\./)).toBeInTheDocument();
+        await new Promise((r) => setTimeout(r, 400));
+        expect(previews()).toHaveLength(0);
+        expect(screen.queryByText("Tue, Mar 31")).not.toBeInTheDocument();
+      });
+
+      it("shows the three next dates the server works out, with the signed amount, direction and account", async () => {
+        await open({ "/api/recurring/preview": { dates: ["2026-03-31", "2026-04-30", "2026-05-29"] } });
+        await fill();
+        const box = await screen.findByText("Tue, Mar 31");
+        const items = within(box.closest<HTMLElement>("section")!).getAllByRole("listitem");
+        expect(items).toHaveLength(3);
+        expect(items[0]).toHaveTextContent("Tue, Mar 31 −$50.00 Money out · Checking");
+        expect(items[2]).toHaveTextContent("Fri, May 29");
+        expect(previews().at(-1)![1]).toMatchObject({ method: "POST", body: { frequency: "monthly", anchor_date: "2026-03-31", amount: -50 } });
+      });
+
+      it("keeps the entered amount when the direction changes, and asks again with the other sign", async () => {
+        await open({ "/api/recurring/preview": { dates: ["2026-03-31"] } });
+        await fill();
+        await screen.findByText("Tue, Mar 31");
+        await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
+        const li = (await screen.findByText("Money in · Checking")).closest("li")!;
+        expect(li).toHaveTextContent("+$50.00");
+        expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("50");
+        await waitFor(() => expect(previews().at(-1)![1]).toMatchObject({ body: { amount: 50 } }));
+      });
+
+      it("shows a single date for a one-time item", async () => {
+        await open({ "/api/recurring/preview": { dates: ["2026-04-20"] } });
+        await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "50");
+        await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "once");
+        await screen.findByText("Mon, Apr 20");
+        expect(screen.getByRole("heading", { name: "When it comes" })).toBeInTheDocument();
+        expect(screen.getAllByRole("listitem").filter((l) => l.closest("[data-preview]"))).toHaveLength(1);
+      });
+
+      it("says so when the dates can't be worked out, and keeps what was entered", async () => {
+        await open();
+        const served = vi.mocked(api).getMockImplementation()!;
+        vi.mocked(api).mockImplementation(async (path, opts) => {
+          if (path === "/api/recurring/preview") throw new Error("The schedule is wrong");
+          return served(path, opts);
+        });
+        await fill();
+        expect(await screen.findByText("The schedule is wrong")).toBeInTheDocument();
+        expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("50");
+      });
     });
 
     it("drops the required-fields sentence: the stars mark them", async () => {
@@ -456,7 +544,7 @@ describe("Recurring page", () => {
       expect(form().getByRole("textbox", { name: /Name/ })).toHaveValue("Netflix");
       expect(form().getByLabelText(/Amount/, AMOUNT)).toHaveValue("15.49");
       expect(form().getByRole("radio", { name: "Money out" })).toBeChecked();
-      expect(form().getByLabelText(/Repeats from/)).toHaveValue("2026-03-05");
+      expect(form().getByLabelText(/A scheduled date/)).toHaveValue("2026-03-05");
       expect(form().getByRole("textbox", { name: /Merchant text/ })).toHaveValue("NETFLIX");
       expect(posts("/api/recurring")).toHaveLength(0);
       await userEvent.clear(form().getByRole("textbox", { name: /Name/ }));
@@ -673,7 +761,7 @@ describe("Recurring page", () => {
       serve([item({ anchor_date: "2025-12-01", next_date: "2026-04-01" })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
-      expect(screen.getByLabelText(/Repeats from/)).toHaveValue("2025-12-01");
+      expect(screen.getByLabelText(/A scheduled date/)).toHaveValue("2025-12-01");
       expect(screen.getByText(/^Next: Apr.1$/)).toBeInTheDocument();
     });
 

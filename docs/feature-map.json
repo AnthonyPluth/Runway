@@ -1339,6 +1339,20 @@
     },
     {
       "method": "POST",
+      "path": "/api/recurring/preview",
+      "handler": "runway/server/api/recurring.py:api_recurring_preview",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringPreview.svelte"
+      ],
+      "tests": [
+        "tests/test_categories_recurring_pinned.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/recurring/{id}/match",
       "handler": "runway/server/api/recurring.py:api_recurring_add_text",
       "web": [
