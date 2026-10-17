@@ -42,16 +42,14 @@ describe("RetirementPlanner", () => {
     } finally { viewport.phone = false; }
   });
 
-  it("shows the results muted, marked as a starting estimate, while it starts from Runway's own figures", () => {
+  it("holds the results back, and has no Start over, while it starts from Runway's own figures", () => {
     setup(data({ is_default: true }));
-    expect(screen.getByTestId("starting-estimate")).toHaveTextContent("Starting estimate · edit below");
-    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Start over/ })).not.toBeInTheDocument();
   });
 
   it("colours the result once the plan is your own, without the estimate mark", () => {
     setup();
-    expect(screen.queryByTestId("starting-estimate")).not.toBeInTheDocument();
     expect(screen.getByText(/^\d+%$/).className).not.toContain("text-muted-foreground");
   });
 
@@ -406,7 +404,7 @@ describe("RetirementPlanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(api).toHaveBeenCalledWith("/api/investments/plan", { method: "POST", body: { plan: null } });
     await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));
-    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Yearly spending in retirement" })).toHaveValue("55000");
   });
 
