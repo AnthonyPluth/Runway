@@ -61,6 +61,8 @@ def _accounts(conn) -> list[dict]:
         select(ia, institution,
                select(func.count()).select_from(ManualPosition).where(ManualPosition.account_id == ia.id)
                .scalar_subquery().label("tracked"),
+               select(func.max(ManualPosition.updated)).where(ManualPosition.account_id == ia.id)
+               .scalar_subquery().label("tracked_updated"),   # when the funds entered by hand were last saved
                select(ManualState.drift).where(ManualState.account_id == ia.id).scalar_subquery().label("drift"),
                func.coalesce(Account.hidden, 0).label("hidden_in_accounts"))
         .outerjoin(PlaidItem, PlaidItem.item_id == ia.item_id)

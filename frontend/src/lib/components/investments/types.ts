@@ -57,6 +57,8 @@ export interface InvAccount {
   source: "plaid" | "simplefin" | string;
   institution_name: string | null;
   tracked: number;
+  /** When the funds entered by hand for this account were last saved (none until some are). */
+  tracked_updated?: string | null;
   drift: number | null;
   /** A Plaid account that SimpleFIN also sends (the SimpleFIN copy isn't listed or counted). */
   also_simplefin?: boolean;

@@ -48,7 +48,7 @@ export interface NetWorth {
   liabilities: number;
   groups: NwGroup[];
   /** Accounts you left out of net worth (still shown elsewhere), to bring back. */
-  excluded: { id: string; name: string; org: string | null; kind: string; /** Signed like the groups: what you owe, positive, for credit and loans. */ balance: number }[];
+  excluded: { id: string; name: string; org: string | null; kind: string; /** When its balance was synced. */ as_of?: string | null; /** Signed like the groups: what you owe, positive, for credit and loans. */ balance: number }[];
   history: { date: string; net: number; assets: number; liabilities: number }[];
   first_snapshot: string | null;
   change: Record<"30d" | "90d" | "1y", number | null>;

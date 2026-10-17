@@ -16,6 +16,8 @@
   import { valueSource } from "$lib/components/networth/homeValues";
   import type { NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
+  import ValuationDates from "$lib/components/ValuationDates.svelte";
+  import { netWorthDates } from "$lib/valuationDates";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
@@ -127,6 +129,9 @@
   // Asset-type groups (Real estate, Vehicles, Other assets) can be added to; any group can be folded away.
   const ADDABLE: Record<string, string> = { home: "home", vehicle: "vehicle", other: "other" };
   let folded = $state<Record<string, boolean>>({});
+  // The "Valuation dates" sheet explains the total from the breakdown below; "Show" takes you to that breakdown.
+  const dates = $derived(d ? netWorthDates(d) : null);
+  const showBreakdown = () => document.getElementById("nw-breakdown")?.scrollIntoView({ behavior: "smooth", block: "start" });
   const hasAssetItems = $derived(!!d?.assets_list.length);
 </script>
 
@@ -223,7 +228,10 @@
   <section class="mb-8">
     {#if error}<RefreshFailed {error} onretry={load} />{/if}
     <div class="sr-only">Net worth</div>
-    <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]" data-testid="nw-headline">{fmt0(scrubbed ? scrubbed.net : d.net)}</div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]" data-testid="nw-headline">{fmt0(scrubbed ? scrubbed.net : d.net)}</div>
+      {#if dates}<ValuationDates title="net worth" total={fmt0(d.net)} model={dates} listName="what makes it up" onshow={showBreakdown} />{/if}
+    </div>
     {#if d.history.length >= 2}
       <div class="mt-2 flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
         {#if scrubbed}
@@ -251,7 +259,7 @@
     {/if}
   </section>
 
-  <Card.Root class="mb-6">
+  <Card.Root class="mb-6" id="nw-breakdown">
     <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
     <Card.Content>
       {@render makeup()}
