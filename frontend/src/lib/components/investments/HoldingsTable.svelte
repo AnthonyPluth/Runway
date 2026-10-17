@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
-    import { barWidth, fmt, pct as share } from "$lib/format";
+  import { barWidth, fmt, pct as share } from "$lib/format";
   import { cn } from "$lib/utils";
   import Pencil from "@lucide/svelte/icons/pencil";
   import { onMount } from "svelte";

@@ -832,6 +832,8 @@ def holding_detail(conn, security_id: str, period: str = "1Y", today: date | Non
     change = round(price - start_price, 4) if price is not None and start_price is not None else None
     since = (today - timedelta(days=365)).isoformat()
     sec_ids = {lot["security_id"] for lot in h["lots"]} | {h["security_id"]}
+    # Plaid's sign: money paid out to you is negative (as _is_income reads it), so a dividend is a negative amount. Only
+    # "dividend" subtypes count: not interest, capital gains or a return of capital, and not a reversal (a positive amount).
     paid = sum(-(t["amount"] or 0.0) for t in db.rows(conn.execute(
         select(InvTransaction.amount, InvTransaction.subtype)
         .where(InvTransaction.account_id.in_(_visible_ids(conn)), InvTransaction.security_id.in_(sec_ids), InvTransaction.date >= since)))

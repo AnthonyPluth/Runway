@@ -36,13 +36,17 @@
   // What the server said the holding and the portfolio were worth, to work out the share of the portfolio as the price moves.
   let base = { value: 0, total: 0 };
 
+  let latest = 0;   // the newest request; an older one that finishes after it is dropped, so a slow 3M can't replace a 1M picked since
   async function load(p = period) {
+    const mine = ++latest;
     busy = true;
     try {
       const r = await apiCall<"GET /api/investments/holding/{id}">(`/api/investments/holding/${encodeURIComponent(id)}?period=${p}`);
+      if (mine !== latest) return;
       d = r; missing = false; error = null; period = p;
       base = { value: r.holding.value, total: r.total };
     } catch (e) {
+      if (mine !== latest) return;
       if (e instanceof ApiError && e.status === 404) { d = null; missing = true; error = null; }
       else error = errMsg(e);
     }

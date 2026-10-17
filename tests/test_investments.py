@@ -989,6 +989,8 @@ class HoldingDetailTests(Base):
         self.tx("d2", (TODAY - timedelta(days=100)).isoformat(), "cash", "qualified dividend", -7.5, "VTI")
         self.tx("d3", (TODAY - timedelta(days=400)).isoformat(), "cash", "dividend", -99, "VTI")   # over a year ago
         self.tx("d4", (TODAY - timedelta(days=10)).isoformat(), "cash", "interest", -3, "SPAXX")
+        self.tx("d5", (TODAY - timedelta(days=20)).isoformat(), "cash", "dividend", 4, "VTI")   # a reversal: money back out, not paid in
+        self.tx("d6", (TODAY - timedelta(days=25)).isoformat(), "cash", "return of capital", -6, "VTI")   # not a dividend
 
     def get(self, sec, period="1Y"):
         from runway.server.api import investments

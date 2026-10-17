@@ -95,6 +95,21 @@ describe("HoldingDetail", () => {
     expect(screen.queryByLabelText("Price per share in Brokerage")).not.toBeInTheDocument();
   });
 
+  it("keeps the period picked last when an older request finishes after it", async () => {
+    let slow!: (r: unknown) => void;
+    vi.mocked(api).mockImplementation(((path: string) =>
+      path.endsWith("period=3M") ? new Promise((done) => { slow = done; }) : Promise.resolve(reply({}, { period: path.slice(-2) }))) as never);
+    render(HoldingDetail, { id: "s1" });
+    await screen.findByTestId("holding-header");
+    await userEvent.click(screen.getByRole("radio", { name: "3M" }));   // slow
+    await userEvent.click(screen.getByRole("radio", { name: "2Y" }));   // answers at once
+    await waitFor(() => expect(screen.getByRole("radio", { name: "2Y" })).toBeChecked());
+    slow(reply({ price: 111 }, { period: "3M" }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByRole("radio", { name: "2Y" })).toBeChecked();
+    expect(screen.getByTestId("holding-price")).toHaveTextContent("$250.00");
+  });
+
   it("shows the dividends of the last 12 months when there were any", async () => {
     vi.mocked(api).mockResolvedValue(reply({}, { dividends_12m: 20 }));
     render(HoldingDetail, { id: "s1" });
