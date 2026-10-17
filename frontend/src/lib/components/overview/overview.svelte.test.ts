@@ -220,6 +220,14 @@ describe("SetupChecklist final review", () => {
     expect(setupReview.open).toBe(false);
   });
 
+  it("leaves out the APR warning and ones put away on Overview", () => {
+    const apr = "Visa: the forecast carries part of its statements to the next one, but doesn’t count the interest on it: enter the card’s APR in Settings.";
+    const away = "Amex: choose which account pays it in Settings.";
+    finishing({ fc: forecast({ dismissed_warnings: [away], warning_links: [
+      { text: apr, href: "#setup/accounts" }, { text: away, href: "#setup/accounts" }] }) });
+    expect(screen.getByText("No card payments need attention")).toBeInTheDocument();
+  });
+
   it("Dismiss on a reopened review also closes the reopened flag, so the card can go", async () => {
     app.state = { connected: true, setup: { ...done, dismissed: true } };
     setupReview.open = true;
@@ -232,15 +240,15 @@ describe("SetupChecklist final review", () => {
   it("Undo after finishing a reopened review puts back dismissed and the reopened review", async () => {
     app.state = { connected: true, setup: { ...done, dismissed: true } };
     setupReview.open = true;
-    vi.mocked(api).mockImplementation(async (path: string, opts?: { body?: { setup_dismissed?: boolean } }) => {
-      if (path === "/api/settings") app.state = { ...app.state!, setup: { ...app.state!.setup!, dismissed: !!opts?.body?.setup_dismissed } };
+    vi.mocked(api).mockImplementation(async (path: string, opts?: unknown) => {
+      if (path === "/api/settings") app.state = { ...app.state!, setup: { ...app.state!.setup!, dismissed: !!(opts as { body?: { setup_dismissed?: boolean } } | undefined)?.body?.setup_dismissed } };
       return {} as never;
     });
     vi.mocked(toast).mockClear();
     render(SetupChecklist, { fc: forecast() });
     await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(setupReview.open).toBe(false);
-    const [, opts] = vi.mocked(toast).mock.calls.at(-1) as [string, { action: { onClick: () => Promise<void> } }];
+    const [, opts] = vi.mocked(toast).mock.calls.at(-1) as unknown as [string, { action: { onClick: () => Promise<void> } }];
     await opts.action.onClick();
     const saves = vi.mocked(api).mock.calls.filter(([p]) => p === "/api/settings");
     expect(saves.at(-1)).toEqual(["/api/settings", { method: "POST", body: { setup_dismissed: true } }]);

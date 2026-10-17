@@ -13,9 +13,12 @@
   const recurring = $derived((fc?.events ?? []).filter((e) => e.kind === "recurring"));
   const income = $derived(recurring.find((e) => e.amount > 0));
   const bills = $derived(recurring.filter((e) => e.amount < 0));
-  // The forecast's own card warnings (a missing or old statement, no account paying the card, ...): each links to
-  // Settings → Accounts, where they're put right.
-  const cards = $derived((fc?.warning_links ?? []).filter((w) => w.href.startsWith("#setup/accounts")).map((w) => w.text));
+  // The forecast's own warnings about card payments (a missing or old statement, no account paying the card, a fixed
+  // amount or minimum payment not known, a payment overdue), each linking to Settings → Accounts. The APR one isn't a
+  // payment, and one you've put away on Overview stays put away.
+  const cardPayment = /pays it|statement|fixed payment|minimum payment|was due/;
+  const cards = $derived((fc?.warning_links ?? []).filter((w) => w.href.startsWith("#setup/accounts") && cardPayment.test(w.text)
+    && !/APR/.test(w.text) && !(fc?.dismissed_warnings ?? []).includes(w.text)).map((w) => w.text));
   const budget = $derived(fc?.budget);
   const editCls = "h-10 shrink-0 sm:h-8";
 </script>
