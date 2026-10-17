@@ -52,7 +52,7 @@
 
 <div class="flex min-h-dvh flex-col desktop:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+7rem)] desktop:p-8">
+  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+7rem)] desktop:p-6 wide:p-8">
     <div class="mx-auto max-w-7xl">
       {#if app.sessionExpired}
         <!-- Above the page, which stays drawn underneath, so an open edit isn't lost; signing in is up to you. -->

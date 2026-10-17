@@ -9,6 +9,8 @@ The [home page](/Runway/) has the short list. This is what each part does and wh
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Investments**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
+**On a tablet** (768 to 1023 pixels wide), the sidebar shrinks to a narrow rail of icons so pages keep their width: hover or tab to an icon to see its name, and the lit icon marks the page you're on. **Menu**, at the bottom of the rail, opens a panel with every page by its full name, who's signed in, the sync status and **Sync now**, and **Sign out**. From 1024 pixels up it's the full sidebar.
+
 **On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a floating tab bar at the bottom (Overview, Transactions, Budget, Invest and More; Recurring, Reports, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, wide tables that keep their main columns (the rest fold under each row or are left out), and buttons big enough to tap. On a touch screen, actions that a mouse shows on hover (Split, a row's checkbox) are always there.
 
 Settings has these tabs: **Accounts**, **Connections** (SimpleFIN, Plaid, the browser extension for Amazon, Target, Costco and Carta, and the optional services: OpenRouter, Realie, Finnhub and Logo.dev), **Categories**, **Rules**, **Notifications** and **Data** (this device's app lock, backup and restore, AI assistants and the version). Until a bank is connected, Settings opens on Connections.
