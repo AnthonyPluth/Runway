@@ -38,6 +38,16 @@ describe("BudgetRow", () => {
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
   });
 
+  it("tightens the amount group on a phone only, leaving the other widths alone", () => {
+    setup(cat({ budget: 12000 }), { budgets: true });
+    const input = screen.getByLabelText("Budget for Groceries");
+    expect(input).toHaveClass("w-20", "sm:w-24", "phone:w-[4.25rem]");
+    const group = input.closest("span.ml-auto")!;
+    expect(group).toHaveClass("gap-1.5", "phone:gap-1");
+    expect(group.parentElement).toHaveClass("gap-x-2.5", "phone:gap-x-1.5");
+    expect(group.parentElement!.className).not.toMatch(/nowrap/);
+  });
+
   describe("a subcategory", () => {
     const produce = (extra: Partial<BudgetCategory> = {}) =>
       cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 100, spent: 40, left: 60, ...extra });

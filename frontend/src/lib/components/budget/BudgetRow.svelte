@@ -123,7 +123,7 @@
 </script>
 
 <div class={cn("py-1", sub && "pl-5")}>
-  <div class="flex min-h-8 flex-wrap items-center gap-x-2.5">
+  <div class="flex min-h-8 flex-wrap items-center gap-x-2.5 phone:gap-x-1.5">
     <span class="relative shrink-0">
       <CatIcon name={c.name} size={sub ? 20 : 28} />
       <!-- The account as a small badge on the emoji, as Transactions puts it on a merchant's logo; not on a phone. -->
@@ -138,7 +138,7 @@
         <Repeat class="size-3" aria-hidden="true" />Rolls over
       </span>
     {/if}
-    <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
+    <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 phone:gap-1 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} class={cn("hover:underline", sub && warnOver && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
         title={subNote || undefined}>{money(c.spent)}{#if subNote}<span class="sr-only">{` (${subNote})`}</span>{/if}</a>
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
@@ -148,7 +148,7 @@
         <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : income ? "Expected" : "Budget") : ""}
           bind:this={box} disabled={locked} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
           onchange={(e) => (monthOnly ? saveMonth(e.currentTarget.value) : onsave(c.name, e.currentTarget.value))}
-          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
+          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24 phone:w-[4.25rem]",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]", monthOnly && "text-primary")} />
       </span>
       {#if budgets && c.budget != null}
