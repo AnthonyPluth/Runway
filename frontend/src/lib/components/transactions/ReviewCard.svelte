@@ -6,6 +6,8 @@
   import { Button } from "$lib/components/ui/button";
   import { fmtDate, fmtSigned } from "$lib/format";
   import { cn } from "$lib/utils";
+  import { viewport } from "$lib/phone.svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { txLogo } from "./logo";
   import { alternatives } from "./reviewCard";
   import type { Tx } from "./types";
@@ -15,7 +17,10 @@
   // category and moves to the next; Skip moves on without changing anything (it comes round again). `onsubmit` is the
   // page's: the existing accept (the suggestion kept) or category save (another picked); true when it was saved,
   // when the transaction leaves `items`.
-  let { items, total, rows, onsubmit, onmore }: {
+  // On a phone it starts as one line, "N to review" with Review next and See all; Review next opens the card as it is
+  // (`open`, bound by the page so it survives reloads).
+  let { items, total, rows, onsubmit, onmore, open = $bindable(false) }: {
+    open?: boolean;
     items: Tx[]; total: number; rows: Tx[]; onsubmit: (t: Tx, category: string) => Promise<boolean>;
     /** Adds the next batch of the queue to `items` (there are more than are loaded). */
     onmore?: () => Promise<void>;
@@ -45,8 +50,18 @@
   }
 </script>
 
-{#if t}
-  <section aria-label="To review" data-review-card class="mb-4 rounded-2xl border bg-card p-4">
+{#if t && viewport.phone}
+  <div class="mb-3 flex min-h-11 items-center justify-between gap-3 rounded-xl border bg-card px-4" data-review-summary>
+    <p class="text-sm font-medium tabular-nums">{Math.max(total, items.length)} to review</p>
+    <div class="flex items-center gap-3 text-sm font-medium">
+      <button type="button" class="inline-flex min-h-11 cursor-pointer items-center gap-1 text-primary" aria-expanded={open} aria-controls="review-card"
+        onclick={() => (open = !open)}>Review next<ChevronDown class={cn("size-4 transition-transform", open && "rotate-180")} aria-hidden="true" /></button>
+      <a href="#review" class="inline-flex min-h-11 items-center text-primary">See all</a>
+    </div>
+  </div>
+{/if}
+{#if t && (open || !viewport.phone)}
+  <section id="review-card" aria-label="To review" data-review-card class="mb-4 rounded-2xl border bg-card p-4">
     <div class="mb-3 flex items-center justify-between text-[13px]">
       <h2 class="font-semibold tracking-wide text-muted-foreground uppercase">To review · {(at % items.length) + 1} of {Math.max(total, items.length)}</h2>
       <a href="#review" class="font-medium text-primary">See all</a>

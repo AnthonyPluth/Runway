@@ -26,7 +26,9 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { amountLabel, isFiltered, KINDS, txShow } from "$lib/filters.svelte";
+  import { amountLabel, isFiltered, KINDS, rangeLabel, txShow } from "$lib/filters.svelte";
+  import { viewport } from "$lib/phone.svelte";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import { fmtSigned, plural } from "$lib/format";
   import DateRange from "$lib/components/transactions/DateRange.svelte";
   import MoreFilters from "$lib/components/transactions/MoreFilters.svelte";
@@ -90,6 +92,11 @@
   loadUpcoming();
 
   let selecting = $state(false);
+  // On a phone: the filters behind one button, the review card behind a summary line. Both stay as the person left them.
+  let filtersOpen = $state(false);
+  let reviewOpen = $state(false);
+  // How many of the secondary filters are on (the search and the primary chips aren't counted: they stay in view).
+  const filterCount = $derived((review && txs.f.account ? 1 : 0) + (txs.f.category ? 1 : 0) + (txs.f.from || txs.f.to ? 1 : 0) + (txs.f.kind ? 1 : 0) + (txs.f.min || txs.f.max ? 1 : 0));
 
   // The review card (All only): what is waiting for review, loaded on its own so the filters of the list below don't
   // narrow it. A decision takes the transaction out of it at once; an undo loads it again (reloadWas).
@@ -306,17 +313,27 @@
     {#if app.state?.ai_configured}<AiLog bind:this={aiLog} />{/if}
   {/if}
 
-  <div class="relative mb-3 w-full">
-    <Search class="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-    <Input type="search" placeholder="Search" aria-label="Search transactions" title="Merchant, bank’s text, category, note or amount" class="h-11 w-full rounded-full pl-10"
-      value={txs.f.q} oninput={(e) => txs.search(e.currentTarget.value)} />
+  <div class="mb-3 flex w-full items-center gap-2">
+    <div class="relative min-w-0 flex-1">
+      <Search class="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      <Input type="search" placeholder="Search" aria-label="Search transactions" title="Merchant, bank’s text, category, note or amount" class="h-11 w-full rounded-full pl-10"
+        value={txs.f.q} oninput={(e) => txs.search(e.currentTarget.value)} />
+    </div>
+    {#if viewport.phone}
+      <!-- The secondary filters (account on Review, category, dates, kind, amount) sit behind this one button; the active ones stay summarized below. -->
+      <Button variant="outline" class={cn("h-11 shrink-0 rounded-full", filterCount && "border-primary bg-primary/15 text-primary")} aria-expanded={filtersOpen} aria-controls="tx-filters"
+        aria-label={filterCount ? `Filters (${filterCount} on)` : "Filters"} onclick={() => (filtersOpen = !filtersOpen)}>
+        <SlidersHorizontal aria-hidden="true" />Filters{#if filterCount}<span class="tabular-nums" data-filter-count>{filterCount}</span>{/if}
+      </Button>
+    {/if}
   </div>
   {#if !review}
     <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} reviewCount={app.state?.review_count || 0} bind:pending={pendingOnly}
       onall={() => { pendingOnly = false; txs.clearFilters(); }} onaccount={txs.load} />
   {/if}
 
-  <div class="mb-3 flex flex-wrap items-center gap-2">
+  <div id="tx-filters" class={cn("mb-3 flex flex-wrap items-center gap-2", viewport.phone && !filtersOpen && !isFiltered(txs.f) && "hidden")}>
+    {#if !viewport.phone || filtersOpen}
     {#if review}
     <NativeSelect aria-label="Account" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-48" bind:value={txs.f.account} onchange={txs.load}>
       <option value="">All accounts</option>
@@ -330,6 +347,12 @@
     </NativeSelect>
     <DateRange from={txs.f.from} to={txs.f.to} note={txs.f.scope === "budget" ? "Budget accounts" : ""} onchange={txs.setDates} />
     <MoreFilters kind={txs.f.kind} min={txs.f.min} max={txs.f.max} onchange={txs.setMore} />
+    {:else}
+      <!-- Closed on a phone: what is on, each with its own ✕ (the account on Review; All has it as a chip above). -->
+      {#if review && txs.f.account}{@render chip((() => { const a = accounts.find((x) => x.id === txs.f.account); return a ? accountName(a) : txs.f.account; })(), "Show every account", () => { txs.f.account = ""; txs.load(); })}{/if}
+      {#if txs.f.category}{@render chip(txs.f.category === "__none__" ? "Uncategorized" : txs.f.category, "Show every category", () => { txs.f.category = ""; txs.load(); })}{/if}
+      {#if txs.f.from || txs.f.to}{@render chip(rangeLabel(txs.f.from, txs.f.to), "Show all dates", () => txs.setDates("", ""))}{/if}
+    {/if}
     {#if txs.f.kind}{@render chip(KINDS.find((k) => k.value === txs.f.kind)?.label ?? txs.f.kind, "Show every kind", () => txs.setMore({ kind: "" }))}{/if}
     {#if txs.f.min || txs.f.max}{@render chip(amountLabel(txs.f.min, txs.f.max), "Any amount", () => txs.setMore({ min: "", max: "" }))}{/if}
     {#if isFiltered(txs.f)}
@@ -339,7 +362,7 @@
 
   {#if review}<ReviewBar {rv} />{/if}
   {#if !review && queue.length}
-    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} onsubmit={decideCard} onmore={moreQueue} />
+    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} bind:open={reviewOpen} onsubmit={decideCard} onmore={moreQueue} />
   {/if}
 
   {#if !review && txs.list}
