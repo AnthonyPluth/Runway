@@ -1,14 +1,17 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import BarChart from "$lib/components/investments/BarChart.svelte";
+  import AccountsCard from "$lib/components/investments/AccountsCard.svelte";
+  import AllocationCard from "$lib/components/investments/AllocationCard.svelte";
   import HandTracked from "$lib/components/investments/HandTracked.svelte";
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
+  import WorthALook from "$lib/components/investments/WorthALook.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
-  import type { AllocKey, Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
+  import type { Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
   import RefreshFailed from "$lib/components/networth/RefreshFailed.svelte";
   import { plaidProblem } from "$lib/components/settings/plaidErrors";
   import type { PlaidStatus } from "$lib/components/settings/types";
@@ -18,10 +21,8 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { barWidth, fmt, fmt0, fmtDateTime, pct as share, plural, shortMoney } from "$lib/format";
+  import { fmt, fmt0, fmtDateTime, plural, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
-  import Check from "@lucide/svelte/icons/check";
-  import Info from "@lucide/svelte/icons/info";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { tick } from "svelte";
   import { errMsg } from "$lib/act";
@@ -127,7 +128,6 @@
     document.getElementById("inv-holdings")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const ALLOC: [AllocKey, string][] = [["asset_class", "Asset class"], ["account", "Account"], ["sector", "Sector"], ["holding", "Top holdings"]];
 </script>
 
 {#if error && !status}
@@ -243,51 +243,11 @@
   </Card.Root>
 
   <div class="mb-6 grid gap-6 lg:grid-cols-2">
-    <Card.Root>
-      <Card.Header class="max-sm:has-data-[slot=card-action]:grid-cols-1">
-        <Card.Title>Allocation</Card.Title>
-        <Card.Action class="min-w-0 max-w-full overflow-x-auto max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-2 max-sm:justify-self-start">
-          <Segmented label="Allocation by" value={inv.allocTab} onchange={(v) => (inv.allocTab = v as AllocKey)}
-            options={ALLOC.map(([value, label]) => ({ value, label }))} />
-        </Card.Action>
-      </Card.Header>
-      <Card.Content>
-        {#if d.allocation[inv.allocTab]?.length}
-          <table class="w-full text-sm">
-            <tbody>
-              {#each d.allocation[inv.allocTab] as a (a.name)}
-                <tr class="border-t border-border first:border-t-0 [&>td]:py-2">
-                  <td class="pr-3">{a.name}</td>
-                  <td class="w-[45%] pr-3"><span class="block h-1.5 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(a.share)}></span></span></td>
-                  <td class="pr-3 text-right tabular-nums">{share(a.share)}</td>
-                  <td class="text-right text-muted-foreground tabular-nums">{fmt0(a.value)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </Card.Content>
-    </Card.Root>
-    <Card.Root>
-      <Card.Header><Card.Title>Checks</Card.Title></Card.Header>
-      <Card.Content>
-        <ul>
-          {#each d.xray as r (r.name)}
-            <li class="flex gap-3 border-t border-border py-2 first:border-t-0">
-              <span class={cn("mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-background",
-                r.ok ? "bg-[var(--good)]" : r.info ? "bg-muted-foreground" : "bg-destructive")} aria-hidden="true">
-                {#if r.ok}<Check class="size-3.5" />{:else if r.info}<Info class="size-3.5" />{:else}<TriangleAlert class="size-3" />{/if}
-              </span>
-              <div>
-                <b>{r.name}</b> <span class="ml-1 text-xs text-muted-foreground">{r.ok ? "looks fine" : r.info ? "note" : "worth a look"}</span>
-                <div class="text-sm text-muted-foreground">{r.detail}</div>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      </Card.Content>
-    </Card.Root>
+    <AllocationCard allocation={d.allocation} />
+    <AccountsCard accounts={d.accounts} holdings={d.holdings} />
   </div>
+
+  <WorthALook checks={d.xray} />
 
   <Card.Root class="mb-6">
     <Card.Header>

@@ -49,6 +49,8 @@ export interface Holding {
 export interface InvAccount {
   id: string;
   item_id: string;
+  /** The Settings → Accounts id a Plaid account is matched to (a SimpleFIN one's is `id` without its "sf:"). */
+  account_id?: string | null;
   name: string | null;
   official_name: string | null;
   subtype: string | null;
