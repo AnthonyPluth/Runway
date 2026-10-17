@@ -24,9 +24,9 @@
   // expected this month (recurring payments that haven't come yet, `expected`) is the bar's lighter part after what's spent.
   // `income`: an income category, whose budget is what's expected to come in and `spent` what has. More is good: its
   // bar is green, going over isn't a warning, and it has no rollover or card. Whether a budget's left rolls over is
+  // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
   // `locked`: the page isn't sure these figures are the month it's showing (another month is loading, or a reload
   // failed), so every control that changes a budget is off until it is.
-  // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
   let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, locked = false, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; income?: boolean; pace: number; payAccounts: PayAccount[];
     account?: string | null; locked?: boolean; onsave: (category: string, amount: string) => void; onchanged: () => void;
