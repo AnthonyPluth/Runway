@@ -57,7 +57,7 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
    ```
    Your existing data in `./data` is used as-is.
 3. Open `RUNWAY_PUBLIC_URL`. You're sent to your provider to sign in, then back to Runway.
-   Sign out with the arrow next to your name at the bottom of the sidebar.
+   Sign out with the arrow next to your name at the bottom of the sidebar (in the Menu on a tablet).
 
 If a setting is missing, the container stops with a message saying which one (see the logs).
 

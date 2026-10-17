@@ -44,8 +44,12 @@ describe("StatStrip", () => {
     expect(screen.getByText("1 card")).toHaveClass("text-muted-foreground");
   });
 
-  it("lays out as a two-column grid on phones and compact tiles from md up", () => {
+  it("sizes its columns by its own width, not the screen's, so a tablet with a rail still fits cards", () => {
     const { container } = render(StatStrip, { items: [{ label: "A", value: "1" }] });
-    expect(container.firstElementChild).toHaveClass("grid-cols-2", "md:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]");
+    expect(container.firstElementChild).toHaveClass("@container");
+    const dl = container.querySelector("dl")!;
+    expect(dl).toHaveClass("grid-cols-2", "@lg:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]");
+    expect(dl.className).not.toMatch(/(^|\s)md:/);
+    expect(screen.getByText("1")).toHaveClass("@lg:text-[26px]");
   });
 });

@@ -199,7 +199,7 @@
     </div>
   </section>
 
-  <StatStrip class="mb-6 md:grid-cols-4" items={stats} />
+  <StatStrip class="mb-6 @2xl:grid-cols-4" items={stats} />
   {#if d.cost_missing}
     <p class="-mt-3 mb-6 text-sm text-muted-foreground">
       <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d.cost_missing} holding{d.cost_missing === 1 ? "" : "s"} ({fmt0(d.cost_missing_value)}) need a cost basis</a>

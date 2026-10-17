@@ -116,6 +116,112 @@ describe("Sidebar", () => {
   });
 });
 
+describe("Sidebar as a tablet rail", () => {
+  it("is 72px wide from 768 to 1023 and the full 256px sidebar from 1024", () => {
+    app.state = state();
+    render(Sidebar);
+    const aside = screen.getByRole("complementary");
+    // The rail: and wide: variants are the tablet and desktop media queries (app.css), so these are the widths at each size.
+    expect(aside).toHaveClass("w-64", "rail:w-[72px]", "desktop:flex", "hidden");
+    expect(aside.className).not.toMatch(/(^|\s)(md|lg):/);
+  });
+
+  it("keeps every destination's accessible name, and shows the label as a tooltip on hover and keyboard focus", () => {
+    app.state = state();
+    render(Sidebar);
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    for (const name of ["Overview", "Transactions", "Budget", "Investments", "Net worth", "Churning"]) {
+      const link = within(nav).getByRole("link", { name });
+      expect(link).toHaveClass("rail:size-11", "group/nav");
+      const tip = within(link).getByText(name);
+      expect(tip).toHaveClass("rail:opacity-0", "rail:group-hover/nav:opacity-100", "rail:group-focus-visible/nav:opacity-100");
+    }
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveClass("rail:size-11");
+  });
+
+  it("lights the current destination in the rail, and badges Transactions on the icon", () => {
+    app.state = state({ review_count: 7 });
+    route.page = "budget";
+    render(Sidebar);
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).getByRole("link", { name: "Budget" })).toHaveClass("rail:before:bg-primary", "bg-sidebar-accent");
+    expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveClass("rail:before:bg-primary");
+    expect(within(nav).getByRole("link", { name: /Transactions/ })).toHaveTextContent("7");
+    expect(screen.getByText("7")).toHaveClass("rail:absolute");
+  });
+
+  it("has a Menu button that opens a sheet with the full labels, the account and sync details and sign-out", async () => {
+    app.state = state({ version: "1.4.0", user: { name: "Ann Lee", email: "ann@x.com" }, review_count: 3, sync_warnings: ["Chase: log in again"] });
+    render(Sidebar);
+    const menu = screen.getByRole("button", { name: "Menu, Synced · 1 bank needs attention" });
+    expect(screen.getByTestId("sync-dot")).toHaveClass("bg-warning");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(menu);
+    const sheet = screen.getByRole("dialog");
+    const pages = within(sheet).getByRole("navigation", { name: "All pages" });
+    expect(within(pages).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(
+      ["Overview", "Transactions 3", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning", "Settings"]);
+    expect(within(sheet).getByRole("link", { name: "Net worth" })).toHaveAttribute("href", "#networth");
+    expect(within(sheet).getByText("Ann Lee")).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "Synced · 1 bank needs attention" })).toHaveAttribute("href", "#setup/connections");
+    expect(within(sheet).getByText("Chase: log in again")).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "Sign out" })).toHaveAttribute("href", "/auth/logout");
+  });
+
+  it("traps focus in the menu sheet and gives it back to Menu on Escape", async () => {
+    app.state = state();
+    render(Sidebar);
+    const menu = screen.getByRole("button", { name: "Menu" });
+    await userEvent.click(menu);
+    const sheet = screen.getByRole("dialog");
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    for (let i = 0; i < 20; i++) await userEvent.tab();
+    expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(menu).toHaveFocus();
+  });
+
+  it("slides the menu in from the left, where the rail is", async () => {
+    app.state = state();
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: "Menu" }));
+    const sheet = screen.getByRole("dialog");
+    expect(sheet).toHaveClass("md:left-0", "md:data-[state=open]:slide-in-from-left", "md:data-[state=closed]:slide-out-to-left");
+    expect(sheet).not.toHaveClass("md:data-[state=open]:slide-in-from-right", "md:right-0");
+  });
+
+  it("closes the menu when you follow the sync warning, even from Settings", async () => {
+    app.state = state({ sync_warnings: ["Chase: log in again"] });
+    route.page = "setup"; route.sub = "";
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: /^Menu/ }));
+    const link = within(screen.getByRole("dialog")).getByRole("link", { name: "Synced · 1 bank needs attention" });
+    link.addEventListener("click", (e) => e.preventDefault());   // (no hash change left over for the next test)
+    await userEvent.click(link);
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes the menu when only the part after the slash changes", async () => {
+    app.state = state();
+    route.page = "setup"; route.sub = "";
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: "Menu" }));
+    route.sub = "connections";
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes the menu when you go to a page", async () => {
+    app.state = state();
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: "Menu" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "Reports" }));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});
+
 describe("MobileNav", () => {
   it("has the main tabs and a More button, with the rest tucked away", () => {
     app.state = state();
