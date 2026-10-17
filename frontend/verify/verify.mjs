@@ -31,9 +31,9 @@ export function findChromium(env = process.env, exists = existsSync, list = read
  *  that fits in a pull request (`make pr-screenshots`). */
 export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
 
-/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | screenshot | reload | authenticator } ] }:
+/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
-const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string",
+const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", screenshot: "string", tab: "object", expect_focus: "string", expect_inert: "string",
   reload: "boolean", authenticator: "string" };
 // The virtual authenticator's states an `authenticator` step sets (a signed_in flow's): Face ID that works, or that fails.
 const AUTHENTICATOR = ["verified", "unverified"];
@@ -88,6 +88,20 @@ async function runStep(page, step, shot) {
     await el.waitFor({ timeout });
     const got = await el.innerText();
     if (!got.includes(step.expect_text.text)) throw new Error(`expected "${step.expect_text.text}" in ${step.expect_text.selector}, found "${got.slice(0, 80)}"`);
+  } else if ("tab" in step) {   // the real keyboard: Tab (or Shift+Tab) `count` times, each landing inside `stay_in`
+    const { count = 1, shift = false, stay_in: within } = step.tab;
+    for (let i = 1; i <= count; i++) {
+      await page.keyboard.press(shift ? "Shift+Tab" : "Tab");
+      if (!within) continue;
+      const inside = await page.evaluate((sel) => !!document.activeElement?.closest(sel), within);
+      if (!inside) throw new Error(`${shift ? "Shift+Tab" : "Tab"} ${i} left ${within}, onto ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
+    }
+  } else if ("expect_focus" in step) {   // the focused element matches the selector
+    await page.waitForFunction((sel) => !!document.activeElement?.matches(sel), step.expect_focus, { timeout })
+      .catch(async () => { throw new Error(`expected focus on ${step.expect_focus}, found ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
+  } else if ("expect_inert" in step) {   // the element, or something around it, is inert
+    const inert = await page.locator(step.expect_inert).first().evaluate((el) => !!el.closest("[inert]"), undefined, { timeout });
+    if (!inert) throw new Error(`expected ${step.expect_inert} to be inert`);
   } else if ("screenshot" in step) {
     await shot(step.screenshot);
   } else if ("reload" in step) {   // opening the app again (a launch), not just another route

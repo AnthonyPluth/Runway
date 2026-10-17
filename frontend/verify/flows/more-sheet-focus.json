@@ -1,0 +1,20 @@
+{
+  "name": "more-sheet-focus",
+  "page": "overview",
+  "viewports": ["phone"],
+  "steps": [
+    { "goto": "#overview" },
+    { "click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')" },
+    { "wait_for": "[role=dialog]" },
+    { "expect_inert": "nav[aria-label=Main]:has(button[aria-haspopup=dialog])" },
+    { "screenshot": "open" },
+    { "tab": { "count": 16, "stay_in": "[role=dialog]" } },
+    { "tab": { "count": 16, "shift": true, "stay_in": "[role=dialog]" } },
+    { "press": { "selector": "[role=dialog]", "key": "Escape" } },
+    { "expect_focus": "nav button[aria-haspopup=dialog]" },
+    { "click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')" },
+    { "wait_for": "[role=dialog]" },
+    { "click": "[role=dialog] button:has-text('Close')" },
+    { "expect_focus": "nav button[aria-haspopup=dialog]" }
+  ]
+}
