@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-184 routes; 27 have no test yet.
+185 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -113,6 +113,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `GET /api/plaid/oauth_resume` | `connections.py:api_plaid_oauth_resume` | `lib/components/settings/plaid.svelte.ts` | `test_plaidbank.py` | [using/features](/Runway/using/features/) |
 | `GET /api/investments` | `investments.py:api_investments` | `lib/components/investments/InvestmentsView.svelte`, `lib/components/networth/RetirementView.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `GET /api/investments/summary` | `investments.py:api_investments_summary` | `lib/components/overview/InvestmentsCard.svelte` | `test_api_contract.py`, `test_investments.py` | [using/features](/Runway/using/features/) |
+| `GET /api/investments/holding/{id}` | `investments.py:api_investments_holding` | `lib/components/investments/HoldingDetail.svelte` | `test_api_contract.py`, `test_investments.py` | [using/features](/Runway/using/features/) |
 | `GET /api/networth` | `networth.py:api_networth` | `lib/components/overview/SummaryTiles.svelte`, `pages/NetWorth.svelte` | `test_networth.py` | [contributing/orm](/Runway/contributing/orm/) |
 | `POST /api/assets` | `networth.py:api_asset_add` | `lib/components/networth/AssetForm.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `POST /api/assets/{id}` | `networth.py:api_asset_update` | `lib/components/networth/AssetCard.svelte`, `lib/components/networth/AssetForm.svelte` | `test_networth.py` | [using/features](/Runway/using/features/) |
@@ -132,7 +133,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/investments/plan` | `investments.py:api_plan_save` | `lib/components/investments/RetirementPlanner.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `GET /api/tracked/{id}` | `investments.py:api_tracked_get` | `lib/components/investments/TrackedEditor.svelte` | `test_simplefin_invest.py` | [using/features](/Runway/using/features/) |
 | `POST /api/tracked/{id}` | `investments.py:api_tracked_save` | `lib/components/investments/TrackedEditor.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
-| `POST /api/investments/cost` | `investments.py:api_cost_basis` | `lib/components/investments/HoldingsTable.svelte` | `test_simplefin_invest.py` | [using/features](/Runway/using/features/) |
+| `POST /api/investments/cost` | `investments.py:api_cost_basis` | `lib/components/investments/CostBasisEditor.svelte` | `test_simplefin_invest.py` | [using/features](/Runway/using/features/) |
 | `POST /api/settings` | `state.py:api_settings` | `lib/components/overview/ForecastSettings.svelte`, `lib/components/overview/SetupChecklist.svelte`, `lib/components/settings/AccountRow.svelte`, `lib/components/settings/AiCard.svelte`, `pages/Overview.svelte` | `test_api_handlers.py`, `test_api_validation.py`, `test_categorize.py`, `test_churn_found.py`, `test_http_pinned.py`, `test_http_server.py`, `test_mcp.py`, `test_security.py` | [using/features](/Runway/using/features/) |
 | `GET /api/equity` | `equity.py:api_equity` | `lib/components/networth/EquityView.svelte`, `lib/components/settings/CartaCard.svelte` | none (allowed) | [using/features](/Runway/using/features/) |
 | `POST /api/equity/companies` | `equity.py:api_equity_company_add` | `lib/components/networth/EquityView.svelte` | none (allowed) | [using/features](/Runway/using/features/) |

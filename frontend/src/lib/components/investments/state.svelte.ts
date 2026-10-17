@@ -13,5 +13,7 @@ export const inv = $state({
   sort: { key: "value" as SortKey, dir: -1 },
   holdView: "day" as HoldView,
   /** The phone list: by value, or by the shown figure after a second tap on the switch's active choice. */
+  /** Where the page was scrolled to when you opened a holding's page, so coming back puts it there (0: nowhere to go back to). */
+  scrollY: 0,
   listSort: { by: "value" as "value" | "figure", dir: -1 },
 });

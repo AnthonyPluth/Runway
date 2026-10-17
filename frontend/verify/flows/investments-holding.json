@@ -1,0 +1,21 @@
+{
+  "name": "investments-holding",
+  "page": "investments",
+  "viewports": ["tablet", "desktop"],
+  "steps": [
+    { "wait_for": "#inv-holdings tbody tr" },
+    { "click": "#inv-holdings tbody tr a" },
+    { "wait_for": "[data-testid=holding-accounts] li" },
+    { "wait_for": "[data-testid=holding-since]" },
+    { "screenshot": "holding" },
+    { "scroll_to": "[data-testid=holding-position]" },
+    { "screenshot": "holding-position" },
+    { "click": "role=radio[name='3M']" },
+    { "wait_for": "[data-testid=holding-since]" },
+    { "screenshot": "holding-3m" },
+    { "goto": "#investments/holding/nope" },
+    { "wait_for": "[data-testid=holding-missing]" },
+    { "expect_text": { "selector": "[data-testid=holding-missing]", "text": "This holding isn't in your portfolio any more" } },
+    { "screenshot": "holding-missing" }
+  ]
+}

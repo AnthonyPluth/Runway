@@ -13,7 +13,7 @@ from runway.providers import plaid, prices
 from runway.domain import planner, portfolio
 from runway.storage.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta,
                                    Security, Transaction)
-from tests.shared import DbCase, TODAY, fetch, own_database, serve
+from tests.shared import DbCase, TODAY, fetch, freeze_today, own_database, serve
 
 
 
@@ -972,3 +972,61 @@ class SummaryEmptyTests(DbCase):
         out = investments.api_investments_summary(self.c, {}, {})
         self.assertEqual(out, {"empty": True, "total": 0.0, "day_change": None, "day_change_pct": None, "market": "closed",
                                "movers": [], "trend": [], "positions": []})
+
+
+class HoldingDetailTests(Base):
+    """GET /api/investments/holding/{id}: one holding's row, its closes over the period and its dividends."""
+    def setUp(self):
+        super().setUp()
+        freeze_today(self)
+        self.c.execute(insert(InvAccount).values(id="B", item_id="it1", name="Roth IRA", type="investment", subtype="ira", balance=0))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="VTI", quantity=10, price=300, value=3000, cost_basis=2500))
+        self.c.execute(insert(Holding).values(account_id="B", security_id="VTI", quantity=5, price=300, value=1500, cost_basis=None))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=500, price=1, value=500, cost_basis=500))
+        for k, close in ((40, 250.0), (20, 270.0), (1, 290.0), (0, 300.0)):
+            self.price("VTI", (TODAY - timedelta(days=k)).isoformat(), close)
+        self.tx("d1", (TODAY - timedelta(days=30)).isoformat(), "cash", "dividend", -12.5, "VTI")
+        self.tx("d2", (TODAY - timedelta(days=100)).isoformat(), "cash", "qualified dividend", -7.5, "VTI")
+        self.tx("d3", (TODAY - timedelta(days=400)).isoformat(), "cash", "dividend", -99, "VTI")   # over a year ago
+        self.tx("d4", (TODAY - timedelta(days=10)).isoformat(), "cash", "interest", -3, "SPAXX")
+
+    def get(self, sec, period="1Y"):
+        from runway.server.api import investments
+        return investments.api_investments_holding(self.c, {"period": [period]}, {}, sec)
+
+    def test_the_reply_for_a_holding(self):
+        out = self.get("VTI")
+        h = out["holding"]
+        self.assertEqual((h["ticker"], h["quantity"], h["value"], h["price"]), ("VTI", 15, 4500, 300))
+        self.assertEqual(h["accounts"], ["Brokerage", "Roth IRA"])
+        self.assertEqual([(lot["account_name"], lot["quantity"], lot["value"]) for lot in h["lots"]],
+                         [("Brokerage", 10, 3000), ("Roth IRA", 5, 1500)])
+        self.assertIsNone(h["gain"])   # one lot has no cost basis, so the whole holding has none
+        self.assertEqual(out["total"], 5000.0)
+        self.assertAlmostEqual(h["allocation"], 0.9)
+        self.assertEqual(h["day_change"], 150.0)   # 15 shares x ($300 - $290)
+        self.assertEqual(out["dividends_12m"], 20.0)
+
+    def test_closes_over_the_period_and_the_change_since_its_start(self):
+        # a month back is 30 days: the close 40 days ago is the one in force then, so it starts the line
+        hist = self.get("VTI", "1M")["history"]
+        self.assertEqual(hist["prices"], [250.0, 270.0, 290.0, 300.0])
+        self.assertEqual((hist["start_price"], hist["change"]), (250.0, 50.0))
+        self.assertAlmostEqual(hist["change_pct"], 0.2)
+        self.assertEqual(self.get("VTI", "1M")["history"]["dates"][-1], TODAY.isoformat())
+        self.price("VTI", (TODAY - timedelta(days=31)).isoformat(), 260.0)   # closer to the start: it now starts the line
+        self.assertEqual(self.get("VTI", "1M")["history"]["prices"], [260.0, 270.0, 290.0, 300.0])
+        self.assertEqual(self.get("VTI", "nonsense")["period"], "1Y")
+
+    def test_a_holding_without_closes_has_an_empty_history(self):
+        self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=2, price=50, value=100))
+        out = self.get("XYZ")
+        self.assertEqual(out["history"], {"dates": [], "prices": [], "start_price": None, "change": None, "change_pct": None})
+        self.assertEqual(out["dividends_12m"], 0.0)
+
+    def test_unknown_and_cash_securities_are_404(self):
+        from runway.server.common import ApiError
+        for sec in ("NOPE", "SPAXX"):   # not held at all / cash, which has no page
+            with self.assertRaises(ApiError) as caught:
+                self.get(sec)
+            self.assertEqual(caught.exception.status, 404)
