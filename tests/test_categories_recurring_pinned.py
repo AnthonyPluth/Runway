@@ -386,6 +386,10 @@ class RecurringPreviewTests(Base):
         self.assertEqual(self.dates(frequency="monthly", end_date="2026-11-30"), ["2026-11-02", "2026-11-30"])
         self.assertEqual(self.dates(frequency="once", anchor_date="2026-12-12"), ["2026-12-14"])
 
+    def test_a_date_years_ahead_still_has_its_dates(self):
+        self.assertEqual(self.dates(frequency="once", anchor_date="2029-12-12"), ["2029-12-12"])
+        self.assertEqual(self.dates(frequency="monthly", anchor_date="2030-01-15"), ["2030-01-15", "2030-02-15", "2030-03-15"])
+
     def test_incomplete_drafts_are_refused(self):
         for draft in ({"anchor_date": ""}, {"amount": None}, {"frequency": "semimonthly", "dates": ""},
                       {"frequency": "nope"}, {"end_date": "2025-01-01"}):

@@ -52,7 +52,7 @@
     <p class="text-destructive" role="alert">{failed}</p>
   {:else if dates.length}
     <ul class="flex flex-col gap-0.5" class:opacity-60={waiting}>
-      {#each dates as d (d)}
+      {#each dates as d, i (`${d}-${i}`)}
         <li class="flex flex-wrap items-baseline gap-x-2">
           <span class="font-medium">{fmtDow(d)}</span>
           <span class="tabular-nums">{out ? "−" : "+"}{fmt(amount)}</span>

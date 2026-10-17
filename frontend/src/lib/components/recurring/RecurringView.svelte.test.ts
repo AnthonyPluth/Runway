@@ -386,6 +386,18 @@ describe("Recurring page", () => {
         await waitFor(() => expect(previews().at(-1)![1]).toMatchObject({ body: { amount: 50 } }));
       });
 
+      it("lists two occurrences that settle on the same day (a semimonthly schedule can) without a duplicate-key error", async () => {
+        const err = vi.spyOn(console, "error").mockImplementation(() => {});
+        await open({ "/api/recurring/preview": { dates: ["2026-03-31", "2026-03-31", "2026-04-15"] } });
+        await fill();
+        await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "semimonthly");
+        await userEvent.type(screen.getByLabelText(/Days of the month/), "30, 31");
+        const rows = await screen.findAllByText("Tue, Mar 31");
+        expect(rows).toHaveLength(2);
+        expect(err).not.toHaveBeenCalled();
+        err.mockRestore();
+      });
+
       it("shows a single date for a one-time item", async () => {
         await open({ "/api/recurring/preview": { dates: ["2026-04-20"] } });
         await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "50");

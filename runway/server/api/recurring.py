@@ -175,8 +175,12 @@ def api_recurring_preview(_conn, _q, body):
                            else "List the days of the month like 1, 15") from None
         listed = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
     item = {"frequency": freq, "anchor_date": anchor, "dates": listed, "end_date": end, "amount": amount}
-    # (start, end] with start a day before today, so today counts; a one-time item shows its date even once it has passed.
-    start = (min(date.today(), date.fromisoformat(anchor)) if freq == "once" else date.today()) - timedelta(days=1)
+    # (start, end]: from the day before today, so today counts (a one-time item shows its date even once it has passed). A date
+    # further out starts the search a week before it (a date moved off a weekend or holiday can land a few days earlier).
+    day = date.fromisoformat(anchor)
+    start = (min(date.today(), day) if freq == "once" else date.today()) - timedelta(days=1)
+    if day > date.today():
+        start = day - timedelta(days=7)
     found = forecast.occurrences(item, start, start + timedelta(days=1200))
     return {"dates": [d.isoformat() for d in found[:1 if freq == "once" else PREVIEW_COUNT]]}
 
