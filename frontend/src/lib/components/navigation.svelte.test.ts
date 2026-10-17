@@ -244,8 +244,8 @@ describe("MobileNav", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(bar).toHaveClass("inset-x-4", "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]");
-    expect(bar.firstElementChild).toHaveClass("h-[66px]", "rounded-full", "backdrop-blur-xl");
+    expect(bar).toHaveClass("inset-x-0", "bottom-0", "border-t", "pb-[env(safe-area-inset-bottom)]", "backdrop-blur-xl");
+    expect(bar.firstElementChild).toHaveClass("h-[66px]", "grid-cols-5");
   });
 
   it("dots More when the sync needs attention, so it's seen without opening the sheet", async () => {

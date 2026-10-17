@@ -9,7 +9,7 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Settings from "@lucide/svelte/icons/settings";
 
-  // On a phone (lib/phone.svelte.ts): a floating tab bar along the bottom with the four pages you use most, and More for
+  // On a phone (lib/phone.svelte.ts): a tab bar docked to the bottom edge with the four pages you use most, and More for
   // the rest (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring and
   // Reports are in the sidebar's main group but go in More here: more tabs wouldn't fit a phone's width.
   // The shared sheet turns into a right-hand panel from 768px (md:). A phone turned sideways is wider than that but still a phone
@@ -66,9 +66,9 @@
   </Sheet.Content>
 </Sheet.Root>
 
-<!-- A floating pill: inset from the sides and lifted off the bottom, translucent over the page with a blur behind it. -->
-<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 desktop:hidden">
-  <div class="mx-auto grid h-[66px] max-w-lg grid-cols-5 items-stretch gap-0 rounded-full border bg-popover/80 p-0.5 min-[380px]:gap-0.5 min-[380px]:p-1 shadow-lg backdrop-blur-xl">
+<!-- A bar docked to the bottom edge, full width, above the home indicator and translucent over the page with a blur behind it. -->
+<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-0 bottom-0 z-50 border-t bg-popover/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl desktop:hidden">
+  <div class="grid h-[66px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
       <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}
