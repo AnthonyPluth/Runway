@@ -23,6 +23,7 @@
   import InvestmentsCard from "$lib/components/overview/InvestmentsCard.svelte";
   import SummaryTiles from "$lib/components/overview/SummaryTiles.svelte";
   import { comingUp } from "$lib/components/overview/comingUp";
+  import { setupReview } from "$lib/components/overview/forecastSheet.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -39,7 +40,10 @@
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
   const setup = $derived(app.state?.setup);
-  const setupLeft = $derived(!!setup && !setup.dismissed && !(setup.bank && setup.primary && setup.recurring && setup.budgets));
+  // Until you finish or dismiss it; with all four steps done it ends in the review of the forecast, which the forecast
+  // settings can bring back.
+  const setupLeft = $derived((!!setup && !setup.dismissed) || setupReview.open);
+  const toForecast = () => document.getElementById("forecast")?.scrollIntoView({ block: "start" });
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
@@ -165,9 +169,9 @@
         </div>
       </section>
     {/if}
-    {#if setupLeft}<SetupChecklist />{/if}
+    {#if setupLeft}<SetupChecklist fc={fc} onretry={() => load(days)} onfinish={toForecast} />{/if}
 
-    <div class="mb-4"><BalanceCard {fc} {days} shownDays={shown.days} {setDays} onchange={() => load(days)} /></div>
+    <div id="forecast" class="mb-4 scroll-mt-4"><BalanceCard {fc} {days} shownDays={shown.days} {setDays} onchange={() => load(days)} /></div>
     <div class="mb-6"><SummaryTiles /></div>
 
     <div class="grid items-start gap-6 lg:grid-cols-2">

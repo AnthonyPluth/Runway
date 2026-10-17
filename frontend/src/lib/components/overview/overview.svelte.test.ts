@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { cleanup, render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,16 +8,16 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
-import type { CardSummary } from "$lib/types";
+import type { CardSummary, Overview as OverviewData } from "$lib/types";
 import { tx } from "../../../test/fixtures";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
-import { forecastSheet } from "./forecastSheet.svelte";
+import { forecastSheet, setupReview } from "./forecastSheet.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
 import ThisMonth from "./ThisMonth.svelte";
 
 beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
-afterEach(() => { app.state = null; forecastSheet.open = false; vi.useRealTimers(); });
+afterEach(() => { app.state = null; forecastSheet.open = false; setupReview.open = false; vi.useRealTimers(); });
 
 describe("SetupChecklist", () => {
   const setup = (s: Partial<NonNullable<typeof app.state>["setup"]> = {}) => {
@@ -119,6 +119,114 @@ describe("SetupChecklist", () => {
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast.error).toHaveBeenCalledWith("Nope");
     expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe("SetupChecklist final review", () => {
+  const done = { bank: true, primary: true, recurring: true, budgets: true, dismissed: false };
+  const forecast = (extra: Partial<OverviewData> = {}): OverviewData => ({
+    today: "2026-09-30", dates: ["2026-09-30"], total: [1000], low: { date: "2026-09-30", balance: 1000 },
+    accounts: [{ id: "chk", name: "Everyday Checking", kind: "checking", balance: 1000 }],
+    events: [
+      { date: "2026-10-01", name: "Rent", amount: -1200, kind: "recurring", key: "r1" },
+      { date: "2026-10-05", name: "Paycheck", amount: 2000, kind: "recurring", key: "r2" },
+    ],
+    cards: [], unlinked_cards: [], warnings: [], warning_links: [],
+    budget: { monthly: 450, used: [{ category: "Groceries", amount: 450, account_id: "chk", account: "Checking", chosen: false }], skipped: [] },
+    ...extra,
+  });
+  const finishing = (props = {}) => { app.state = { connected: true, setup: done }; render(SetupChecklist, props); };
+
+  it("shows the review once all four steps are done, with what the forecast uses and an Edit link for each", async () => {
+    finishing({ fc: forecast() });
+    expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
+    expect(screen.getByText("4 of 4 done")).toBeInTheDocument();
+    expect(screen.getByText("Everyday Checking")).toBeInTheDocument();
+    expect(screen.getByText(/Paycheck, Oct 5/)).toBeInTheDocument();
+    expect(screen.getByText("1 bill coming up")).toBeInTheDocument();
+    expect(screen.getByText(/Rent, Oct 1/)).toBeInTheDocument();
+    expect(screen.getByText("No card payments need attention")).toBeInTheDocument();
+    expect(screen.getByText(/1 budget in the forecast, \$450\.00 a month/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit income" })).toHaveAttribute("href", "#recurring");
+    expect(screen.getByRole("link", { name: "Edit bills" })).toHaveAttribute("href", "#recurring");
+    expect(screen.getByRole("link", { name: "Edit card payments" })).toHaveAttribute("href", "#setup/accounts");
+    expect(screen.getByRole("link", { name: "Edit budgets" })).toHaveAttribute("href", "#budget");
+    await userEvent.click(screen.getByRole("button", { name: "Edit forecast account" }));
+    expect(forecastSheet.open).toBe(true);
+    expect(screen.queryByText(/safe|complete/i)).toBeNull();
+  });
+
+  it("does not show it while a step is still to do", () => {
+    app.state = { connected: true, setup: { ...done, budgets: false } };
+    render(SetupChecklist, { fc: forecast() });
+    expect(screen.queryByRole("heading", { name: "Review your forecast" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finish setup" })).toBeNull();
+  });
+
+  it("says specifically what is missing", () => {
+    finishing({ fc: forecast({ accounts: [], events: [], budget: null, unlinked_cards: [{ id: "v", name: "Visa" } as never] }) });
+    expect(screen.getByText("No forecast account chosen")).toBeInTheDocument();
+    expect(screen.getByText("No income scheduled")).toBeInTheDocument();
+    expect(screen.getByText("No bills scheduled")).toBeInTheDocument();
+    expect(screen.getByText("Visa: no statement yet")).toBeInTheDocument();
+    expect(screen.getByText("No budgets in the forecast")).toBeInTheDocument();
+  });
+
+  it("says when the forecast is loading, or couldn't load, and tries again", async () => {
+    const onretry = vi.fn();
+    finishing({ fc: null });
+    expect(screen.getByText("Loading your forecast…")).toBeInTheDocument();
+    cleanup();
+    finishing({ fc: null, fcError: new Error("Offline"), onretry });
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t load your forecast: Offline");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onretry).toHaveBeenCalled();
+  });
+
+  it("finishes with omissions, saves first, then brings the forecast into view, with Undo", async () => {
+    const onfinish = vi.fn();
+    vi.mocked(api).mockResolvedValue({});
+    vi.mocked(toast).mockClear();
+    finishing({ fc: forecast({ events: [], budget: null }), onfinish });
+    await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: true } });
+    expect(onfinish).toHaveBeenCalledOnce();
+    const [message, opts] = vi.mocked(toast).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => Promise<void> } }];
+    expect(message).toBe("Setup checklist dismissed");
+    await opts.action.onClick();
+    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: false } });
+  });
+
+  it("stays, says why and offers another try when finishing fails", async () => {
+    const onfinish = vi.fn();
+    vi.mocked(api).mockRejectedValueOnce(new Error("Nope"));
+    vi.mocked(toast).mockClear();
+    finishing({ fc: forecast(), onfinish });
+    await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t finish setup: Nope");
+    expect(onfinish).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+    vi.mocked(api).mockResolvedValue({});
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onfinish).toHaveBeenCalledOnce();
+  });
+
+  it("can be reopened with a step still to do, and Dismiss is still there early", async () => {
+    app.state = { connected: true, setup: { ...done, budgets: false } };
+    setupReview.open = true;
+    render(SetupChecklist, { fc: forecast() });
+    expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(setupReview.open).toBe(false);
+  });
+
+  it("keeps the early Dismiss and leaves the welcome screen without a review", () => {
+    finishing({ fc: forecast() });
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    cleanup();
+    app.state = { connected: false, setup: { ...done, bank: false } };
+    render(SetupChecklist, { welcome: true });
+    expect(screen.queryByRole("heading", { name: "Review your forecast" })).toBeNull();
   });
 });
 

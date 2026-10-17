@@ -341,6 +341,17 @@ describe("Overview on a phone", () => {
     expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
   });
 
+  it("ends setup in a review of the forecast once all four steps are done, and Finish setup puts it away", async () => {
+    viewport.phone = true;
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
+    expect(screen.getByText("No income scheduled")).toBeInTheDocument();
+    expect(screen.getByText("Rent, Oct 1 · $100.00")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: true } });
+  });
+
   it("welcomes a phone with the checklist before a bank is connected", async () => {
     viewport.phone = true;
     app.state = { ...app.state!, connected: false, setup: { bank: false, primary: false, recurring: false, budgets: false, dismissed: false } };

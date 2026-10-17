@@ -7,15 +7,22 @@
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import Check from "@lucide/svelte/icons/check";
-  import { openForecastSettings } from "./forecastSheet.svelte";
-  import { act } from "$lib/act";
+  import { openForecastSettings, setupReview } from "./forecastSheet.svelte";
+  import ForecastReview from "./ForecastReview.svelte";
+  import { act, errMsg } from "$lib/act";
+  import type { Overview } from "$lib/types";
 
   // Getting started: four steps that tick themselves off as you do them, each with a short line on what it means. On its
   // own (`welcome`) before a bank is connected; at the top of the Overview after that, until every step is done or you
   // put it away (with Undo). Until there's an account the later steps can't be done, so they wait, greyed. The forecast
   // account is chosen in the forecast settings on the Overview itself, so its step opens them there. Accounts Plaid found
   // that wait for a decision come first: those steps point at Settings → Accounts, where they're added.
-  let { welcome = false }: { welcome?: boolean } = $props();
+  // Once all four are done (or when it's brought back from the forecast settings) it ends with a review of what the
+  // forecast uses, from `fc` (the Overview's own figures: loading until it arrives, or its error), and Finish setup puts
+  // the checklist away like Dismiss does, then `onfinish` brings the forecast into view.
+  let { welcome = false, fc = null, fcError = null, onretry, onfinish }: {
+    welcome?: boolean; fc?: Overview | null; fcError?: Error | null; onretry?: () => void; onfinish?: () => void;
+  } = $props();
   const s = $derived(app.state?.setup);
   const undecided = $derived(app.state?.plaid_undecided ?? 0);
   const locked = $derived(!s?.bank);
@@ -37,6 +44,7 @@
   ]);
   const doneCount = $derived(steps.filter((x) => x.done).length);
   const next = $derived(steps.findIndex((x) => !x.done));
+  const reviewing = $derived(!welcome && (doneCount === 4 || setupReview.open));
 
   const setDismissed = async (on: boolean) => {
     await api("/api/settings", { method: "POST", body: { setup_dismissed: on } });
@@ -46,9 +54,21 @@
     if (!(await act(async () => { await setDismissed(true); }))) return;
     undoable("Setup checklist dismissed", () => setDismissed(false));
   }
+
+  // Saved first: the checklist only goes (and the forecast comes into view) once the server has it. A failure is said
+  // here, beside the button, which stays for another try.
+  let finishing = $state(false);
+  let finishError = $state("");
+  async function finish() {
+    finishing = true; finishError = "";
+    try { await setDismissed(true); } catch (e) { finishError = errMsg(e); return; } finally { finishing = false; }
+    setupReview.open = false;
+    undoable("Setup checklist dismissed", () => setDismissed(false));
+    onfinish?.();
+  }
 </script>
 
-<Card.Root class={cn(welcome ? "mx-auto mt-6 max-w-2xl md:mt-12" : "mb-6")}>
+<Card.Root id="setup-checklist" class={cn(welcome ? "mx-auto mt-6 max-w-2xl md:mt-12" : "mb-6")}>
   <Card.Header>
     {#if welcome}<img src="/logo.svg" alt="" width="40" height="40" class="mb-2" />{/if}
     <Card.Title class={welcome ? "text-2xl" : ""}>{welcome ? "Welcome to Runway" : "Finish setting up"}</Card.Title>
@@ -81,5 +101,12 @@
         </li>
       {/each}
     </ol>
+    {#if reviewing}
+      <ForecastReview {fc} error={fcError} {onretry} />
+      <div class="mt-4 flex flex-wrap items-center gap-3 border-t pt-4">
+        <Button onclick={finish} disabled={finishing} class="h-10 sm:h-8" size="sm">{finishError ? "Try again" : "Finish setup"}</Button>
+        {#if finishError}<span role="alert" class="text-sm text-destructive">Couldn’t finish setup: {finishError}</span>{/if}
+      </div>
+    {/if}
   </Card.Content>
 </Card.Root>
