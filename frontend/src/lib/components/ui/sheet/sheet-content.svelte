@@ -5,7 +5,8 @@
   import type { Snippet } from "svelte";
 
   // z-[60] keeps the sheet (and its backdrop) above MobileNav's tab bar and More menu (z-50).
-  let { ref = $bindable(null), class: className, children, ...restProps }: WithoutChildrenOrChild<Dialog.ContentProps> & { children?: Snippet } = $props();
+  // `side="left"` is for a panel that belongs to the left edge (the tablet rail's Menu): it slides in from there.
+  let { ref = $bindable(null), class: className, side = "right", children, ...restProps }: WithoutChildrenOrChild<Dialog.ContentProps> & { children?: Snippet; side?: "left" | "right" } = $props();
 </script>
 
 <Dialog.Portal>
@@ -19,7 +20,10 @@
       "data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom",
       // Desktop: right-hand panel.
       "md:inset-y-0 md:right-0 md:left-auto md:bottom-auto md:h-full md:max-h-none md:w-[440px] md:max-w-full md:rounded-none md:border-t-0 md:border-l md:pb-0",
-      "md:data-[state=open]:slide-in-from-bottom-0 md:data-[state=open]:slide-in-from-right md:data-[state=closed]:slide-out-to-bottom-0 md:data-[state=closed]:slide-out-to-right",
+      "md:data-[state=open]:slide-in-from-bottom-0 md:data-[state=closed]:slide-out-to-bottom-0",
+      side === "left"
+        ? "md:right-auto md:left-0 md:border-r md:border-l-0 md:data-[state=open]:slide-in-from-left md:data-[state=closed]:slide-out-to-left"
+        : "md:data-[state=open]:slide-in-from-right md:data-[state=closed]:slide-out-to-right",
       "duration-200",
       className,
     )}

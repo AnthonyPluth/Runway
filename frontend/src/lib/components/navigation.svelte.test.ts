@@ -177,6 +177,15 @@ describe("Sidebar as a tablet rail", () => {
     expect(menu).toHaveFocus();
   });
 
+  it("slides the menu in from the left, where the rail is", async () => {
+    app.state = state();
+    render(Sidebar);
+    await userEvent.click(screen.getByRole("button", { name: "Menu" }));
+    const sheet = screen.getByRole("dialog");
+    expect(sheet).toHaveClass("md:left-0", "md:data-[state=open]:slide-in-from-left", "md:data-[state=closed]:slide-out-to-left");
+    expect(sheet).not.toHaveClass("md:data-[state=open]:slide-in-from-right", "md:right-0");
+  });
+
   it("closes the menu when you go to a page", async () => {
     app.state = state();
     render(Sidebar);

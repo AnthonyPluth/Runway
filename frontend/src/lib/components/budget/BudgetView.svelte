@@ -122,7 +122,7 @@
 {/snippet}
 
 <!-- The month leads; the actions follow beside it when they fit, else on a row of their own (never squeezed or overlapping). -->
-<div class="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 [&>:last-child]:order-first">
+<div class="mb-6 flex flex-wrap items-center justify-end gap-4 rail:justify-between rail:gap-y-3 rail:[&>:last-child]:order-first">
   <BudgetSuggest month={b?.month ?? month} onchanged={refresh} />
   <MonthPicker month={b?.month ?? month} onchange={pick} />
 </div>

@@ -100,7 +100,7 @@
       {#if sync.href}<span class={cn("absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ring-sidebar", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}
       <span class={tip} aria-hidden="true">Menu</span>
     </Sheet.Trigger>
-    <Sheet.Content class="md:right-auto md:left-0 md:w-80 md:border-r md:border-l-0">
+    <Sheet.Content side="left" class="md:w-80">
       <Sheet.Header>
         <Sheet.Title class="flex items-center gap-2.5"><img src="/logo.svg" alt="" width="24" height="24" />Runway
           {#if s?.version}<span class="text-xs font-normal text-muted-foreground">{s.version}</span>{/if}</Sheet.Title>
