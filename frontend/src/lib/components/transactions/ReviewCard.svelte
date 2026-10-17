@@ -54,7 +54,7 @@
   <div class="mb-3 flex min-h-11 items-center justify-between gap-3 rounded-xl border bg-card px-4" data-review-summary>
     <p class="text-sm font-medium tabular-nums">{Math.max(total, items.length)} to review</p>
     <div class="flex items-center gap-3 text-sm font-medium">
-      <button type="button" class="inline-flex min-h-11 cursor-pointer items-center gap-1 text-primary" aria-expanded={open} aria-controls="review-card"
+      <button type="button" class="inline-flex min-h-11 cursor-pointer items-center gap-1 text-primary" aria-expanded={open} aria-controls={open ? "review-card" : undefined}
         onclick={() => (open = !open)}>Review next<ChevronDown class={cn("size-4 transition-transform", open && "rotate-180")} aria-hidden="true" /></button>
       <a href="#review" class="inline-flex min-h-11 items-center text-primary">See all</a>
     </div>

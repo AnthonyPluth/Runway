@@ -115,6 +115,7 @@ describe("Transactions on a phone: the review card", () => {
     expect(card()).toBeNull();
     expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "#review");
     expect(screen.getByRole("button", { name: "Review next" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Review next" })).not.toHaveAttribute("aria-controls");   // nothing to point at while collapsed
   });
 
   it("Review next reveals the existing card, and it decides as before", async () => {

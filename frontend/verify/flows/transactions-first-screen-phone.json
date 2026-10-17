@@ -11,7 +11,7 @@
     {
       "expect_above": {
         "selector": "[data-tx]",
-        "above": "nav[aria-label='Main']"
+        "above": "nav[aria-label='Main']:visible"
       }
     },
     {
