@@ -70,7 +70,8 @@ const MOVED: Record<string, [page: string, sub: string]> = {};
 
 function readHash(): void {
   const [path, query = ""] = (location.hash || "#overview").slice(1).split(/\?(.*)/s);
-  const [name, rawSub = ""] = path.split("/");
+  const [name, ...rest] = path.split("/");
+  const rawSub = rest.join("/");   // (more than one part after the page: #investments/holding/<id>)
   const [page, sub] = name === "budget" && rawSub === "recurring" ? ["recurring", ""]
     : MOVED[name] ?? [name === "settings" ? "setup" : name, rawSub];
   if ((page || "overview") !== route.page) newPage();   // a tab inside the same page keeps its data and place
