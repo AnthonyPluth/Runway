@@ -1,0 +1,33 @@
+{
+  "name": "transactions-first-screen-phone",
+  "page": "transactions",
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-review-summary]"
+    },
+    {
+      "expect_above": {
+        "selector": "[data-tx]",
+        "above": "nav[aria-label='Main']:visible"
+      }
+    },
+    {
+      "screenshot": "first-screen"
+    },
+    {
+      "click": "button:has-text('Filters')"
+    },
+    {
+      "wait_for": "select[aria-label='Category']"
+    },
+    {
+      "screenshot": "filters-open"
+    }
+  ],
+  "viewports": [
+    "phone"
+  ]
+}

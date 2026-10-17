@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { cleanup, render, screen } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 import { app } from "$lib/app.svelte";
-import { describe, expect, it, vi } from "vitest";
+import { viewport } from "$lib/phone.svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
 
@@ -15,6 +17,31 @@ const events = (n: number): UpcomingEvent[] => Array.from({ length: n }, (_, i) 
 const width = (wide: boolean) => vi.spyOn(window, "matchMedia").mockImplementation((q) => ({
   matches: wide, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false,
 }) as MediaQueryList);
+
+describe("Upcoming on a phone", () => {
+  afterEach(() => { cleanup(); viewport.phone = false; });
+
+  it("is collapsed to 'Upcoming · N' and opens with Show", async () => {
+    viewport.phone = true;
+    render(Upcoming, { props: { onchanged: vi.fn(), events: events(6) } });
+    const toggle = screen.getByRole("button", { name: "Show upcoming, 6" });
+    expect(screen.getByText("Upcoming · 6")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Bill 1")).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide upcoming, 6" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Bill 1")).toBeInTheDocument();
+  });
+
+  it("stays open when the events load again", async () => {
+    viewport.phone = true;
+    const view = render(Upcoming, { props: { onchanged: vi.fn(), events: events(6) } });
+    await userEvent.click(screen.getByRole("button", { name: "Show upcoming, 6" }));
+    await view.rerender({ onchanged: vi.fn(), events: events(5) });
+    expect(screen.getByRole("button", { name: "Hide upcoming, 5" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Bill 1")).toBeInTheDocument();
+  });
+});
 
 describe("Upcoming", () => {
   it("shows 4 items on a narrow screen and offers the rest", () => {
