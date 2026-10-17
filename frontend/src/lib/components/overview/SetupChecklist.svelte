@@ -50,9 +50,17 @@
     await api("/api/settings", { method: "POST", body: { setup_dismissed: on } });
     await refreshState();
   };
+  // Undo puts back what was there: the saved flag as it was (a reopened review starts from dismissed) and the reopened
+  // review. A brought-back review goes with the checklist too, not only the saved flag.
+  const before = () => ({ dismissed: !!s?.dismissed, reopened: setupReview.open });   // read before saving
+  function putAway(was: { dismissed: boolean; reopened: boolean }) {
+    setupReview.open = false;
+    undoable("Setup checklist dismissed", async () => { await setDismissed(was.dismissed); setupReview.open = was.reopened; });
+  }
   async function dismiss() {
+    const was = before();
     if (!(await act(async () => { await setDismissed(true); }))) return;
-    undoable("Setup checklist dismissed", () => setDismissed(false));
+    putAway(was);
   }
 
   // Saved first: the checklist only goes (and the forecast comes into view) once the server has it. A failure is said
@@ -61,9 +69,9 @@
   let finishError = $state("");
   async function finish() {
     finishing = true; finishError = "";
+    const was = before();
     try { await setDismissed(true); } catch (e) { finishError = errMsg(e); return; } finally { finishing = false; }
-    setupReview.open = false;
-    undoable("Setup checklist dismissed", () => setDismissed(false));
+    putAway(was);
     onfinish?.();
   }
 </script>

@@ -164,11 +164,11 @@ describe("SetupChecklist final review", () => {
   });
 
   it("says specifically what is missing", () => {
-    finishing({ fc: forecast({ accounts: [], events: [], budget: null, unlinked_cards: [{ id: "v", name: "Visa" } as never] }) });
+    finishing({ fc: forecast({ accounts: [], events: [], budget: null, warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
     expect(screen.getByText("No forecast account chosen")).toBeInTheDocument();
     expect(screen.getByText("No income scheduled")).toBeInTheDocument();
     expect(screen.getByText("No bills scheduled")).toBeInTheDocument();
-    expect(screen.getByText("Visa: no statement yet")).toBeInTheDocument();
+    expect(screen.getByText("Visa: choose which account pays it in Settings.")).toBeInTheDocument();
     expect(screen.getByText("No budgets in the forecast")).toBeInTheDocument();
   });
 
@@ -218,6 +218,40 @@ describe("SetupChecklist final review", () => {
     expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(setupReview.open).toBe(false);
+  });
+
+  it("Dismiss on a reopened review also closes the reopened flag, so the card can go", async () => {
+    app.state = { connected: true, setup: { ...done, dismissed: true } };
+    setupReview.open = true;
+    vi.mocked(api).mockResolvedValue({});
+    render(SetupChecklist, { fc: forecast() });
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(setupReview.open).toBe(false);
+  });
+
+  it("Undo after finishing a reopened review puts back dismissed and the reopened review", async () => {
+    app.state = { connected: true, setup: { ...done, dismissed: true } };
+    setupReview.open = true;
+    vi.mocked(api).mockImplementation(async (path: string, opts?: { body?: { setup_dismissed?: boolean } }) => {
+      if (path === "/api/settings") app.state = { ...app.state!, setup: { ...app.state!.setup!, dismissed: !!opts?.body?.setup_dismissed } };
+      return {} as never;
+    });
+    vi.mocked(toast).mockClear();
+    render(SetupChecklist, { fc: forecast() });
+    await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(setupReview.open).toBe(false);
+    const [, opts] = vi.mocked(toast).mock.calls.at(-1) as [string, { action: { onClick: () => Promise<void> } }];
+    await opts.action.onClick();
+    const saves = vi.mocked(api).mock.calls.filter(([p]) => p === "/api/settings");
+    expect(saves.at(-1)).toEqual(["/api/settings", { method: "POST", body: { setup_dismissed: true } }]);
+    expect(setupReview.open).toBe(true);
+  });
+
+  it("counts a card with a statement but no paying account as needing attention", () => {
+    finishing({ fc: forecast({ warning_links: [{ text: "Amex: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
+    expect(screen.getByText("1 card payment to look at")).toBeInTheDocument();
+    expect(screen.getByText("Amex: choose which account pays it in Settings.")).toBeInTheDocument();
+    expect(screen.queryByText("No card payments need attention")).toBeNull();
   });
 
   it("keeps the early Dismiss and leaves the welcome screen without a review", () => {

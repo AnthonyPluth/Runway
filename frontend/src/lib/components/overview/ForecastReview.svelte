@@ -13,10 +13,9 @@
   const recurring = $derived((fc?.events ?? []).filter((e) => e.kind === "recurring"));
   const income = $derived(recurring.find((e) => e.amount > 0));
   const bills = $derived(recurring.filter((e) => e.amount < 0));
-  const cards = $derived([
-    ...(fc?.unlinked_cards ?? []).map((c) => ({ name: c.name, why: "no statement yet" })),
-    ...(fc?.cards ?? []).filter((c) => c.statement_stale).map((c) => ({ name: c.name, why: "statement out of date" })),
-  ]);
+  // The forecast's own card warnings (a missing or old statement, no account paying the card, ...): each links to
+  // Settings → Accounts, where they're put right.
+  const cards = $derived((fc?.warning_links ?? []).filter((w) => w.href.startsWith("#setup/accounts")).map((w) => w.text));
   const budget = $derived(fc?.budget);
   const editCls = "h-10 shrink-0 sm:h-8";
 </script>
@@ -40,8 +39,8 @@
           {:else}<span class="text-muted-foreground">No bills scheduled</span>{/if}
         {:else if id === "cards"}
           {#if cards.length}
-            {plural(cards.length, "card")} to look at
-            <ul class="mt-0.5 text-xs text-muted-foreground">{#each cards as c (c.name + c.why)}<li>{c.name}: {c.why}</li>{/each}</ul>
+            {plural(cards.length, "card payment")} to look at
+            <ul class="mt-0.5 text-xs text-muted-foreground">{#each cards as c (c)}<li>{c}</li>{/each}</ul>
           {:else}<span class="text-muted-foreground">No card payments need attention</span>{/if}
         {:else if id === "budgets"}
           {#if budget?.used.length}

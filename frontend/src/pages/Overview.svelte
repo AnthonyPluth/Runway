@@ -43,7 +43,8 @@
   // Until you finish or dismiss it; with all four steps done it ends in the review of the forecast, which the forecast
   // settings can bring back.
   const setupLeft = $derived((!!setup && !setup.dismissed) || setupReview.open);
-  const toForecast = () => document.getElementById("forecast")?.scrollIntoView({ block: "start" });
+  $effect(() => () => { setupReview.open = false; });   // a reopened review doesn't outlive leaving Overview
+  const toForecast =() => document.getElementById("forecast")?.scrollIntoView({ block: "start" });
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
