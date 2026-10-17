@@ -148,8 +148,8 @@
         <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : income ? "Expected" : "Budget") : ""}
           bind:this={box} disabled={locked} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
           onchange={(e) => (monthOnly ? saveMonth(e.currentTarget.value) : onsave(c.name, e.currentTarget.value))}
-          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24 phone:w-[4.25rem]",
-            c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]", monthOnly && "text-primary")} />
+          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
+            c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px] phone:w-[4.25rem]", monthOnly && "text-primary")} />
       </span>
       {#if budgets && c.budget != null}
         <button type="button" aria-pressed={monthOnly} onclick={toggleMonth} disabled={locked}

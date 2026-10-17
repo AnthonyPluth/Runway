@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { cleanup, render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,7 +42,13 @@ describe("BudgetRow", () => {
     setup(cat({ budget: 12000 }), { budgets: true });
     const input = screen.getByLabelText("Budget for Groceries");
     expect(input).toHaveClass("w-20", "sm:w-24", "phone:w-[4.25rem]");
-    const group = input.closest("span.ml-auto")!;
+    // An empty box keeps its width: its placeholder ("Expected") doesn't fit in the narrower one.
+    cleanup();
+    setup(cat({ budget: null }), { budgets: true });
+    expect(screen.getByLabelText("Budget for Groceries")).not.toHaveClass("phone:w-[4.25rem]");
+    cleanup();
+    setup(cat({ budget: 12000 }), { budgets: true });
+    const group = screen.getByLabelText("Budget for Groceries").closest("span.ml-auto")!;
     expect(group).toHaveClass("gap-1.5", "phone:gap-1");
     expect(group.parentElement).toHaveClass("gap-x-2.5", "phone:gap-x-1.5");
     expect(group.parentElement!.className).not.toMatch(/nowrap/);
