@@ -356,8 +356,8 @@ describe("Recurring page", () => {
       it("says what's missing instead of showing dates while the draft is incomplete, and asks for nothing", async () => {
         await open({ "/api/recurring/preview": { dates: ["2026-04-01"] } });
         expect(screen.getByText(/Dates show once the schedule is complete\. Enter an amount, like 120\.00\./)).toBeInTheDocument();
-        await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "50");
         await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "semimonthly");
+        await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "50");
         expect(screen.getByText(/List the days of the month, like 1, 15\./)).toBeInTheDocument();
         await new Promise((r) => setTimeout(r, 400));
         expect(previews()).toHaveLength(0);
