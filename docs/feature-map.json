@@ -1569,6 +1569,21 @@
     },
     {
       "method": "GET",
+      "path": "/api/investments/holding/{id}",
+      "handler": "runway/server/api/investments.py:api_investments_holding",
+      "web": [
+        "frontend/src/lib/components/investments/HoldingDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_investments.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/networth",
       "handler": "runway/server/api/networth.py:api_networth",
       "web": [
@@ -1825,7 +1840,7 @@
       "path": "/api/investments/cost",
       "handler": "runway/server/api/investments.py:api_cost_basis",
       "web": [
-        "frontend/src/lib/components/investments/HoldingsTable.svelte"
+        "frontend/src/lib/components/investments/CostBasisEditor.svelte"
       ],
       "tests": [
         "tests/test_simplefin_invest.py"

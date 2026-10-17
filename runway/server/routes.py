@@ -40,7 +40,7 @@ from .api.equity import (
     api_equity_grant_update
 )
 from .api.investments import (
-    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_investments_summary, api_investments_sync, api_live_quotes, api_plan_save,
+    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_investments_holding, api_investments_summary, api_investments_sync, api_live_quotes, api_plan_save,
     api_quote_stream, api_tracked_get, api_tracked_save
 )
 from .api.lock import (
@@ -180,6 +180,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/plaid/oauth_resume", api_plaid_oauth_resume),
     ("GET", "/api/investments", api_investments),
     ("GET", "/api/investments/summary", api_investments_summary),
+    ("GET", "/api/investments/holding/{id}", api_investments_holding),
     ("GET", "/api/networth", api_networth),
     ("POST", "/api/assets", api_asset_add),
     ("POST", "/api/assets/{id}", api_asset_update),
