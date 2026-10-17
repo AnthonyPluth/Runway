@@ -2,6 +2,10 @@
 // getting-started checklist, the line under the verdict) and it stays open while Overview loads its figures again.
 export const forecastSheet = $state({ open: false });
 
+// The final review of getting started ("Review your forecast"): it shows once the four steps are done, and this brings
+// it back from the forecast settings after setup was finished.
+export const setupReview = $state({ open: false });
+
 export function openForecastSettings(): void {
   forecastSheet.open = true;
 }

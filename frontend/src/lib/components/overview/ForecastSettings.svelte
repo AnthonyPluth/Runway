@@ -9,7 +9,9 @@
   import { accountName, type Account } from "$lib/types";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
-  import { forecastSheet } from "./forecastSheet.svelte";
+  import { forecastSheet, setupReview } from "./forecastSheet.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { tick } from "svelte";
   import { act, errMsg } from "$lib/act";
 
   // Overview's forecast settings: the account the forecast shows and how far it looks. The account's name above the balance is the trigger, so switching account is one click away; anything
@@ -38,6 +40,11 @@
       toast.success("Primary account saved"); await refreshState(); onchange?.();
     });
   }
+  async function reviewSetup() {
+    setupReview.open = true; forecastSheet.open = false;
+    await tick();
+    document.getElementById("setup-checklist")?.scrollIntoView({ block: "start" });
+  }
   async function setHorizon(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     const days = Number(f.value);
     await api("/api/settings", { method: "POST", body: { horizon_days: days } });
@@ -65,6 +72,8 @@
       <label class={fieldCls}>Default forecast length (days)
         <input class={inputCls} type="number" min="14" max="365" value={st.horizon_days} use:autosave={setHorizon} />
       </label>
+      <!-- Brings back the final step of getting started, "Review your forecast". -->
+      <Button variant="outline" onclick={reviewSetup}>Review your setup</Button>
     </div>
   </Sheet.Content>
 </Sheet.Root>
