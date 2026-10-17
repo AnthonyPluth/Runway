@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findChromium, flowProblems, PAGES, screenshotFiles, unknownPages } from "./verify.mjs";
+import { findChromium, flowProblems, PAGES, screenshotFile, unknownPages } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -54,10 +54,10 @@ describe("flowProblems", () => {
   it("includes the setup page", () => expect(PAGES).toContain("setup"));
 });
 
-describe("screenshotFiles", () => {
-  it("names the full-page file as before and a viewport-only one beside it", () => {
-    expect(screenshotFiles("budget", "phone")).toEqual({ full: "budget-phone.png", top: "budget-phone-top.png" });
-    expect(screenshotFiles("flow-emoji-picker-open", "desktop").top).toBe("flow-emoji-picker-open-desktop-top.png");
+describe("screenshotFile", () => {
+  it("names the full-page file after the page and the width", () => {
+    expect(screenshotFile("budget", "phone")).toBe("budget-phone.png");
+    expect(screenshotFile("flow-emoji-picker-open", "desktop")).toBe("flow-emoji-picker-open-desktop.png");
   });
 });
 

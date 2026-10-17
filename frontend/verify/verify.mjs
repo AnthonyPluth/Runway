@@ -1,4 +1,4 @@
-// Drives the running app with Playwright and collects proof: a screenshot of each page (full page, and the top of it) at phone, tablet and desktop
+// Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone, tablet and desktop
 // widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
 // demo database and the server; run alone it needs a server that already has the demo data.
 //
@@ -29,9 +29,8 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   return undefined;
 }
 
-/** The two files one screenshot makes: the full page, and `-top`, just the viewport (the top of the page), which is the one
- *  that fits in a pull request (`make pr-screenshots`). */
-export const screenshotFiles = (name, viewport) => ({ full: `${name}-${viewport}.png`, top: `${name}-${viewport}-top.png` });
+/** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
+export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
 
 /** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
@@ -259,11 +258,9 @@ async function main() {
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     const files = [];
     const shot = async (name) => {
-      const { full, top } = screenshotFiles(name, viewport);
-      await page.screenshot({ path: join(out, full), fullPage: true });
-      files.push(full);
-      await page.screenshot({ path: join(out, top) });
-      files.push(top);
+      const file = screenshotFile(name, viewport);
+      await page.screenshot({ path: join(out, file), fullPage: true });
+      files.push(file);
     };
     try {
       await work(page, shot);

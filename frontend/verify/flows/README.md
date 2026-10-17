@@ -21,14 +21,14 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
 - A step has one action, and an optional `timeout` in milliseconds (default 10000). Selectors are [Playwright selectors](https://playwright.dev/docs/other-locators) (CSS, `text=…`, `role=…`).
   - `{"goto": "#route"}` opens a route of the app (or a full URL).
   - `{"click": selector}`, `{"fill": {"selector": …, "text": …}}`, `{"press": {"selector": …, "key": "Enter"}}`.
-  - `{"scroll_to": selector}` scrolls it to the middle of the window (and, inside a table that scrolls sideways, to its left edge), so the `-top` screenshot after it shows it.
+  - `{"scroll_to": selector}` scrolls it to the middle of the window (and, inside a table that scrolls sideways, to its left edge), so the screenshot after it shows it.
   - `{"wait_for": selector}` waits for it to appear; `{"expect_text": {"selector": …, "text": …}}` fails unless it contains the text.
     `expect_text` reads the text once the selector exists and does not wait for the text to arrive: for content a page loads after it renders (a `{#await}` block), `wait_for` a `text=…` selector first, or a slow runner reads the page before it is filled in.
   - `{"expect_above": {"selector": …, "above": …}}` fails unless the first match is whole inside the window and ends above the first match of `above` (the floating navigation, say): that is, it is on the first screen.
   - `{"reload": true}` opens the app again (a launch), not just another route.
   - `{"authenticator": "verified"}` or `"unverified"` (signed-in flows only): the virtual authenticator's Face ID works, or fails.
   - Keyboard: `{"tab": {"count": 16, "shift": false, "stay_in": "[role=dialog]"}}` presses Tab (Shift+Tab with `shift`) `count` times and fails if focus ever leaves `stay_in`; `{"expect_focus": selector}` fails unless the focused element matches it; `{"expect_inert": selector}` fails unless it is inert (itself or an ancestor).
-  - `{"screenshot": "name"}` saves `flow-<flow name>-<name>-<viewport>.png` (full page) and `…-<viewport>-top.png` (the top of the page, the size of the viewport).
+  - `{"screenshot": "name"}` saves the full page as `flow-<flow name>-<name>-<viewport>.png`.
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
 
 Flows run against the demo data only.
