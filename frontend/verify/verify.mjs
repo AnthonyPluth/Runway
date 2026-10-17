@@ -93,12 +93,12 @@ async function runStep(page, step, shot) {
     for (let i = 1; i <= count; i++) {
       await page.keyboard.press(shift ? "Shift+Tab" : "Tab");
       if (!within) continue;
-      const inside = await page.evaluate((sel) => !!document.activeElement?.closest(sel), within);
-      if (!inside) throw new Error(`${shift ? "Shift+Tab" : "Tab"} ${i} left ${within}, onto ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`);
+      const inside = await page.evaluate((sel) => !!globalThis.document.activeElement?.closest(sel), within);
+      if (!inside) throw new Error(`${shift ? "Shift+Tab" : "Tab"} ${i} left ${within}, onto ${await page.evaluate(() => globalThis.document.activeElement?.outerHTML.slice(0, 80))}`);
     }
   } else if ("expect_focus" in step) {   // the focused element matches the selector
-    await page.waitForFunction((sel) => !!document.activeElement?.matches(sel), step.expect_focus, { timeout })
-      .catch(async () => { throw new Error(`expected focus on ${step.expect_focus}, found ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
+    await page.waitForFunction((sel) => !!globalThis.document.activeElement?.matches(sel), step.expect_focus, { timeout })
+      .catch(async () => { throw new Error(`expected focus on ${step.expect_focus}, found ${await page.evaluate(() => globalThis.document.activeElement?.outerHTML.slice(0, 80))}`); });
   } else if ("expect_inert" in step) {   // the element, or something around it, is inert
     const inert = await page.locator(step.expect_inert).first().evaluate((el) => !!el.closest("[inert]"), undefined, { timeout });
     if (!inert) throw new Error(`expected ${step.expect_inert} to be inert`);
