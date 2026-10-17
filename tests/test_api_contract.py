@@ -100,6 +100,7 @@ class Replies(DbCase):
         self.test_budget()
         self.test_transactions()
         self.test_lock()
+        self.test_investments_holding()
         self.test_investments_summary()
         self.assertEqual(self.checked, covered(), "check each route the contract covers here")
 
@@ -156,8 +157,12 @@ class Replies(DbCase):
         self.assertEqual(reply["deleted"], 1)
         self.check("POST /api/transactions/bulk-delete", reply)
 
+    def seed_investments(self):
+        if not self.c.execute(select(InvAccount.id)).fetchone():   # (the checks above may have)
+            demo.seed_investments(self.c, TODAY)
+
     def test_investments_summary(self):
-        demo.seed_investments(self.c, TODAY)
+        self.seed_investments()
         reply = investments.api_investments_summary(self.c, {}, {})
         self.assertFalse(reply["empty"])
         self.assertTrue(reply["movers"] and reply["trend"])
@@ -166,6 +171,12 @@ class Replies(DbCase):
         empty = investments.api_investments_summary(self.c, {}, {})
         self.assertTrue(empty["empty"])
         self.check("GET /api/investments/summary", empty)
+
+    def test_investments_holding(self):
+        self.seed_investments()
+        reply = investments.api_investments_holding(self.c, {"period": ["3M"]}, {}, "demo-DEMOTM")
+        self.assertTrue(reply["history"]["prices"])
+        self.check("GET /api/investments/holding/{id}", reply)
 
     def test_lock(self):
         # Without sign-in there's none; with it, this session's, turned on with a software passkey, locked and unlocked.
