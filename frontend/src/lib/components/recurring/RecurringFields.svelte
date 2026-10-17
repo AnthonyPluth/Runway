@@ -16,6 +16,7 @@
   import { fmt, fmtDate } from "$lib/format";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import X from "@lucide/svelte/icons/x";
+  import RecurringPreview from "./RecurringPreview.svelte";
   import { FREQ_OPTIONS, MODE_OPTIONS, needsDates, signedAmount, type Errors, type RecurringValues } from "./types";
 
   // A recurring item's fields. With `save`, each one saves itself when you change it (the classic onEdit);
@@ -98,7 +99,7 @@
 
   // Help for each field, as its tooltip.
   const hints = {
-    anchor_date: "Any date it falls on works.", account_id: "The account the money moves through.",
+    account_id: "The account the money moves through.",
     amount_mode: "Use the recent payments when the amount changes, like a utility bill.",
     amount_max: "Leave blank to match any amount with the text.",
     category: "A transaction you link to this item takes this category, and so its icon. One matched automatically takes it only when it has none.",
@@ -106,16 +107,15 @@
   };
   // While More options is closed, one line says what's in it.
   const moreSummary = $derived.by(() => {
-    const acct = options.find((a) => a.id === v.account_id);
     const mode = MODE_OPTIONS.find(([val]) => val === v.amount_mode)?.[1] ?? "";
     const cat = v.category ? `category ${v.category}` : "";
     const lines = v.match.split("\n").map((x) => x.trim()).filter(Boolean);
     const match = lines.length ? `matches ${lines[0]}${lines.length > 1 ? ` +${lines.length - 1}` : ""}` : "matches the name";
     const ends = v.end_date && !once ? `ends ${fmtDate(v.end_date)}` : "";
-    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match, cat, ends].filter(Boolean).join(" · ");
+    return [mode.charAt(0).toLowerCase() + mode.slice(1), match, cat, ends].filter(Boolean).join(" · ");
   });
   let moreOpen = $state(untrack(() => !!save));   // the Add form keeps these tucked away; an existing item shows them all
-  $effect(() => { if (errors.account_id || errors.amount_max || errors.end_date) moreOpen = true; });
+  $effect(() => { if (errors.amount_max || errors.end_date) moreOpen = true; });
   const err = (name: string) => errors[name as keyof Errors];
   const ids = (name: string) => (err(name) ? `${uid}-${name}-err` : undefined);
   const bad = (name: string) => (err(name) ? "true" : undefined);
@@ -131,7 +131,7 @@
 <div class="grid gap-x-3 gap-y-4 @min-[380px]:grid-cols-2 @min-[640px]:grid-cols-4">
   <div class="flex min-w-0 flex-col gap-1.5">
     <label class={lbl}><span>Name{@render star()}</span>
-      <input class={fieldCls} name="name" bind:value={v.name} placeholder="Paycheck" aria-required="true" aria-invalid={bad("name")} aria-describedby={ids("name")} use:saveIf={save} />
+      <input class={fieldCls} name="name" bind:value={v.name} placeholder={out ? "e.g. Rent" : "e.g. Paycheck"} aria-required="true" aria-invalid={bad("name")} aria-describedby={ids("name")} use:saveIf={save} />
     </label>
     {@render note("name")}
   </div>
@@ -159,6 +159,14 @@
       </select>
     </label>
   </div>
+  <div class="flex min-w-0 flex-col gap-1.5">
+    <label class={lbl}><span>Account{@render star()}</span>
+      <select class={selectCls} name="account_id" bind:value={v.account_id} aria-required="true" aria-invalid={bad("account_id")} aria-describedby={ids("account_id")} title={hints.account_id} use:saveIf={save}>
+        {#each options as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
+      </select>
+    </label>
+    {@render note("account_id")}
+  </div>
   <!-- The dates box shows only for schedules that need it, with the right hint. -->
   {#if dated}
     <div class="flex min-w-0 flex-col gap-1.5">
@@ -169,14 +177,18 @@
     </div>
   {/if}
   <div class="relative flex min-w-0 flex-col gap-1.5">
-    <label class={lbl}><span>{once ? "Date" : "Repeats from"}{@render star()}</span>
-      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date")} title={once ? undefined : hints.anchor_date} use:saveIf={save} />
+    <label class={lbl}><span>{once ? "Date" : "A scheduled date"}{@render star()}</span>
+      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={[ids("anchor_date"), once ? undefined : `${uid}-anchor-help`].filter(Boolean).join(" ") || undefined} use:saveIf={save} />
     </label>
     <!-- When it's next due, worked out from this date (and any skipped or paid), beside the label. -->
     {#if next && !once}<span class="absolute top-0 right-0 text-xs text-muted-foreground" data-next>Next: {fmtDate(next)}</span>{/if}
+    {#if !once}<p id="{uid}-anchor-help" class="text-xs text-muted-foreground">Choose a date this payment occurs. Future dates follow this schedule.</p>{/if}
     {@render note("anchor_date")}
   </div>
 </div>
+
+<!-- The Add form shows when the first few would come, before anything is created (an existing item shows its Next). -->
+{#if !save}<RecurringPreview {v} {out} account={options.find((a) => a.id === v.account_id)} />{/if}
 
 {#if suggest}
   <p class="mt-3 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
@@ -193,14 +205,6 @@
     {#if !moreOpen}<span class="min-w-0 truncate text-xs">{moreSummary}</span>{/if}
   </summary>
   <div class="mt-3 grid gap-x-3 gap-y-4 @min-[380px]:grid-cols-2 @min-[640px]:grid-cols-3">
-    <div class="flex min-w-0 flex-col gap-1.5">
-      <label class={lbl}>Account
-        <select class={selectCls} name="account_id" bind:value={v.account_id} aria-invalid={bad("account_id")} aria-describedby={ids("account_id")} title={hints.account_id} use:saveIf={save}>
-          {#each options as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
-        </select>
-      </label>
-      {@render note("account_id")}
-    </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Amount to forecast
         <select class={selectCls} name="amount_mode" bind:value={v.amount_mode} title={hints.amount_mode} bind:this={modeSelect} use:saveIf={save}>

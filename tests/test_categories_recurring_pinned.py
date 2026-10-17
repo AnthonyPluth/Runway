@@ -361,6 +361,42 @@ class RecurringPinnedTests(Base):
             api_recurring.api_tx_recurring(self.c, None, {"recurring_id": 999}, "chk|9")
 
 
+class RecurringPreviewTests(Base):
+    """POST /api/recurring/preview: a draft's next dates come from the forecast's own occurrences."""
+
+    def setUp(self):
+        super().setUp()
+        freeze_today(self, date(2026, 10, 17))
+
+    def dates(self, **draft):
+        return api_recurring.api_recurring_preview(self.c, None, {"amount": -50, "anchor_date": "2026-01-31", **draft})["dates"]
+
+    def test_month_end_shifts_off_the_weekend_by_direction(self):
+        # Oct 31 2026 is a Saturday: money out settles the business day after, money in the day before.
+        self.assertEqual(self.dates(frequency="monthly"), ["2026-11-02", "2026-11-30", "2026-12-31"])
+        self.assertEqual(self.dates(frequency="monthly", amount=50), ["2026-10-30", "2026-11-30", "2026-12-31"])
+
+    def test_other_schedules(self):
+        self.assertEqual(self.dates(frequency="biweekly", anchor_date="2026-10-02"), ["2026-10-30", "2026-11-13", "2026-11-27"])
+        self.assertEqual(self.dates(frequency="semimonthly", dates="1, 15", anchor_date="2026-01-01"),
+                         ["2026-11-02", "2026-11-16", "2026-12-01"])
+        self.assertEqual(self.dates(frequency="yearly", anchor_date="2025-03-10"), ["2027-03-10", "2028-03-10", "2029-03-12"])
+
+    def test_end_date_and_one_time(self):
+        self.assertEqual(self.dates(frequency="monthly", end_date="2026-11-30"), ["2026-11-02", "2026-11-30"])
+        self.assertEqual(self.dates(frequency="once", anchor_date="2026-12-12"), ["2026-12-14"])
+
+    def test_a_date_years_ahead_still_has_its_dates(self):
+        self.assertEqual(self.dates(frequency="once", anchor_date="2029-12-12"), ["2029-12-12"])
+        self.assertEqual(self.dates(frequency="monthly", anchor_date="2030-01-15"), ["2030-01-15", "2030-02-15", "2030-03-15"])
+
+    def test_incomplete_drafts_are_refused(self):
+        for draft in ({"anchor_date": ""}, {"amount": None}, {"frequency": "semimonthly", "dates": ""},
+                      {"frequency": "nope"}, {"end_date": "2025-01-01"}):
+            with self.subTest(draft=draft), self.assertRaises(ApiError):
+                self.dates(**{"frequency": "monthly", **draft})
+
+
 class RulesPinnedTests(Base):
     def test_remember_and_offer(self):
         t = self.tx(-5, "BLUE BOTTLE")

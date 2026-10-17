@@ -25,9 +25,11 @@
   // `income`: an income category, whose budget is what's expected to come in and `spent` what has. More is good: its
   // bar is green, going over isn't a warning, and it has no rollover or card. Whether a budget's left rolls over is
   // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
-  let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, onsave, onchanged }: {
+  // `locked`: the page isn't sure these figures are the month it's showing (another month is loading, or a reload
+  // failed), so every control that changes a budget is off until it is.
+  let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, locked = false, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; income?: boolean; pace: number; payAccounts: PayAccount[];
-    account?: string | null; onsave: (category: string, amount: string) => void; onchanged: () => void;
+    account?: string | null; locked?: boolean; onsave: (category: string, amount: string) => void; onchanged: () => void;
   } = $props();
 
   const brand = $derived(account ? app.state?.brands?.[account] : undefined);
@@ -144,17 +146,17 @@
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-1.5 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
         <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : income ? "Expected" : "Budget") : ""}
-          bind:this={box} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
+          bind:this={box} disabled={locked} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
           onchange={(e) => (monthOnly ? saveMonth(e.currentTarget.value) : onsave(c.name, e.currentTarget.value))}
           class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px]", monthOnly && "text-primary")} />
       </span>
       {#if budgets && c.budget != null}
-        <button type="button" aria-pressed={monthOnly} onclick={toggleMonth}
+        <button type="button" aria-pressed={monthOnly} onclick={toggleMonth} disabled={locked}
           aria-label={ownMonth ? `Use the usual ${fmt0(usual)} for ${c.name} in ${monthName}` : `A different budget for ${c.name} in ${monthName} only`}
           title={ownMonth ? `${monthName} has its own amount. Click to use the usual ${fmt0(usual)} again.`
             : `A different amount for ${monthName} only; other months keep ${fmt0(usual)}`}
-          class={cn("-ml-1 inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted focus-visible:bg-muted focus-visible:outline-none sm:size-7",
+          class={cn("-ml-1 inline-flex size-9 shrink-0 cursor-pointer disabled:cursor-default disabled:opacity-50 items-center justify-center rounded-md hover:bg-muted focus-visible:bg-muted focus-visible:outline-none sm:size-7",
             monthOnly ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
           <Calendar1 class="size-3.5" aria-hidden="true" />
         </button>
@@ -195,16 +197,16 @@
       {#if canRoll}
         <Button variant="ghost" size="icon" class={cn("-my-2 -mr-1.5 -ml-1.5 size-8 shrink-0 text-muted-foreground hover:text-foreground focus-visible:opacity-100",
           menu ? "opacity-100" : "hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}
-          aria-label={`Actions for ${c.name}`} aria-expanded={menu} onclick={() => (menu = !menu)}><Ellipsis /></Button>
+          aria-label={`Actions for ${c.name}`} aria-expanded={menu} disabled={locked} onclick={() => (menu = !menu)}><Ellipsis /></Button>
       {/if}
     </div>
   {/if}
   {#if menu && canRoll}
     <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 pt-1 pb-1 sm:pl-[38px]">
-      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
+      <button type="button" aria-pressed={!!c.rollover_from} disabled={locked} onclick={() => setRollover(!c.rollover_from)}
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
           : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border disabled:cursor-default disabled:opacity-50 px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
           c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
         <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
       </button>
@@ -219,7 +221,7 @@
       {ownMonth ? `${monthName} only` : `Changing ${monthName} only`} · {money(usual)} other months
       {#if ownMonth}
         <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
-        <button type="button" onclick={resetMonth} disabled={resetting} data-month-reset
+        <button type="button" onclick={resetMonth} disabled={resetting || locked} data-month-reset
           aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
           class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
           Reset to usual</button>

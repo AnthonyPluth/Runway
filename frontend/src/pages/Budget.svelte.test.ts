@@ -248,6 +248,149 @@ describe("Budget page", () => {
     expect(await screen.findByText("Budgeted")).toBeInTheDocument();
   });
 
+  describe("refreshing a month", () => {
+    type Gate = { resolve: (m: BudgetMonth) => void; reject: (e: Error) => void };
+    // A budget GET the test settles by hand; the first load (March) is served at once.
+    function gated() {
+      const gates: Record<string, Gate> = {};
+      let firstLoad = false;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/categories") return [] as never;
+        if (path.startsWith("/api/budget?") && !opts?.method) {
+          const m = path.split("=")[1];
+          if (!firstLoad) { firstLoad = true; return month({ month: m }) as never; }
+          return new Promise((resolve, reject) => { gates[m] = { resolve: resolve as Gate["resolve"], reject }; }) as never;
+        }
+        return {} as never;
+      });
+      return gates;
+    }
+    // The month on screen outlives a test (like a redraw), so each ends back on March.
+    async function back(gates: Record<string, Gate>) {
+      await userEvent.click(screen.getByRole("button", { name: "Previous month" }));
+      await waitFor(() => expect(gates["2026-03"]).toBeDefined());
+      gates["2026-03"].resolve(month());
+      await screen.findByText("March 2026");
+    }
+    const mutationControls = () => [screen.getByLabelText("Budget for Gas"), screen.getByLabelText("Budget for Dining"),
+      screen.getByLabelText("Budget for the chosen category"), screen.getByLabelText("Category to budget"),
+      screen.getByRole("button", { name: "Suggest budgets" })];
+
+    it("keeps the loaded month, labels it and locks edits while another month loads", async () => {
+      const gates = gated();
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      expect(await screen.findByText("Loading April 2026…")).toBeInTheDocument();
+      expect(screen.getByText("Showing March 2026")).toBeInTheDocument();
+      expect(screen.getByText("$600")).toBeInTheDocument();
+      for (const el of mutationControls()) expect(el).toBeDisabled();
+      expect(screen.getByLabelText("Budget for Groceries")).toBeDisabled();
+      gates["2026-04"].resolve(month({ month: "2026-04" }));
+      await screen.findByText("April 2026");
+      expect(screen.queryByText("Loading April 2026…")).not.toBeInTheDocument();
+      for (const el of mutationControls()) expect(el).toBeEnabled();
+      await back(gates);
+    });
+
+    it("shows a failed month's alert over the old figures, and Retry asks for that month", async () => {
+      const gates = gated();
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-04"]).toBeDefined());
+      gates["2026-04"].reject(new Error("Server down"));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load April 2026. Showing March 2026.");
+      expect(screen.getByText("March 2026")).toBeInTheDocument();
+      expect(screen.getByText("$600")).toBeInTheDocument();
+      for (const el of mutationControls()) expect(el).toBeDisabled();
+      vi.mocked(api).mockClear();
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(api).toHaveBeenCalledWith("/api/budget?month=2026-04");
+      expect(screen.getByText("Loading April 2026…")).toBeInTheDocument();
+      gates["2026-04"].resolve(month({ month: "2026-04" }));
+      await screen.findByText("April 2026");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      for (const el of mutationControls()) expect(el).toBeEnabled();
+      await back(gates);
+    });
+
+    it("clears the failure and unlocks when you go back to the displayed month", async () => {
+      const gates = gated();
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-04"]).toBeDefined());
+      gates["2026-04"].reject(new Error("Server down"));
+      await screen.findByRole("alert");
+      await userEvent.click(screen.getByRole("button", { name: "Back to March 2026" }));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByText("March 2026")).toBeInTheDocument();
+      for (const el of mutationControls()) expect(el).toBeEnabled();
+    });
+
+    it("ignores a request that answers after a later one", async () => {
+      const gates = gated();
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-04"]).toBeDefined());
+      await userEvent.click(screen.getByRole("button", { name: "Previous month" }));
+      await waitFor(() => expect(gates["2026-02"]).toBeDefined());
+      gates["2026-02"].resolve(month({ month: "2026-02" }));
+      await screen.findByText("February 2026");
+      gates["2026-04"].resolve(month({ month: "2026-04" }));
+      await waitFor(() => expect(screen.getByText("February 2026")).toBeInTheDocument());
+      expect(screen.queryByText("April 2026")).not.toBeInTheDocument();
+      // and an earlier request failing late says nothing either
+      for (const el of mutationControls()) expect(el).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-03"]).toBeDefined());
+      gates["2026-03"].resolve(month());
+      await screen.findByText("March 2026");
+    });
+
+    it("does not show an older request's failure after a newer one succeeded", async () => {
+      const gates = gated();
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-04"]).toBeDefined());
+      await userEvent.click(screen.getByRole("button", { name: "Previous month" }));
+      await waitFor(() => expect(gates["2026-02"]).toBeDefined());
+      gates["2026-02"].resolve(month({ month: "2026-02" }));
+      await screen.findByText("February 2026");
+      gates["2026-04"].reject(new Error("late"));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+      await waitFor(() => expect(gates["2026-03"]).toBeDefined());
+      gates["2026-03"].resolve(month());
+      await screen.findByText("March 2026");
+    });
+
+    it("keeps a same-month refresh failure visible and edits locked until Retry works", async () => {
+      let fail = false;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/categories") return [] as never;
+        if (path.startsWith("/api/budget?")) { if (fail) throw new Error("Server down"); return month() as never; }
+        if (opts?.method === "POST") { fail = true; return { ok: true } as never; }
+        return {} as never;
+      });
+      render(Budget);
+      await screen.findByText("Budgeted");
+      await userEvent.type(screen.getByLabelText("Budget for Gas"), "120");
+      await userEvent.tab();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t refresh March 2026. Showing the last figures loaded.");
+      for (const el of mutationControls()) expect(el).toBeDisabled();
+      fail = false;
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+      for (const el of mutationControls()) expect(el).toBeEnabled();
+    });
+  });
+
   it("puts the month's income in the strip with the totals", async () => {
     serve(month());
     render(Budget);

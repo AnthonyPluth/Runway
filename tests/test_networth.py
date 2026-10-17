@@ -54,13 +54,17 @@ class NetWorthTests(Base):
 
     def test_an_account_can_be_left_out_of_net_worth_only(self):
         from runway.server.api.accounts import api_account_update
+        self.c.execute(update(Account).where(Account.id == "brk").values(balance_date="2026-09-23"))
         before = networth.summary(self.c, TODAY, save=False)
         api_account_update(self.c, {}, {"networth_hidden": 1}, "brk")
         after = networth.summary(self.c, TODAY, save=False)
         self.assertEqual(round(before["net"] - after["net"], 2), 98250.35)
         self.assertNotIn("investments", {g["key"] for g in after["groups"]})
-        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment", "balance": 98250.35}])
+        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment",
+                                            "as_of": "2026-09-23", "balance": 98250.35}])   # as_of: when that balance was synced
         self.assertEqual(before["excluded"], [])
+        self.c.execute(update(Account).where(Account.id == "brk").values(balance_date=None))
+        self.assertIsNone(networth.summary(self.c, TODAY, save=False)["excluded"][0]["as_of"])   # unknown stays unknown
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "auto")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "chk")

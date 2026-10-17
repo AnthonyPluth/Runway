@@ -11,6 +11,11 @@ describe("flowProblems", () => {
     expect(flowProblems({ ...ok, steps: [{ scroll_to: 3 }] })).toEqual(["step 1: scroll_to takes a string"]);
   });
 
+  it("accepts expect_above, which takes a selector and the one it must end above", () => {
+    expect(flowProblems({ ...ok, steps: [{ expect_above: { selector: "[data-tx]", above: "nav" } }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ expect_above: "[data-tx]" }] })).toEqual(["step 1: expect_above takes a object"]);
+  });
+
   it("names what is wrong, step by step", () => {
     expect(flowProblems({ steps: [] })).toEqual(["needs a name of letters, digits, - or _", "needs a list of steps"]);
     const bad = flowProblems({ ...ok, steps: [{ click: "a", goto: "#b" }, { fill: "text" }, { hover: "x" }] });

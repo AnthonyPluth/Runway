@@ -1,7 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -15,7 +14,7 @@
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
   import { addedPayments, agesFit, assumptionsLine, bornOk, copyPlan, counted, type Dollars, endingPayments, inDollars, newPartner, num, paymentLine,
-    pctIn, personNames, planToError, planUsable, project, projectable, projectionIn, retireError, saleProceeds, saleTitle, saleYear, startingPlan,
+    pctIn, personNames, planToError, planUsable, project, projectable, projectionIn, retireError, reviewErrors, saleProceeds, saleTitle, saleYear, startingPlan,
     verdict, VERDICT_TIP, vestsTo } from "./planner";
   import type { PlanData, RetirementPlan } from "./types";
   import { errMsg } from "$lib/act";
@@ -23,6 +22,8 @@
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
   // Changes are kept a moment after you stop typing (or when you leave). Phones get the same fields, stacked.
+  // Until the household has confirmed a first plan (Runway's own figures, `is_default`), there are no results: the
+  // assumptions are reviewed, edits stay a draft in the page, and "Show my projection" saves the plan and reveals them.
   // `accounts`: how many investment accounts the starting figure adds up, for the line above the results.
   let { data, accounts = 0 }: { data: PlanData; accounts?: number } = $props();
   const uid = $props.id();
@@ -38,29 +39,49 @@
   // server refuses stays on screen with the reason; one it takes shows "Saved ✓" for a moment.
   let saved = $state(false);
   const unflash = debounced(() => (saved = false), 1600);
-  async function save() {
+  async function save(): Promise<boolean> {
     later.cancel();
     try {
       await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
       problem = null; isDefault = false; saved = true;
       unflash.call();
-    } catch (err) { problem = errMsg(err); }
+      return true;
+    } catch (err) { problem = errMsg(err); return false; }
   }
   const later = debounced(save, 700);
-  const keep = () => later.call();
-  onDestroy(() => { unflash.cancel(); later.flush(); });
+  // A plan that's still the default is only a draft: neither the pause after typing nor leaving saves it, which would
+  // make Runway's guesses (with whatever was edited) the household's plan without their say-so.
+  const keep = () => { if (!isDefault) later.call(); };
+  onDestroy(() => { unflash.cancel(); if (isDefault) later.cancel(); else later.flush(); });
+
+  // The first plan's confirmation: the ages and birth years must be real (planner.ts), and it saves once; the results show
+  // only after the save worked. A failure keeps the draft and the reason, and the button reads Retry.
+  let tried = $state(false);
+  let confirming = $state(false);
+  const review = $derived(reviewErrors(plan, year));
+  async function confirm() {
+    tried = true;
+    if (confirming || !review.ok) return;
+    confirming = true;
+    const sent = JSON.stringify($state.snapshot(plan));
+    const ok = await save();
+    confirming = false;
+    // Edited while it was saving: that edit wasn't in what was sent, so it goes the usual way now the plan is saved.
+    if (ok && JSON.stringify($state.snapshot(plan)) !== sent) later.call();
+  }
   async function startOver() {
     later.cancel();
     try { await api("/api/investments/plan", { method: "POST", body: { plan: null } }); }
     catch (err) { problem = errMsg(err); return; }
     plan = copyPlan({ ...data.plan, ...startingPlan(data.computed, year) });
-    isDefault = true; problem = null; assumptionsOpen = true;
+    isDefault = true; problem = null; assumptionsOpen = true; tried = false;
   }
   const setPct = (k: "return_before" | "return_after" | "volatility" | "inflation", s: string) => { plan[k] = (Number(s) || 0) / 100; keep(); };
 
   // Ages that can't be each say so under their field, and there's no projection until they're fixed (planner.ts).
-  const retireErr = (p: RetirementPlan["people"][number]) => retireError(p, year);
-  const planToErr = $derived(planToError(plan));
+  const retireErr = (p: RetirementPlan["people"][number], i: number) => retireError(p, year) ?? (tried ? review.retire[i] : null);
+  const bornErr = (i: number) => (tried ? review.born[i] : null);
+  const planToErr = $derived(planToError(plan) ?? (tried ? review.planTo : null));
   const agesOk = $derived(agesFit(plan, year));
   const usable = $derived(planUsable(plan, year));
   const proj = $derived.by(() => (usable ? project(projectable($state.snapshot(plan) as RetirementPlan), data.current, year, data.assets) : null));
@@ -84,17 +105,17 @@
   const savingsNote = $derived(data.computed.savings_measured !== false && data.computed.savings_since
     ? `Your investment history only goes back to ${fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}.` : undefined);
   // Nothing invested and no plan of your own yet: nothing to project from. With investments but still Runway's guesses,
-  // the results are a sample, so they're shown muted rather than as a verdict.
+  // the assumptions are reviewed first (`gate`), with no chance, verdict or runs-out age until they're confirmed.
   const empty = $derived(data.current <= 0 && isDefault);
-  const sample = $derived(isDefault && data.current > 0);
-  const successCls = (s: number) => (sample ? "text-muted-foreground" : s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
+  const gate = $derived(isDefault && data.current > 0);
+  const successCls = (s: number) => (s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
   // Set-once figures (birth years, how long to plan for, income in retirement, returns and inflation) sit under
   // Assumptions: open while something's still missing (Runway's sample plan, or a birth year that isn't one), folded
   // to a one-line summary once they're in. It stays as you leave it while you type.
   const assumptionsMissing = () => isDefault || !plan.people.every((p) => bornOk(p.birth_year, year));
   let assumptionsOpen = $state(assumptionsMissing());
   // An age to fix that's folded away under Assumptions opens them.
-  $effect(() => { if (planToErr) assumptionsOpen = true; });
+  $effect(() => { if (planToErr || (tried && review.born.some(Boolean))) assumptionsOpen = true; });
   const assumptionsSummary = $derived(assumptionsLine(plan));
 
   function addPartner() {
@@ -162,12 +183,17 @@
     <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
   </div>
 {:else}
-{#if shown}
+{#if gate}
+  <section class="mb-5 rounded-lg border p-4">
+    <h3 class="font-medium">Review your assumptions</h3>
+    <p class="mt-1 text-sm text-muted-foreground">These start from Runway's own figures, taken from your accounts. Check each one and change what isn't right, then show your projection. Nothing is saved until you do.</p>
+    <p class="mt-2 text-sm text-muted-foreground" data-testid="starting-from">Starting from <span class="font-medium text-foreground tabular-nums">{fmt0(data.current)}</span> invested today{accounts ? ` (${plural(accounts, "account")})` : ""}</p>
+  </section>
+{:else if shown}
   {@const future = dollars === "future"}
   <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
     <Segmented label="Show amounts in" value={dollars} onchange={setDollars}
       options={[{ value: "today", label: "Today’s dollars" }, { value: "future", label: "Future dollars" }]} />
-    {#if sample}<Badge variant="secondary" data-testid="starting-estimate" title="These results start from Runway’s own guesses; change any figure below to make the plan yours">Starting estimate · edit below</Badge>{/if}
   </div>
   {#if data.current > 0}
     <p class="mb-3 text-sm text-muted-foreground" data-testid="starting-from">Starting from <span class="font-medium text-foreground tabular-nums">{fmt0(data.current)}</span> invested today{accounts ? ` (${plural(accounts, "account")})` : ""}</p>
@@ -189,7 +215,7 @@
     <div>
       {#if shown.runsOutAge != null}
         <div class="text-sm text-muted-foreground">Runs out</div>
-        <div class={`text-2xl font-semibold tabular-nums ${sample ? "text-muted-foreground" : "text-[var(--low)]"}`}>age {shown.runsOutAge}</div>
+        <div class={`text-2xl font-semibold tabular-nums text-[var(--low)]`}>age {shown.runsOutAge}</div>
       {:else}
         <div class="text-sm text-muted-foreground">Left at age {plan.plan_to_age}{future ? ` · ${shown.years[shown.years.length - 1]}` : ""}</div>
         <div class="text-2xl font-semibold tabular-nums">{fmt0(shown.atEnd)}</div>
@@ -201,7 +227,7 @@
 {:else}
   <p class="py-6 text-center text-sm text-muted-foreground">{agesOk ? "Enter a birth year and retirement age to see the projection." : "Fix the ages below to see the projection."}</p>
 {/if}
-{#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
+{#if problem && !gate}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
 <div class="mt-5 grid gap-6 lg:grid-cols-2">
   <section>
@@ -212,12 +238,15 @@
           <Input value={person.name} oninput={(e) => { person.name = e.currentTarget.value; keep(); }} /></label>
         <div class="flex flex-col gap-1">
           <label class="flex flex-col gap-1">{@render field("Retires at", `age`)}
-            <Input type="number" step="1" value={person.retire_age} aria-invalid={!!retireErr(person)} aria-describedby={retireErr(person) ? `${uid}-retire-${i}` : undefined}
+            <Input type="number" step="1" value={person.retire_age} aria-invalid={!!retireErr(person, i)} aria-describedby={retireErr(person, i) ? `${uid}-retire-${i}` : undefined}
               oninput={(e) => { person.retire_age = Number(e.currentTarget.value); keep(); }} /></label>
-          {#if retireErr(person)}<span id={`${uid}-retire-${i}`} class="text-xs text-destructive">{retireErr(person)}</span>{/if}
+          {#if retireErr(person, i)}<span id={`${uid}-retire-${i}`} class="text-xs text-destructive">{retireErr(person, i)}</span>{/if}
         </div>
         <label class="flex flex-col gap-1" title={savingsNote}>{@render field("Saves a year")}
           {@render money(person.savings, (v) => (person.savings = v), `${names[i]}'s yearly savings`)}</label>
+        {#if gate && i === 0}
+          <p class="col-span-2 text-xs text-muted-foreground sm:col-span-3" data-testid="savings-source">{savingsNote ?? "Runway's figure: what went into your investments over the last year."}</p>
+        {/if}
       </div>
     {/each}
     {#if plan.people.length === 1}
@@ -231,6 +260,9 @@
     <h3 class="mb-2 font-medium">In retirement</h3>
     <label class="flex max-w-60 flex-col gap-1">{@render field("Spending a year", "today’s dollars")}
       {@render money(plan.spending, (v) => { plan.spending = v; plan.spending_own = true; }, "Yearly spending in retirement")}</label>
+    {#if gate && !plan.spending_own}
+      <p class="mt-1 text-xs text-muted-foreground" data-testid="spending-source">Runway's figure: what you spend a year now ({fmt0(data.computed.annual_spending)}).</p>
+    {/if}
     {#if plan.spending_own && (ending.length || added.length)}
       <p class="mt-2 text-sm"><button type="button" class="font-medium text-foreground underline underline-offset-4" onclick={useRunwaySpending}>Use Runway's figure</button>
         <span class="text-muted-foreground">({fmt0(data.computed.annual_spending)})</span></p>
@@ -315,7 +347,8 @@
         <div class="grid grid-cols-2 gap-3 @xl:grid-cols-4">
           {#each plan.people as person, i (i)}
             <label class="flex flex-col gap-1">{@render field(plan.people.length > 1 ? `${names[i]} · born in` : "Born in")}
-              <Input type="number" step="1" aria-label="Born in" value={person.birth_year} oninput={(e) => { person.birth_year = Number(e.currentTarget.value); keep(); }} /></label>
+              <Input type="number" step="1" aria-label="Born in" value={person.birth_year} aria-invalid={!!bornErr(i)} oninput={(e) => { person.birth_year = Number(e.currentTarget.value); keep(); }} />
+              {#if bornErr(i)}<span class="text-xs text-destructive">{bornErr(i)}</span>{/if}</label>
           {/each}
           <div class="flex flex-col gap-1">
             <label class="flex flex-col gap-1">{@render field("Plan until age")}
@@ -369,12 +402,22 @@
           <label class="flex flex-col justify-between gap-1">{@render field("Inflation", "yearly")}
             {@render percent(plan.inflation, (s) => setPct("inflation", s), "Inflation", `${uid}-inflation`)}</label>
         </div>
-        {#if !isDefault}
+        {#if gate}
+          <p class="mt-2 text-xs text-muted-foreground" data-testid="returns-source">Return while saving starts from Runway's estimate for your holdings ({pctIn(data.computed.expected_return)}%); the rest are common planning figures.</p>
+        {:else if !isDefault}
           <p class="mt-2 text-sm"><ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton></p>
         {/if}
       </section>
     </div>
   </details>
+
+  {#if gate}
+    <div class="flex flex-col items-start gap-2 lg:col-span-2">
+      {#if problem}<p class="text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
+      {#if tried && !review.ok}<p class="text-sm text-destructive">Fix the highlighted ages and birth years to see your projection.</p>{/if}
+      <Button onclick={confirm} disabled={confirming}>{confirming ? "Saving…" : problem ? "Retry" : "Show my projection"}</Button>
+    </div>
+  {/if}
 </div>
 {/if}
 

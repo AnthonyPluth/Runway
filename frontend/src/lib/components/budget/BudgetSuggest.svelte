@@ -10,8 +10,9 @@
 
   // Suggested budgets (GET /api/budget/suggestions; the method is in runway/domain/budget_suggest.py): nothing is saved
   // until you apply one, or all of them, through POST /api/budget like a budget you type. `month` is the month on screen
-  // (a month still to come counts its own recurring payments); `onchanged` reloads the page after a budget is set.
-  let { month, onchanged }: { month: string; onchanged?: () => void } = $props();
+  // (a month still to come counts its own recurring payments); `locked` turns it off while the page can't vouch for that
+  // month's figures; `onchanged` reloads the page after a budget is set.
+  let { month, locked = false, onchanged }: { month: string; locked?: boolean; onchanged?: () => void } = $props();
 
   let open = $state(false);
   let s = $state<BudgetSuggestions | null>(null);
@@ -68,7 +69,7 @@
 </script>
 
 <!-- On a phone just the icon, so it fits beside the month picker. -->
-<AiButton label="Suggest budgets" onclick={() => (open = true)} />
+<AiButton label="Suggest budgets" disabled={locked} onclick={() => (open = true)} />
 <Sheet.Root bind:open>
   <Sheet.Content>
     <Sheet.Header>
@@ -106,7 +107,7 @@
                 <div class="text-[13px] text-muted-foreground">{x.budget == null ? "no budget" : `now ${fmt0(x.budget)}`}</div>
               </div>
               {#if differs(x)}
-                <Button size="sm" variant="outline" class="h-10 w-16 shrink-0 sm:h-8" disabled={busy} onclick={() => apply(x)}
+                <Button size="sm" variant="outline" class="h-10 w-16 shrink-0 sm:h-8" disabled={busy || locked} onclick={() => apply(x)}
                   aria-label={`Apply ${fmt0(x.suggested)} to ${x.category}`}>Apply</Button>
               {:else}
                 <span class="w-16 shrink-0 text-center text-[13px] text-muted-foreground">Set</span>
@@ -118,7 +119,7 @@
     </div>
     {#if s && pending.length}
       <Sheet.Footer>
-        <Button disabled={busy} onclick={applyAll}>Apply {pending.length === 1 ? "it" : `all ${pending.length}`}</Button>
+        <Button disabled={busy || locked} onclick={applyAll}>Apply {pending.length === 1 ? "it" : `all ${pending.length}`}</Button>
       </Sheet.Footer>
     {/if}
   </Sheet.Content>

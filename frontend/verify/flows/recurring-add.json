@@ -1,0 +1,16 @@
+{
+  "name": "recurring-add",
+  "page": "recurring",
+  "steps": [
+    { "goto": "#recurring" },
+    { "wait_for": "button[aria-haspopup=dialog]:has-text('Gym')" },
+    { "click": "button[title^='You can also start one']" },
+    { "wait_for": "text=Add a recurring item" },
+    { "screenshot": "empty" },
+    { "fill": { "selector": "input[name=name]", "text": "Rent" } },
+    { "fill": { "selector": "input[name=amount]", "text": "1200" } },
+    { "wait_for": "[data-preview] ul li" },
+    { "scroll_to": "[data-preview]" },
+    { "screenshot": "preview" }
+  ]
+}
