@@ -121,7 +121,8 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     return {
         "today": today.isoformat(), "net": net, "assets": total_assets, "liabilities": total_liab,
         "groups": [g for g in groups.values() if g["items"]],
-        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a, today, terms)} for a in left_out],
+        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "as_of": a["balance_date"],
+                      "balance": _presented(a, today, terms)} for a in left_out],
         "history": hist, "first_snapshot": hist[0]["date"] if hist else None,
         "change": {k: amount for k, (amount, _) in changes.items()},
         "change_since": {k: since for k, (_, since) in changes.items()},   # the snapshot each change is measured from

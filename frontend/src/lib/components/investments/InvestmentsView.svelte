@@ -7,6 +7,8 @@
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
+  import ValuationDates from "$lib/components/ValuationDates.svelte";
+  import { investmentDates } from "$lib/valuationDates";
   import WorthALook from "$lib/components/investments/WorthALook.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
@@ -119,6 +121,14 @@
     return new Date(yy, mm - 1, 1).toLocaleDateString("en-US", { month: "short" }) + (mm === 1 ? ` ${String(yy).slice(2)}` : "");
   }) ?? []);
 
+  // The "Valuation dates" sheet explains the total from the accounts list; "Show" takes you to that list.
+  const dates = $derived(d && status ? investmentDates(d, status, live) : null);
+  // With every account hidden the list isn't on the page: go to where they are managed instead.
+  const showAccounts = () => {
+    const list = document.getElementById("inv-accounts");
+    if (list) list.scrollIntoView({ behavior: "smooth", block: "start" });
+    else location.hash = "#setup/accounts";
+  };
   function setPeriod(p: string) { void load(p); }
   // "2 holdings need a cost basis": sort those to the top and go to them.
   async function showMissing(e: MouseEvent) {
@@ -171,7 +181,10 @@
   {/each}
 
   <section class="mb-6" data-testid="headline">
-    <p class="text-sm text-muted-foreground">Total value · {plural(accountCount, "account")}</p>
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <p class="text-sm text-muted-foreground">Total value · {plural(accountCount, "account")}</p>
+      {#if dates}<ValuationDates title="total value" total={fmt(d.total)} model={dates} listName="the accounts" onshow={showAccounts} />{/if}
+    </div>
     <p class="text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
     <div class="mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
       {#if perf.gain != null || perf.return != null}
