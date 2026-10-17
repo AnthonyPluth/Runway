@@ -14,7 +14,7 @@ const acct = (id: string, name: string, value: number, as_of: string | null, ext
 const nw = (over: object = {}) => ({
   today: "2026-09-30", net: 400000, assets: 600000, liabilities: 200000, change: { "30d": null, "90d": null, "1y": null },
   history: [{ date: "2026-09-29", net: 399000, assets: 1, liabilities: 1 }, { date: "2026-09-30", net: 400000, assets: 1, liabilities: 1 }], first_snapshot: "2026-09-29",
-  assets_list: [], loan_accounts: [], realie: { configured: false, used: 0, limit: 0 },
+  assets_list: [{ id: 7, name: "House", kind: "home", value: 520000, current_value: 540000, as_of: "2026-09-01", source: "realie", yearly_change: 4 }], loan_accounts: [], realie: { configured: false, used: 0, limit: 0 },
   excluded: [{ id: "old", name: "Old brokerage", org: "Fidelity", kind: "investment", balance: 9000, as_of: "2026-01-02" }],
   groups: [
     { key: "cash", label: "Cash", side: "asset", total: 5000, items: [acct("chk", "Checking", 5000, "2026-09-30"), acct("sav", "Savings", 100, null)] },
@@ -55,6 +55,11 @@ describe("Net worth: valuation dates", () => {
     expect(rows[2]).toHaveTextContent("Realie estimate");
     expect(rows[2]).toHaveTextContent("Value as of: Sep 1, 2026");
     expect(rows[2]).toHaveTextContent("Mortgage is counted once, under Liabilities");
+    // the amount is the one the Real estate group adds up (the loan is a liability, not taken off here), and a value carried
+    // forward to today says where it started instead of passing as the dated value
+    expect(rows[2]).toHaveTextContent("$540,000.00");
+    expect(rows[2]).not.toHaveTextContent("$340,000");
+    expect(rows[2]).toHaveTextContent("Carried forward to today from $520,000.00");
     expect(within(sheet).getByText(/not today's valuations/)).toBeInTheDocument();
   });
 

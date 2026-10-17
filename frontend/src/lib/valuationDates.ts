@@ -6,7 +6,7 @@ import type { InvAccount, Investments, LiveQuotes } from "$lib/components/invest
 import { valueSource } from "$lib/components/networth/homeValues";
 import type { NetWorth } from "$lib/components/networth/types";
 import type { PlaidStatus, SimplefinSeen } from "$lib/components/settings/types";
-import { fmtDate, fmtDateTime, isoDay, serverTime } from "$lib/format";
+import { fmt, fmtDate, fmtDateTime, isoDay, serverTime } from "$lib/format";
 
 export const UNAVAILABLE = "Date unavailable";
 export const DIFFERENT = "Values from different dates";
@@ -74,8 +74,12 @@ export function netWorthDates(d: NetWorth): ValuationModel {
       } else if (i.type === "equity") {
         counted.push({ ...row, source: i.source === "carta" ? "Share price from Carta" : "Share price you entered", dateLabel: "Share price as of" });
       } else {
-        counted.push({ ...row, source: valueSource(i.source), dateLabel: "Value as of",
-          note: i.loan ? `${i.loan.name} is counted once, under Liabilities` : undefined });
+        // An asset with a yearly change is carried forward to today (current_value); the date is still the one it was entered on.
+        const a = d.assets_list.find((x) => x.id === i.id);
+        const carried = a && a.value != null && a.yearly_change && Math.abs(a.current_value - a.value) >= 0.005;
+        const notes = [carried ? `Carried forward to today from ${fmt(a.value!)} using the yearly change you set` : undefined,
+          i.loan ? `The value is counted in full; ${i.loan.name} is counted once, under Liabilities` : undefined].filter(Boolean);
+        counted.push({ ...row, source: valueSource(i.source), dateLabel: "Value as of", note: notes.join(" · ") || undefined });
       }
     }
   }
@@ -126,8 +130,22 @@ export function investmentDates(d: Investments, status: PlaidStatus, live: LiveQ
   const left = d.accounts.filter((a) => a.hidden && a.hidden_in_accounts).map((a) => row(a, true));
   const entries: { name: string; day: string | null; label?: string }[] = counted.map((r) => ({ name: r.name, day: r.day }));
   const clock = live ? new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "";
-  if (live) {
-    entries.push({ name: "Stocks and ETFs", day: `live ${live.as_of}`, label: `${live.market === "open" ? "Live quotes" : "Latest quotes, market closed"} · ${clock}` });
+  // The quotes actually applied to holdings (applyLiveQuotes stamps `live_time`), by the calendar day of the quote, so a quote
+  // from the day of a sync is that same day; the time of day stays in the name.
+  const quoted = new Map<string, { tickers: string[]; last: number; live: boolean }>();
+  for (const h of d.holdings) {
+    if (!h.live_time) continue;
+    const day = isoDay(new Date(h.live_time * 1000));
+    const g = quoted.get(day) ?? { tickers: [], last: 0, live: false };
+    g.tickers.push(h.ticker || h.name || "Holding");
+    g.last = Math.max(g.last, h.live_time);
+    g.live ||= !!h.live;
+    quoted.set(day, g);
+  }
+  for (const [day, g] of quoted) {
+    const names = g.tickers.length > 5 ? `${g.tickers.slice(0, 5).join(", ")} and ${g.tickers.length - 5} more` : g.tickers.join(", ");
+    const at = new Date(g.last * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    entries.push({ name: `${g.live ? "Live quotes" : "Latest quotes"} to ${at} (${names})`, day });
   }
   const at = [status.last_inv_sync, status.simplefin_last_sync].filter((x): x is string => !!x).map((x) => serverTime(x)).sort((a, b) => a.getTime() - b.getTime()).pop();
   const lastDate = d.history.dates.at(-1);

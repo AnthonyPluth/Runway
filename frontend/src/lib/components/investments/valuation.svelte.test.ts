@@ -12,7 +12,8 @@ import InvestmentsView from "./InvestmentsView.svelte";
 import { livePrices } from "./live";
 import { inv } from "./state.svelte";
 
-const perf = { start: "2026-08-01", return: 0.1, benchmark_return: 0.08, gain: 100 };
+const QUOTE_AT = Date.parse("2026-09-30T12:00:00Z") / 1000;
+const perf ={ start: "2026-08-01", return: 0.1, benchmark_return: 0.08, gain: 100 };
 const acct = (over: object) => ({ id: "a1", item_id: "i1", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: "Fidelity", tracked: 0, drift: null, balance: 2500, ...over });
 const page = (accounts: object[], status: object = {}) => {
   const data = {
@@ -81,13 +82,39 @@ describe("Investments: valuation dates", () => {
     render(InvestmentsView);
     await screen.findByTestId("holdings-updated");
     const onQuotes = vi.mocked(livePrices).mock.calls[0][0];
-    onQuotes({ quotes: {}, market: "closed", as_of: "2026-09-30T20:00:00Z" });
+    onQuotes({ quotes: { VTI: { price: 260, prev_close: 250, time: QUOTE_AT, type: "ETF" } }, market: "closed", as_of: "2026-09-30T20:00:00Z" });
     const { sheet } = await open();
     expect(within(sheet).getByTestId("valuation-headline")).toHaveTextContent("Values from different dates");
-    expect(within(sheet).getByTestId("valuation-groups")).toHaveTextContent(/Latest quotes, market closed/);
+    expect(within(sheet).getByTestId("valuation-groups")).toHaveTextContent(/Latest quotes to .* \(VTI\)/);
     expect(within(sheet).getByText(/The market is closed\. The total uses the latest quotes/)).toBeInTheDocument();
     expect(within(sheet).getByText(/The charts run to Sep 29, 2026 and are as of the last sync, not live quotes\. Values before Aug 15, 2026 are estimated/)).toBeInTheDocument();
     expect(screen.getByTestId("holdings-updated")).toHaveTextContent("Market closed");
+  });
+
+  it("lists quotes only for holdings that got one, and a quote from the day of the sync is the same date", async () => {
+    page([acct({})], { items: [{ item_id: "i1", last_sync: "2026-09-30T13:00:00Z" }], last_inv_sync: "2026-09-30T13:00:00Z" });
+    render(InvestmentsView);
+    await screen.findByTestId("holdings-updated");
+    const onQuotes = vi.mocked(livePrices).mock.calls[0][0];
+    onQuotes({ quotes: {}, market: "open", as_of: "2026-09-30T20:00:00Z" });   // a response, but no holding was quoted
+    let { sheet } = await open();
+    expect(within(sheet).getByTestId("valuation-headline")).toHaveTextContent("All values are from Sep 30, 2026");
+    expect(sheet).not.toHaveTextContent(/Live quotes to/);
+    expect(within(sheet).getByText(/re-price stocks and ETFs/)).toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    onQuotes({ quotes: { VTI: { price: 260, prev_close: 250, time: QUOTE_AT, type: "ETF" } }, market: "closed", as_of: "2026-09-30T20:00:00Z" });
+    ({ sheet } = await open());
+    expect(within(sheet).getByTestId("valuation-headline")).toHaveTextContent("All values are from Sep 30, 2026");   // not "different dates"
+  });
+
+  it("'Show the accounts' goes to Settings → Accounts when every account is hidden and the list isn't on the page", async () => {
+    page([acct({ hidden: 1, hidden_in_accounts: 1 })]);
+    render(InvestmentsView);
+    const { user, sheet } = await open();
+    expect(document.getElementById("inv-accounts")).toBeNull();
+    await user.click(within(sheet).getByRole("button", { name: "Show the accounts" }));
+    await vi.waitFor(() => expect(location.hash).toBe("#setup/accounts"));
   });
 
   it("opening it makes no request", async () => {

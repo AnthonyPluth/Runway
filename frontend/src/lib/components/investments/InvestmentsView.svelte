@@ -123,7 +123,12 @@
 
   // The "Valuation dates" sheet explains the total from the accounts list; "Show" takes you to that list.
   const dates = $derived(d && status ? investmentDates(d, status, live) : null);
-  const showAccounts = () => document.getElementById("inv-accounts")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // With every account hidden the list isn't on the page: go to where they are managed instead.
+  const showAccounts = () => {
+    const list = document.getElementById("inv-accounts");
+    if (list) list.scrollIntoView({ behavior: "smooth", block: "start" });
+    else location.hash = "#setup/accounts";
+  };
   function setPeriod(p: string) { void load(p); }
   // "2 holdings need a cost basis": sort those to the top and go to them.
   async function showMissing(e: MouseEvent) {
