@@ -273,6 +273,15 @@ export const agesFit = (plan: RetirementPlan, year: number) => plan.people.every
 export const planUsable = (plan: RetirementPlan, year: number) =>
   plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0 && agesFit(plan, year);
 
+/** What stops a first plan being confirmed: per person a birth year that isn't one or a missing/impossible retirement age,
+ * and a missing/impossible age to plan to (the same age rules as above, plus the ones that are simply blank). */
+export function reviewErrors(plan: RetirementPlan, year: number) {
+  const born = plan.people.map((p) => (bornOk(p.birth_year, year) ? null : `Enter the year born, ${year - 100} to ${year - 14}`));
+  const retire = plan.people.map((p) => (num(p.retire_age) > 0 ? retireError(p, year) : "Enter a retirement age"));
+  const planTo = num(plan.plan_to_age) > 0 ? planToError(plan) : "Enter an age to plan until";
+  return { born, retire, planTo, ok: !planTo && born.every((e) => !e) && retire.every((e) => !e) };
+}
+
 /** The plan with every figure a number, as project() takes it (an income or event of a person who's gone is left out). */
 export function projectable(plan: RetirementPlan): RetirementPlan {
   const p = copyPlan(plan);
