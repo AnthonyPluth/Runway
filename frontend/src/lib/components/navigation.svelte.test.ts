@@ -242,21 +242,35 @@ describe("MobileNav", () => {
     expect(lit.map((l) => l.textContent!.trim())).toEqual(["Invest"]);
   });
 
-  it("is docked to the bottom edge, 56px of tabs and only half the safe-area inset under them", () => {
+  it("floats as a glass pill 12px in from the sides and the bottom (and the inset), 56px of tabs", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(bar).toHaveClass("inset-x-0", "bottom-0", "border-t", "pb-[calc(env(safe-area-inset-bottom)/2)]", "backdrop-blur-xl");
-    expect(bar).not.toHaveClass("pb-[env(safe-area-inset-bottom)]");
+    expect(bar).toHaveClass("fixed", "inset-x-3", "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]", "rounded-[22px]");
+    // No outline (the border keeps its width but is transparent), a solid surface where backdrop-filter is missing, and the glass where it is.
+    expect(bar).toHaveClass("border", "border-transparent", "bg-popover", "supports-[backdrop-filter]:bg-popover/60",
+      "supports-[backdrop-filter]:backdrop-blur-[28px]", "supports-[backdrop-filter]:backdrop-saturate-200");
+    expect(bar.className).not.toContain("backdrop-brightness");
+    expect(bar.className).toContain("shadow-[inset_0_1px_0_rgb(255_255_255/0.2)");
+    expect(bar).not.toHaveClass("border-t", "bg-popover/90", "backdrop-blur-xl");
     // 56px less 4px of padding each side: tabs 48px tall, over the 44px a finger needs.
     expect(bar.firstElementChild).toHaveClass("h-[56px]", "grid-cols-5", "p-1");
     expect(bar.firstElementChild).not.toHaveClass("h-[66px]");
   });
 
+  it("draws the inactive tabs lighter than muted-foreground so the labels stay readable over the glass, and the current one white", () => {
+    app.state = state();
+    render(MobileNav);
+    const bar = screen.getByRole("navigation", { name: "Main" });
+    expect(within(bar).getByRole("link", { name: "Transactions" })).toHaveClass("text-[#b9bec7]");
+    expect(within(bar).getByRole("button", { name: /More/ })).toHaveClass("text-[#b9bec7]");
+    expect(within(bar).getByRole("link", { name: "Overview" })).toHaveClass("bg-foreground/12", "text-foreground");
+  });
+
   it("is the height app.css calls --tabbar-h, which the page padding and the toasts are measured from", () => {
     const css = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
-    // 1px border + 56px of tabs + half the inset: 57px with no inset, 74px with an iPhone's 34px.
-    expect(css).toMatch(/--tabbar-h:\s*calc\(57px \+ env\(safe-area-inset-bottom\) \/ 2\)/);
+    // 1px border twice + 56px of tabs + 12px lifted + the inset: 70px with no inset, 104px with an iPhone's 34px.
+    expect(css).toMatch(/--tabbar-h:\s*calc\(70px \+ env\(safe-area-inset-bottom\)\)/);
     const shell = readFileSync(resolve(__dirname, "../../App.svelte"), "utf8");
     expect(shell).toContain("pb-[calc(var(--tabbar-h)+2rem)]");
   });

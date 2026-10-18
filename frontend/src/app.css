@@ -21,9 +21,10 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 @font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
 
-/* The phone tab bar's height (MobileNav): its 1px border and 56px of tabs, plus half the safe-area inset under them (the
-   home indicator sits in the bottom part of it). What sits above the bar (page padding, the toasts, a sticky footer) uses it. */
-:root { --tabbar-h: calc(57px + env(safe-area-inset-bottom) / 2); }
+/* How far the phone tab bar's top is from the screen's bottom (MobileNav): the floating pill's 1px border on each side and
+   56px of tabs, over the 12px it is lifted and the safe-area inset (the home indicator). What sits above the bar (page padding,
+   the toasts, a sticky footer) uses it. */
+:root { --tabbar-h: calc(70px + env(safe-area-inset-bottom)); }
 
 /* shadcn-svelte's default theme (neutral). Runway uses the dark one (index.html sets class="dark"). */
 :root {
