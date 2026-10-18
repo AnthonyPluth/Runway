@@ -1,5 +1,5 @@
-// Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone, tablet and desktop
-// widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
+// Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone and desktop
+// widths (tablet is visited and checked but not screenshotted), plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
 // demo database and the server; run alone it needs a server that already has the demo data.
 //
 //   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page…]
@@ -28,6 +28,10 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   }
   return undefined;
 }
+
+/** Widths that are visited and checked (console errors, 5xx, expect_* steps) but never screenshotted: no tablet screenshot is saved or committed. */
+export const NO_SCREENSHOT = new Set(["tablet"]);
+export const savesScreenshots = (viewport) => !NO_SCREENSHOT.has(viewport);
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
@@ -258,6 +262,7 @@ async function main() {
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     const files = [];
     const shot = async (name) => {
+      if (!savesScreenshots(viewport)) return;
       const file = screenshotFile(name, viewport);
       await page.screenshot({ path: join(out, file), fullPage: true });
       files.push(file);
