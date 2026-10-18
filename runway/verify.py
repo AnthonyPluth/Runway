@@ -1,7 +1,7 @@
 """`python run.py verify [page…]`: run the real app on made-up data and capture proof that it works.
 
 Makes a temporary database, fills it with demo.seed (as `run.py demo` does), starts the server on a free port, and runs
-frontend/verify/verify.mjs (Playwright) against it. Screenshots at phone, tablet and desktop widths, console errors and
+frontend/verify/verify.mjs (Playwright) against it. Pages are visited at phone, tablet and desktop widths; screenshots are saved at phone and desktop only (never tablet). Console errors and
 failed requests go to artifacts/verify/. Returns the exit code: non-zero on a console error or a 5xx response. Never
 touches your own data: the server gets its own folder and SQLite database, and none of your Postgres, sign-in, bank or
 error-report settings.

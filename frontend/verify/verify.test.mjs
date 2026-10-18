@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findChromium, flowProblems, PAGES, screenshotFile, unknownPages } from "./verify.mjs";
+import { findChromium, flowProblems, PAGES, savesScreenshots, screenshotFile, unknownPages } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -75,5 +75,13 @@ describe("findChromium", () => {
     const { exists, list } = tree(["/x/chromium-1194/chrome-linux/chrome"]);
     expect(findChromium({ PLAYWRIGHT_BROWSERS_PATH: "/x" }, exists, list)).toBe("/x/chromium-1194/chrome-linux/chrome");
     expect(findChromium({ PLAYWRIGHT_BROWSERS_PATH: "/nowhere" }, exists, list)).toBeUndefined();
+  });
+});
+
+describe("savesScreenshots", () => {
+  it("saves phone and desktop screenshots, never tablet", () => {
+    expect(savesScreenshots("phone")).toBe(true);
+    expect(savesScreenshots("desktop")).toBe(true);
+    expect(savesScreenshots("tablet")).toBe(false);
   });
 });
