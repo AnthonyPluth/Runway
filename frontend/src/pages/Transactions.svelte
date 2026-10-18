@@ -328,8 +328,7 @@
     {/if}
   </div>
   {#if !review}
-    <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} reviewCount={app.state?.review_count || 0} bind:pending={pendingOnly}
-      onall={() => { pendingOnly = false; txs.clearFilters(); }} onaccount={txs.load} />
+    <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} onaccount={txs.load} />
   {/if}
 
   <div id="tx-filters" class={cn("mb-3 flex flex-wrap items-center gap-2", viewport.phone && !filtersOpen && !isFiltered(txs.f) && "hidden")}>

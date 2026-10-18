@@ -20,7 +20,7 @@
   }
 </script>
 
-<Button variant="ghost" size="sm" class={compact ? "size-8 shrink-0 p-0 md:max-lg:hidden text-muted-foreground hover:text-destructive phone:size-11" : "self-start text-destructive hover:text-destructive"}
+<Button variant="ghost" size="sm" class={compact ? "size-8 shrink-0 p-0 md:max-lg:hidden text-muted-foreground hover:text-destructive" : "self-start text-destructive hover:text-destructive"}
   aria-label={compact ? `Delete ${name}` : undefined} title="Delete transaction" onclick={() => (deleting = true)}>
   {#if compact}<Trash2 class="size-4" aria-hidden="true" />{:else}Delete transaction{/if}
 </Button>

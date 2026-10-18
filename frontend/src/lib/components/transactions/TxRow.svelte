@@ -11,6 +11,7 @@
   import { fmt, fmtSigned } from "$lib/format";
   import { categories } from "$lib/categories.svelte";
   import { cn } from "$lib/utils";
+  import { viewport } from "$lib/phone.svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
   import SplitIcon from "@lucide/svelte/icons/split";
@@ -227,7 +228,8 @@
       <button type="button" data-accept class="flex size-8 shrink-0 lg:size-9 cursor-pointer items-center justify-center rounded-full text-primary hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50 max-md:hidden lg:-my-1"
         aria-label={`Accept ${t.category} for ${name}`} title={acceptTitle} disabled={saving} onclick={() => onaccept?.()}><Check class="size-5" aria-hidden="true" /></button>
     {/if}
-    <TxDelete {t} compact {onchanged} />
+    <!-- Not on a phone: Delete transaction is in the details sheet there. -->
+    {#if !viewport.phone}<TxDelete {t} compact {onchanged} />{/if}
     <span class="sr-only">Amount:</span>
     <div class={cn("ml-auto whitespace-nowrap text-right tabular-nums", (part?.amount ?? t.amount) > 0 ? "font-semibold text-good" : "font-medium", t.pending && "opacity-70")}>
       {#if part}{fmtSigned(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
