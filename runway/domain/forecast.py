@@ -41,7 +41,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
-from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
+from sqlalchemy import ColumnElement, and_, delete, exists, func, not_, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, splits, statements
@@ -52,7 +52,8 @@ from ..money import CENT, allocate_cents, cents, is_zero, same_amount
 from . import categories as catmod
 from ..storage import settings_keys as sk
 from . import recurring as rec
-from ..storage.models import Account, Category, ChurnCard, Override, PlaidAccount, Recurring, Transaction
+from ..storage.models import (Account, Category, ChurnCard, DeletedCharge, Override, PlaidAccount, Recurring,
+                              Transaction)
 
 SPEND_WINDOW_DAYS = 90
 ONE_OFF_LIMIT = 1000.0
@@ -410,7 +411,8 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     its close, so a charge pending then posts after it, onto the next statement. Once it posts it's a charge since the
     close like any other, and one the bank drops is gone. Only charges: a pending payment or credit from before the
     close may be on the statement already (an issuer can credit a payment on the day it's made), so it isn't taken off
-    anything until it's dated after the close."""
+    anything until it's dated after the close. A posted charge since the close that you deleted from the list counts as
+    if it were still there, as far as the card's balance still has it (deleted_still_owed)."""
     transfers = _transfer_categories(conn)
     last_close = parse_day(bank["last_statement_date"])
     T = Transaction
@@ -431,7 +433,8 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     charges = [t for t in txs if t["category"] not in transfers]
     credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
     over = max(0.0, paid + credits - statement)
-    net = held - sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over
+    net = held - sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over \
+        + deleted_still_owed(conn, card, last_close, statement, transfers)
     new_charges = max(0.0, net)
     due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, bank["due_day"])
@@ -459,6 +462,45 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
         "pending_before_close": round(min(held, new_charges), 2),
         "credit": round(max(0.0, -net), 2),
     }
+
+
+def remember_deleted_charges(conn, ids: list[str], today: date) -> None:
+    """Before these transactions are deleted: keep the posted charges among them on a card (deleted_charges), for
+    deleted_still_owed. Deleting one tidies the list (a duplicate, a charge you'd rather not see), but the card's
+    balance at the bank still has a charge that posted, so its statement will too. Pending ones aren't kept: the balance
+    doesn't have them yet (deleting one takes it out of the forecast, as before, until the bank sends it again). Kept
+    ones dated more than a year ago go: no statement in progress is that old."""
+    T = Transaction
+    rows = db.rows(conn.execute(
+        select(T.id, T.account_id, T.posted, T.amount, T.category).join(Account, Account.id == T.account_id)
+        .where(T.id.in_(ids), Account.kind == "credit", T.pending == 0, T.amount < 0)))
+    if rows:
+        db.upsert(conn, DeletedCharge, rows, key=["id"])
+    conn.execute(delete(DeletedCharge).where(DeletedCharge.posted < (today - timedelta(days=366)).isoformat()))
+
+
+def deleted_still_owed(conn, card: dict, last_close: date, statement: float, transfers: set[str]) -> float:
+    """The posted charges since the close you deleted from the card's list (remember_deleted_charges), as much of them as
+    its balance at the bank still has: what it owes beyond the statement and the posted transactions listed since the
+    close, up to the day of the balance. So a charge you deleted is counted as before, while a duplicate you deleted
+    (the balance has it once, and the list still does) or a charge the bank has taken off isn't. Nothing without a
+    balance from after the close, which can't say. One a sync brings back is counted as itself; a transfer, as a charge
+    would be, isn't one."""
+    as_of = (card.get("balance_date") or "")[:10]
+    if card.get("balance") is None or as_of <= last_close.isoformat():
+        return 0.0
+    T, D = Transaction, DeletedCharge
+    since = (last_close.isoformat(), as_of)
+    deleted = -(conn.execute(
+        select(func.coalesce(func.sum(D.amount), 0.0))
+        .where(D.account_id == card["id"], D.posted > since[0], D.posted <= since[1], ~exists().where(T.id == D.id),
+               or_(D.category.is_(None), D.category.not_in(sorted(transfers))))).scalar() or 0.0)
+    if deleted < CENT:
+        return 0.0
+    listed = conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
+                          .where(T.account_id == card["id"], T.posted > since[0], T.posted <= since[1], T.pending == 0)
+                          ).scalar() or 0.0
+    return min(deleted, max(0.0, owed(card) - statement + listed))
 
 
 def fee_posted(conn, account_id: str, day: date, fee: float | None = None) -> bool:

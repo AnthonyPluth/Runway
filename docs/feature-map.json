@@ -430,6 +430,7 @@
       ],
       "tests": [
         "tests/test_api_contract.py",
+        "tests/test_forecast_deleted.py",
         "tests/test_mcp.py",
         "tests/test_tx_edits.py"
       ],
@@ -550,6 +551,7 @@
       ],
       "tests": [
         "tests/test_api_contract.py",
+        "tests/test_forecast_deleted.py",
         "tests/test_tx_edits.py"
       ],
       "docs": [

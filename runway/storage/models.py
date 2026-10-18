@@ -334,6 +334,16 @@ class ManualStatement(Base):
     entered_at: Mapped[str | None]
 
 
+class DeletedCharge(Base):
+    __table__ = schema.deleted_charges
+    id: Mapped[str]
+    account_id: Mapped[str]
+    posted: Mapped[str]
+    amount: Mapped[float]
+    category: Mapped[str | None]
+    deleted_at: Mapped[str | None]
+
+
 class DeletedAccount(Base):
     __table__ = schema.deleted_accounts
     id: Mapped[str]

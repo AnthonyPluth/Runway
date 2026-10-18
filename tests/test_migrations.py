@@ -11,7 +11,7 @@ from sqlalchemy import func, insert, select
 
 from runway.storage import db, schema
 from runway.storage.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore,
-                                   ChurnTask, ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement,
+                                   ChurnTask, ChurnWish, DeletedAccount, DeletedCharge, InvAccount, LoanTerms, ManualStatement,
                                    MonthBudget, Recurring, Rule, Setting, Transaction)
 from tests.shared import database_path, scratch_dir
 
@@ -525,6 +525,31 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:   # and back down, leaving them where they are
             command.downgrade(db.alembic_config(c), "0044")
             self.assertEqual(c.exec_driver_sql("SELECT account_id FROM recurring WHERE id = 1").scalar(), "card")
+
+    def test_0046_adds_deleted_charges_that_go_with_their_card(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0045")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("deleted_charges", sa.inspect(c).get_table_names())
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('card', 'Card A', 'credit')")
+            c.exec_driver_sql("INSERT INTO transactions(id, account_id, posted, amount) VALUES ('card|1', 'card', '2026-09-12', -40)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            self.assertEqual(conn.execute(select(func.count()).select_from(Transaction)).scalar(), 1)   # transactions stay
+            conn.execute(insert(DeletedCharge).values(id="card|2", account_id="card", posted="2026-09-14", amount=-25.0))
+            self.assertIsNotNone(conn.execute(select(DeletedCharge.deleted_at)).scalar())
+            with self.assertRaises(sa.exc.IntegrityError):   # a kept charge belongs to an account that's there
+                with conn.sa.begin_nested():
+                    conn.execute(insert(DeletedCharge).values(id="x|1", account_id="nobody", posted="2026-09-14", amount=-1.0))
+            conn.execute(sa.delete(schema.accounts).where(schema.accounts.c.id == "card"))   # and goes with it
+            self.assertEqual(conn.execute(select(func.count()).select_from(DeletedCharge)).scalar(), 0)
+        with db.engine(self.path).begin() as c:   # and back down
+            command.downgrade(db.alembic_config(c), "0045")
+            self.assertNotIn("deleted_charges", sa.inspect(c).get_table_names())
 
     def test_0044_adds_the_key_share_to_app_locks_and_it_goes_with_the_row(self):
         from alembic import command
