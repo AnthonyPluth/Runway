@@ -66,9 +66,13 @@
   </Sheet.Content>
 </Sheet.Root>
 
-<!-- A bar docked to the bottom edge, full width, above the home indicator and translucent over the page with a blur behind it. -->
-<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-0 bottom-0 z-50 border-t bg-popover/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl desktop:hidden">
-  <div class="grid h-[66px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
+<!-- A bar docked to the bottom edge, full width and translucent over the page with a blur behind it. The tabs are 48px tall
+     (56px less the 4px padding each side). Half the safe-area inset goes under them: the home indicator sits in the bottom
+     ~13px of it, so the labels stay clear without a tall empty band. The bar's height is `--tabbar-h` in app.css (1px border
+     + 56px + half the inset: 57px with no inset, 74px with an iPhone's 34px); the page's bottom padding, the toasts and a
+     sticky form footer all follow it. -->
+<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-0 bottom-0 z-50 border-t bg-popover/90 pb-[calc(env(safe-area-inset-bottom)/2)] backdrop-blur-xl desktop:hidden">
+  <div class="grid h-[56px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
       <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}

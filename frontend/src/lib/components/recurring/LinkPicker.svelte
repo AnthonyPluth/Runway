@@ -5,6 +5,7 @@
   import { fmtDate, fmtSigned } from "$lib/format";
   import type { Missed } from "$lib/types";
   import { toast } from "svelte-sonner";
+  import { UNDO_MS } from "$lib/undo";
   import type { Candidate } from "./types";
   import { act, errMsg } from "$lib/act";
 
@@ -33,7 +34,7 @@
       try { await api("/api/recurring/dismiss", { method: "POST", body: { key: m.key } }); } catch { /* see above */ }
       const text = r?.suggest_text;
       if (text) {
-        toast.success(`Linked to ${m.name}`, { description: `Also match “${text}” from now on?`, action: { label: "Also match", onClick: () => alsoMatch(text) } });
+        toast.success(`Linked to ${m.name}`, { description: `Also match “${text}” from now on?`, duration: UNDO_MS, action: { label: "Also match", onClick: () => alsoMatch(text) } });
       } else toast.success(`Linked to ${m.name}`);
       onlinked();
     } catch (err) { toast.error(errMsg(err)); }

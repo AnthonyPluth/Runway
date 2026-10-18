@@ -8,7 +8,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
-  import { Toaster } from "svelte-sonner";
+  import { Toaster } from "$lib/components/ui/sonner";
   import type { Component } from "svelte";
 
   // Every page in pages/ is picked up here by name: pages/NetWorth.svelte is #networth. A page gets the route it
@@ -52,7 +52,7 @@
 
 <div class="flex min-h-dvh flex-col desktop:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+7rem)] desktop:p-6 wide:p-8">
+  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(var(--tabbar-h)+2rem)] desktop:p-6 wide:p-8">
     <div class="mx-auto max-w-7xl">
       {#if app.sessionExpired}
         <!-- Above the page, which stays drawn underneath, so an open edit isn't lost; signing in is up to you. -->
@@ -97,4 +97,4 @@
   <div class="fixed inset-0 z-[100] flex items-center justify-center bg-background" aria-hidden="true"><img src="/logo.svg" width="56" height="56" alt="" /></div>
 {/if}
 {/if}
-<Toaster theme="dark" position="bottom-center" mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 6.5rem)" }} />
+<Toaster />
