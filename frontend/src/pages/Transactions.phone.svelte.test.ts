@@ -107,6 +107,30 @@ describe("Transactions on a phone: filters", () => {
   });
 });
 
+describe("Transactions on a phone: simplified", () => {
+  it("has no All, To review or Pending chips, keeps Accounts, and the review card still links to the Review tab", async () => {
+    open(waiting(), waiting());
+    render(Transactions);
+    await screen.findByText("2 to review");
+    const chips = within(document.querySelector<HTMLElement>("[data-chips]")!);
+    expect(chips.getByText("Accounts")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pending" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+    expect(chips.queryByRole("link", { name: /^To review/ })).not.toBeInTheDocument();   // the To review tab is not a chip
+    expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "#review");
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+  });
+
+  it("shows no trash button on a row, and Delete transaction is in the opened details", async () => {
+    open();
+    render(Transactions);
+    await screen.findByText("Zulu");
+    expect(screen.queryByRole("button", { name: /^Delete Zulu/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Zulu"));
+    expect(await screen.findByRole("button", { name: "Delete transaction" })).toBeInTheDocument();
+  });
+});
+
 describe("Transactions on a phone: the review card", () => {
   it("starts as 'N to review' with Review next and See all, and no card", async () => {
     open(waiting(), waiting());
