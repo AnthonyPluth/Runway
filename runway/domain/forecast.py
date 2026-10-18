@@ -434,7 +434,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
     over = max(0.0, paid + credits - statement)
     net = held - sum(t["amount"] for t in charges if t["amount"] <= 0 or t["pending"]) - over \
-        + deleted_still_owed(conn, card, last_close, statement, transfers)
+        + deleted_still_owed(conn, card, last_close, statement)
     new_charges = max(0.0, net)
     due = parse_day(bank["next_due_date"]) if bank["next_due_date"] and parse_day(bank["next_due_date"]) > last_close \
         else next_after(last_close, bank["due_day"])
@@ -468,24 +468,28 @@ def remember_deleted_charges(conn, ids: list[str], today: date) -> None:
     """Before these transactions are deleted: keep the posted charges among them on a card (deleted_charges), for
     deleted_still_owed. Deleting one tidies the list (a duplicate, a charge you'd rather not see), but the card's
     balance at the bank still has a charge that posted, so its statement will too. Pending ones aren't kept: the balance
-    doesn't have them yet (deleting one takes it out of the forecast, as before, until the bank sends it again). Kept
-    ones dated more than a year ago go: no statement in progress is that old."""
+    doesn't have them yet (deleting one takes it out of the forecast, as before, until the bank sends it again). Nor are
+    transfers, which card_cycle doesn't count as charges: that's decided now, by the category's kind when it's deleted,
+    so renaming, removing or changing the category later doesn't turn a kept transfer into a charge. Kept ones dated
+    more than a year ago go: no statement in progress is that old."""
     T = Transaction
+    transfers = sorted(_transfer_categories(conn))
     rows = db.rows(conn.execute(
         select(T.id, T.account_id, T.posted, T.amount, T.category).join(Account, Account.id == T.account_id)
-        .where(T.id.in_(ids), Account.kind == "credit", T.pending == 0, T.amount < 0)))
+        .where(T.id.in_(ids), Account.kind == "credit", T.pending == 0, T.amount < 0,
+               or_(T.category.is_(None), T.category.not_in(transfers)))))
     if rows:
         db.upsert(conn, DeletedCharge, rows, key=["id"])
     conn.execute(delete(DeletedCharge).where(DeletedCharge.posted < (today - timedelta(days=366)).isoformat()))
 
 
-def deleted_still_owed(conn, card: dict, last_close: date, statement: float, transfers: set[str]) -> float:
+def deleted_still_owed(conn, card: dict, last_close: date, statement: float) -> float:
     """The posted charges since the close you deleted from the card's list (remember_deleted_charges), as much of them as
     its balance at the bank still has: what it owes beyond the statement and the posted transactions listed since the
     close, up to the day of the balance. So a charge you deleted is counted as before, while a duplicate you deleted
     (the balance has it once, and the list still does) or a charge the bank has taken off isn't. Nothing without a
-    balance from after the close, which can't say. One a sync brings back is counted as itself; a transfer, as a charge
-    would be, isn't one."""
+    balance from after the close, which can't say. One a sync brings back is counted as itself. (Transfers were never
+    kept: remember_deleted_charges.)"""
     as_of = (card.get("balance_date") or "")[:10]
     if card.get("balance") is None or as_of <= last_close.isoformat():
         return 0.0
@@ -493,8 +497,8 @@ def deleted_still_owed(conn, card: dict, last_close: date, statement: float, tra
     since = (last_close.isoformat(), as_of)
     deleted = -(conn.execute(
         select(func.coalesce(func.sum(D.amount), 0.0))
-        .where(D.account_id == card["id"], D.posted > since[0], D.posted <= since[1], ~exists().where(T.id == D.id),
-               or_(D.category.is_(None), D.category.not_in(sorted(transfers))))).scalar() or 0.0)
+        .where(D.account_id == card["id"], D.posted > since[0], D.posted <= since[1], ~exists().where(T.id == D.id))
+    ).scalar() or 0.0)
     if deleted < CENT:
         return 0.0
     listed = conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))

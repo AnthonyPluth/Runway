@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from sqlalchemy import func, select, update
 
-from runway.domain import forecast
+from runway.domain import categories, forecast
 from runway.providers import plaidbank
 from runway.server.api import transactions as tx
 from runway.storage.models import Account, DeletedCharge, Transaction
@@ -109,6 +109,21 @@ class DeletedChargeTests(LedgerCase):
         plaidbank.sync_transactions(self.conn, item, TODAY, ([], [], [{"transaction_id": "t9"}], "c1"))
         self.assertEqual(self.kept(), 0)
         self.assertEqual(self.figures()[0], 300.0)
+
+    def test_a_deleted_transfer_stays_out_whatever_happens_to_its_category(self):
+        """Money out to a transfer category isn't a charge: deleting it keeps nothing, so renaming the category or
+        removing it afterwards doesn't turn it into one."""
+        categories.add(self.conn, "Card Transfer", is_transfer=True)
+        self.tx("cc", "2026-09-16", -150.0, "MOVED OUT", "Card Transfer")
+        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-1050.0))   # the balance has it
+        before = self.figures()
+        self.assertEqual(before[0], 300.0)
+        self.delete("MOVED OUT")
+        self.assertEqual((self.figures(), self.kept()), (before, 0))
+        categories.rename(self.conn, "Card Transfer", "Moved")
+        self.assertEqual(self.figures(), before)
+        categories.remove(self.conn, "Moved")
+        self.assertEqual(self.figures(), before)
 
     def test_kept_charges_go_after_a_year(self):
         self.delete("COFFEE")
