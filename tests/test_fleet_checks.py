@@ -185,15 +185,19 @@ class Images(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertIn("docs/src/assets/tabbar-before-after.png: the only images a change commits", problems[0])
 
+    def test_a_file_exception_is_exact_not_a_prefix(self):
+        self.assertEqual(len(self.problems("docs/src/assets/logo.png-before.png", "docs/src/assets/logo.png.bak.png")), 2)
+        self.assertEqual(self.problems("docs/src/assets/logo.png"), [])
+
     def test_every_raster_format_is_counted_and_vector_and_text_files_are_not(self):
         raster = ["a.png", "b.JPG", "c.jpeg", "d.gif", "e.webp", "f.avif", "g.ico", "h.heic", "i.bmp", "j.tif", "k.TIFF"]
         self.assertEqual([p for p in [*raster, "l.svg", "m.md"] if fc.IMAGE.search(p)], raster)
 
     def test_the_branch_s_added_images_are_read_from_git(self):
-        done = mock.Mock(stdout="docs/a.png\nREADME.md\nfrontend/a.svg\nscreenshots/b-phone.PNG\n")
+        done = mock.Mock(stdout="docs/a.png\0README.md\0frontend/a.svg\0screenshots/b-phone.PNG\0docs/é-ü.png\0")
         with mock.patch.object(fc.subprocess, "run", return_value=done) as run:
-            self.assertEqual(fc.added_images("base"), ["docs/a.png", "screenshots/b-phone.PNG"])
-        self.assertEqual(run.call_args.args[0], ["git", "diff", "--name-only", "--diff-filter=AMR", "base", "HEAD", "--"])
+            self.assertEqual(fc.added_images("base"), ["docs/a.png", "screenshots/b-phone.PNG", "docs/é-ü.png"])
+        self.assertEqual(run.call_args.args[0], ["git", "diff", "--name-only", "-z", "--diff-filter=AMR", "base", "HEAD", "--"])
 
 
 if __name__ == "__main__":

@@ -131,8 +131,9 @@ IMAGE = re.compile(r"\.(png|jpe?g|gif|webp|avif|ico|heic|bmp|tiff?)$", re.IGNORE
 SCREENSHOTS = "screenshots/"
 # Where an image belongs besides screenshots/: the extension's icons, the served assets (icons, logo), and the docs site's logo
 # and the home page's five hand-taken pictures (docs/src/assets/screenshots/: not `make verify`'s, which are 1440×900 and phone.png at 2x).
-IMAGE_HOMES = ("extension/icons/", "runway/static/", "docs/src/assets/logo.png")
-DOCS_PICTURES = tuple(f"docs/src/assets/screenshots/{n}.png" for n in ("overview", "transactions", "budget", "reports", "phone"))
+IMAGE_HOMES = ("extension/icons/", "runway/static/")   # folders: anything under them
+IMAGE_FILES = ("docs/src/assets/logo.png",   # exactly these files
+               *(f"docs/src/assets/screenshots/{n}.png" for n in ("overview", "transactions", "budget", "reports", "phone")))
 VERIFY = ROOT / "frontend/verify/verify.mjs"
 FLOWS = ROOT / "frontend/verify/flows"
 
@@ -159,9 +160,9 @@ def verify_images(text: str | None = None, flows: Path = FLOWS) -> set[str]:
 
 def added_images(base: str) -> list[str]:
     """The images this branch adds, changes or renames since `base` (a deleted one is always fine)."""
-    out = subprocess.run(["git", "diff", "--name-only", "--diff-filter=AMR", base, "HEAD", "--"], cwd=ROOT, check=True,
-                         capture_output=True, text=True).stdout
-    return [path for path in out.splitlines() if IMAGE.search(path)]
+    out = subprocess.run(["git", "diff", "--name-only", "-z", "--diff-filter=AMR", base, "HEAD", "--"], cwd=ROOT,
+                         check=True, capture_output=True, text=True).stdout
+    return [path for path in out.split("\0") if IMAGE.search(path)]   # -z: git doesn't quote a non-ASCII name
 
 
 def check_images(paths: list[str], made: set[str]) -> list[str]:
@@ -169,7 +170,7 @@ def check_images(paths: list[str], made: set[str]) -> list[str]:
             "image named <name>-phone.png or <name>-desktop.png; they are the visual regression baselines), plus the icons and "
             "logos in extension/icons/, runway/static/ and docs/src/assets/; show a before and after through those images' "
             "diff, not a hand-made file"
-            for path in paths if not (path.startswith(IMAGE_HOMES) or path in DOCS_PICTURES
+            for path in paths if not (path.startswith(IMAGE_HOMES) or path in IMAGE_FILES
                                       or (path.startswith(SCREENSHOTS) and path[len(SCREENSHOTS):] in made))]
 
 
