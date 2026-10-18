@@ -9,6 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { isoDay } from "$lib/format";
+import { UNDO_MS } from "$lib/undo";
 import type { DismissedSuggestion, RecurringItem, Suggestion } from "$lib/components/recurring/types";
 import type { Account } from "$lib/types";
 import { toast } from "svelte-sonner";
@@ -160,6 +161,18 @@ describe("Recurring page", () => {
       await userEvent.click(await screen.findByRole("button", { name: /^Link City Water on Mar.4$/ }));
       expect(api).toHaveBeenCalledWith("/api/transactions/t9/recurring", { method: "POST", body: { recurring_id: 2 } });
       await waitFor(() => expect(screen.queryByRole("heading", { name: "Needs attention" })).not.toBeInTheDocument());
+    });
+
+    it("offers Also match in a toast that stays as long as an Undo toast, not the 6s default", async () => {
+      serve([item({ id: 2, name: "Water", missed: [missed] })], [], {
+        "/api/recurring/2/candidates?date=2026-03-02": [{ id: "t9", posted: "2026-03-04", amount: -41.2, name: "City Water" }],
+        "/api/transactions/t9/recurring": { ok: true, suggest_text: "city water" } });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Link a transaction" }));
+      await userEvent.click(await screen.findByRole("button", { name: /^Link City Water on Mar.4$/ }));
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Linked to Water", expect.objectContaining({
+        description: "Also match “city water” from now on?", duration: UNDO_MS, action: expect.objectContaining({ label: "Also match" }) })));
+      expect(UNDO_MS).toBe(10_000);
     });
   });
 

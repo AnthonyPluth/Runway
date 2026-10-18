@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -240,12 +242,23 @@ describe("MobileNav", () => {
     expect(lit.map((l) => l.textContent!.trim())).toEqual(["Invest"]);
   });
 
-  it("floats as a pill, inset from the sides and lifted off the bottom", () => {
+  it("is docked to the bottom edge, 56px of tabs and only half the safe-area inset under them", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(bar).toHaveClass("inset-x-0", "bottom-0", "border-t", "pb-[env(safe-area-inset-bottom)]", "backdrop-blur-xl");
-    expect(bar.firstElementChild).toHaveClass("h-[66px]", "grid-cols-5");
+    expect(bar).toHaveClass("inset-x-0", "bottom-0", "border-t", "pb-[calc(env(safe-area-inset-bottom)/2)]", "backdrop-blur-xl");
+    expect(bar).not.toHaveClass("pb-[env(safe-area-inset-bottom)]");
+    // 56px less 4px of padding each side: tabs 48px tall, over the 44px a finger needs.
+    expect(bar.firstElementChild).toHaveClass("h-[56px]", "grid-cols-5", "p-1");
+    expect(bar.firstElementChild).not.toHaveClass("h-[66px]");
+  });
+
+  it("is the height app.css calls --tabbar-h, which the page padding and the toasts are measured from", () => {
+    const css = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
+    // 1px border + 56px of tabs + half the inset: 57px with no inset, 74px with an iPhone's 34px.
+    expect(css).toMatch(/--tabbar-h:\s*calc\(57px \+ env\(safe-area-inset-bottom\) \/ 2\)/);
+    const shell = readFileSync(resolve(__dirname, "../../App.svelte"), "utf8");
+    expect(shell).toContain("pb-[calc(var(--tabbar-h)+2rem)]");
   });
 
   it("dots More when the sync needs attention, so it's seen without opening the sheet", async () => {

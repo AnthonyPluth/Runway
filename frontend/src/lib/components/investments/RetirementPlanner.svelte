@@ -422,6 +422,6 @@
 {/if}
 
 {#if saved}
-  <div class="fixed right-4 bottom-20 z-40 rounded-md bg-card px-3 py-1.5 text-sm text-[var(--good)] shadow-lg ring-1 ring-border lg:bottom-4" role="status"
+  <div class="fixed right-4 bottom-[calc(var(--tabbar-h)+0.75rem)] z-40 rounded-md bg-card px-3 py-1.5 text-sm text-[var(--good)] shadow-lg ring-1 ring-border lg:bottom-4" role="status"
     style:animation="saved-fade 1.6s ease forwards">Saved ✓</div>
 {/if}
