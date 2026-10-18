@@ -100,7 +100,7 @@ It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` 
 
 ### Screenshots in a pull request
 
-`screenshots/` holds one full-page screenshot of every page and scripted flow at phone and desktop widths (`<name>-<width>.png`; never tablet), all in the one directory and committed. A pull request that changes the UI runs
+`screenshots/` holds one full-page screenshot of every page and scripted flow at phone and desktop widths (`<name>-<width>.png`; never tablet, so a flow that runs only at tablet width leaves no committed screenshot), all in the one directory and committed. A pull request that changes the UI runs
 
 ```bash
 make screenshots

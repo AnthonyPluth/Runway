@@ -271,7 +271,8 @@ async function main() {
       await work(page, shot);
     } catch (e) {
       problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
-      await shot(`${label.replace(/\W+/g, "-")}-FAILED`).catch(() => { /* best effort: the step's own error is already recorded above */ });
+      // Straight to page.screenshot, not shot(): a failure at tablet keeps its evidence in artifacts/verify/ (sync_screenshots never commits -FAILED- files).
+      await page.screenshot({ path: join(out, screenshotFile(`${label.replace(/\W+/g, "-")}-FAILED`, viewport)), fullPage: true }).catch(() => { /* best effort: the step's own error is already recorded above */ });
     }
     for (const c of consoleErrors) problems.push(`${where}: console error: ${c.slice(0, 300)}`);
     results.push({ label, viewport, screenshots: files, consoleErrors });

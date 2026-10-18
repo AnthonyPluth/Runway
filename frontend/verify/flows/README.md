@@ -1,6 +1,6 @@
 # Scripted flows
 
-Each `*.json` file here is a flow that `make verify` runs after visiting the pages, at phone, tablet and desktop widths (or the `viewports` it lists). Screenshots are saved at phone and desktop only: a flow at tablet still runs its steps and `expect_*` checks, but its `screenshot` steps save nothing. A pull request adds steps by adding or editing a file.
+Each `*.json` file here is a flow that `make verify` runs after visiting the pages, at phone, tablet and desktop widths (or the `viewports` it lists). Screenshots are saved at phone and desktop only: a flow at tablet still runs its steps and `expect_*` checks, but its `screenshot` steps save nothing. A flow that lists only `tablet` (such as `transactions-delete-tablet`) therefore leaves no committed screenshot. A step that fails at tablet still saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
 
 ```json
 {
