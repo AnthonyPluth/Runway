@@ -72,14 +72,14 @@
      border is transparent, kept so the width doesn't change), a faint highlight along the top edge and a soft drop shadow.
      The tabs are 48px tall (56px less the 4px padding each side). The bar's top is `--tabbar-h` above the screen's bottom
      (app.css: 1px border twice + 56px + 12px + the inset: 70px with no inset, 104px with an iPhone's 34px); the page's bottom
-     padding, the toasts and a sticky form footer all follow it. Over bright content the inactive labels can fall under 4.5:1:
-     the measured contrast is in docs/src/content/docs/contributing/development.md ("The phone tab bar"). -->
+     padding, the toasts and a sticky form footer all follow it. The inactive labels are #b9bec7, lighter than muted-foreground, so they stay at 4.5:1 or better over the glass
+     (measured: docs/src/content/docs/contributing/development.md, "The phone tab bar"). -->
 <nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 rounded-[22px] border border-transparent bg-popover shadow-[inset_0_1px_0_rgb(255_255_255/0.2),0_18px_40px_-16px_rgb(0_0_0/0.8)] supports-[backdrop-filter]:bg-white/[0.04] supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 supports-[backdrop-filter]:backdrop-brightness-110 desktop:hidden">
   <div class="grid h-[56px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
       <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}
-        class={cn("relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", on ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
+        class={cn("relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", on ? "bg-foreground/12 text-foreground" : "text-[#b9bec7]")}>
         <item.icon class={cn("size-5", on && "stroke-[2.25]")} aria-hidden="true" />
         <span class="max-w-full truncate">{item.short ?? item.label}</span>
         {#if item.page === "transactions" && s?.review_count}
@@ -88,7 +88,7 @@
       </a>
     {/each}
     <button type="button" bind:this={moreBtn} aria-expanded={open} aria-haspopup="dialog" onclick={() => (open = !open)}
-      class={cn("flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", open || inMore ? "bg-foreground/12 text-foreground" : "text-muted-foreground")}>
+      class={cn("flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", open || inMore ? "bg-foreground/12 text-foreground" : "text-[#b9bec7]")}>
       <span class="relative"><Ellipsis class="size-5" aria-hidden="true" />
         <!-- A sync problem shows here too, so it's seen without opening the sheet. -->
         {#if sync.href}<span class={cn("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-popover", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}

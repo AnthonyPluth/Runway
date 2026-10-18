@@ -257,6 +257,15 @@ describe("MobileNav", () => {
     expect(bar.firstElementChild).not.toHaveClass("h-[66px]");
   });
 
+  it("draws the inactive tabs lighter than muted-foreground so the labels stay readable over the glass, and the current one white", () => {
+    app.state = state();
+    render(MobileNav);
+    const bar = screen.getByRole("navigation", { name: "Main" });
+    expect(within(bar).getByRole("link", { name: "Transactions" })).toHaveClass("text-[#b9bec7]");
+    expect(within(bar).getByRole("button", { name: /More/ })).toHaveClass("text-[#b9bec7]");
+    expect(within(bar).getByRole("link", { name: "Overview" })).toHaveClass("bg-foreground/12", "text-foreground");
+  });
+
   it("is the height app.css calls --tabbar-h, which the page padding and the toasts are measured from", () => {
     const css = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
     // 1px border twice + 56px of tabs + 12px lifted + the inset: 70px with no inset, 104px with an iPhone's 34px.
