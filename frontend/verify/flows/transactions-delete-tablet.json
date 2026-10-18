@@ -2,6 +2,7 @@
   "name": "transactions-delete-tablet",
   "page": "transactions",
   "viewports": [
+    "phone",
     "tablet"
   ],
   "steps": [
