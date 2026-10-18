@@ -45,8 +45,11 @@ describe("toasterProps", () => {
     expect(TOAST_CLASSES.toast).toMatch(/\bshadow-lg\b/);
     expect(TOAST_CLASSES.actionButton).toContain("bg-primary");
     expect(TOAST_CLASSES.actionButton).toContain("phone:min-h-11");
-    expect(TOAST_CLASSES.cancelButton).toContain("bg-secondary");
+    expect(TOAST_CLASSES.cancelButton).toContain("bg-background");
     expect(TOAST_CLASSES.closeButton).toContain("size-11");
+    // Text on one row, buttons wrapping onto the next, so a long label (Always for a merchant) never squeezes the text.
+    expect(TOAST_CLASSES.toast).toContain("flex-wrap");
+    expect(TOAST_CLASSES.content).toContain("flex-[1_1_calc(100%-2rem)]");
     for (const c of Object.values(TOAST_CLASSES)) expect(c).not.toMatch(/#[0-9a-f]{3,8}\b|\b(?:black|white)\b|rgb\(|oklch\(/i);
   });
 });

@@ -15,18 +15,20 @@ export function toastBottom(phone: boolean): string {
   return phone ? `calc(var(--tabbar-h) + ${BAR_GAP})` : `calc(env(safe-area-inset-bottom) + ${EDGE_GAP})`;
 }
 
-// The toasts are drawn by these classes alone (`unstyled`), from the same tokens as a card or popover, so they follow the
-// theme (app.css `:root` / `.dark`) and nothing here names a colour. Their buttons are the app's own (ui/button).
+// A toast is its text (and an icon) on one row and its buttons, if it has any, on the next, so a long button label
+// ("Always for Corner Market") never squeezes the text. It is drawn by these classes alone (`unstyled`), from the same
+// tokens as a card or popover, so it follows the theme (app.css `:root` / `.dark`) and nothing here names a colour. Its
+// buttons are the app's own (ui/button).
 export const TOAST_CLASSES = {
-  toast: "pointer-events-auto flex w-[var(--width)] items-center gap-3 rounded-xl border bg-popover py-2 pr-2 pl-4 text-sm text-popover-foreground shadow-lg",
+  toast: "pointer-events-auto relative flex min-h-[3.25rem] w-[var(--width)] flex-wrap items-center justify-end gap-x-3 gap-y-2 rounded-xl border bg-popover py-3 pr-14 pl-4 text-sm text-popover-foreground shadow-lg",
   icon: "flex shrink-0 items-center [&_svg]:size-4",
-  content: "flex min-w-0 flex-1 flex-col gap-0.5 py-1",
+  content: "flex min-w-0 flex-[1_1_calc(100%-2rem)] flex-col gap-0.5",
   title: "font-medium",
   description: "text-xs text-muted-foreground",
   actionButton: buttonVariants({ variant: "default", size: "sm" }),
-  cancelButton: buttonVariants({ variant: "secondary", size: "sm" }),
-  // Always there (not on hover) and 44px square, the size a finger can hit; last in the row whatever the DOM order.
-  closeButton: "order-last inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg]:size-5",
+  cancelButton: buttonVariants({ variant: "outline", size: "sm" }),
+  // Always there (not on hover) and 44px square, the size a finger can hit, in the toast's top right corner.
+  closeButton: "absolute top-1 right-1 inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg]:size-5",
   success: "[&_[data-icon]]:text-good",
   error: "[&_[data-icon]]:text-destructive",
   warning: "[&_[data-icon]]:text-warning",
