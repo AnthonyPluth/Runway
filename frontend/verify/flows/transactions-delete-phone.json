@@ -1,0 +1,57 @@
+{
+  "name": "transactions-delete-phone",
+  "page": "transactions",
+  "viewports": [
+    "phone"
+  ],
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-tx] button[aria-label^=\"Details for \"]"
+    },
+    {
+      "click": "[data-tx] button[aria-label^=\"Details for \"]"
+    },
+    {
+      "click": "button:has-text(\"Delete transaction\")"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-slot=confirm-dialog]",
+        "text": "A later bank sync may bring it back."
+      }
+    },
+    {
+      "screenshot": "confirm"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text(\"Cancel\")"
+    },
+    {
+      "goto": "#review"
+    },
+    {
+      "wait_for": "[data-tx] button[aria-label^=\"Details for \"]"
+    },
+    {
+      "click": "[data-tx] button[aria-label^=\"Details for \"]"
+    },
+    {
+      "click": "button:has-text(\"Delete transaction\")"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-slot=confirm-dialog]",
+        "text": "A later bank sync may bring it back."
+      }
+    },
+    {
+      "screenshot": "review-confirm"
+    },
+    {
+      "click": "[data-slot=confirm-dialog] button:has-text(\"Cancel\")"
+    }
+  ]
+}

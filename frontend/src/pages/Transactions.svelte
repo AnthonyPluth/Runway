@@ -140,8 +140,6 @@
   }
   // Something changed in the list (a row accepted, a bulk change, an undo): the card follows.
   const changed = () => { loadQueue(); return txs.load(); };
-  // Pending: the pending rows among those loaded (the list has no such filter on the server).
-  let pendingOnly = $state(false);
 
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = txs.applied, q = a.q.trim().toLowerCase();
@@ -328,8 +326,7 @@
     {/if}
   </div>
   {#if !review}
-    <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} reviewCount={app.state?.review_count || 0} bind:pending={pendingOnly}
-      onall={() => { pendingOnly = false; txs.clearFilters(); }} onaccount={txs.load} />
+    <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} onaccount={txs.load} />
   {/if}
 
   <div id="tx-filters" class={cn("mb-3 flex flex-wrap items-center gap-2", viewport.phone && !filtersOpen && !isFiltered(txs.f) && "hidden")}>
@@ -420,13 +417,8 @@
       <ReviewGroups items={txs.list.items} onapplied={rv.groupApplied} onchanged={txs.load} />
     {:else}
       {#key txs.loads}
-        {@const visible = pendingOnly ? txs.list.items.filter((t) => t.pending) : txs.list.items}
-        {#if pendingOnly && !visible.length}
-          <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">No pending transactions among these.</Card.Content></Card.Root>
-        {:else}
-        <TxTable items={visible} total={pendingOnly ? visible.length : txs.list.total} {review} {recurring} {only} family={txs.list.family} oneAccount={!!txs.applied.account} every={txs.everyFilter}
+        <TxTable items={txs.list.items} total={txs.list.total} {review} {recurring} {only} family={txs.list.family} oneAccount={!!txs.applied.account} every={txs.everyFilter}
           bind:selecting focused={rv.keyed} onsave={save} onaccept={accept} onchanged={changed} onmore={txs.more} onopen={openTx} today={hostToday} />
-        {/if}
       {/key}
     {/if}
     </div>

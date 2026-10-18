@@ -105,40 +105,28 @@ describe("Transactions: the review card", () => {
 });
 
 describe("Transactions: the filter chips", () => {
-  it("search is a full-width field, and the chips are All, To review · N, Pending and Accounts", async () => {
+  it("search is a full-width field, and Accounts is the only chip: no All, To review or Pending", async () => {
     open([tx({ id: "z", payee: "Zulu" })], []);
     render(Transactions);
     await screen.findByText("Zulu");
     expect(screen.getByRole("searchbox", { name: "Search transactions" })).toHaveClass("w-full");
     const chips = within(document.querySelector<HTMLElement>("[data-chips]")!);
-    expect(chips.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
-    expect(chips.getByRole("link", { name: "To review · 3" })).toHaveAttribute("href", "#review");
-    expect(chips.getByRole("button", { name: "Pending" })).toBeInTheDocument();
     expect(chips.getByText("Accounts")).toBeInTheDocument();
+    for (const gone of ["All", "Pending"]) expect(chips.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+    expect(chips.queryByRole("link", { name: /^To review/ })).not.toBeInTheDocument();   // the To review tab is not a chip
+    expect(document.querySelector("[data-chips] a, [data-chips] button")).toBeNull();
   });
 
-  it("Accounts sets the existing account filter, and All clears the filters", async () => {
+  it("Accounts sets the existing account filter, and Clear filters still resets it", async () => {
     open([tx({ id: "z", payee: "Zulu" })], []);
     render(Transactions);
     await screen.findByText("Zulu");
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
     expect(txFilters.transactions.account).toBe("a1");
     await waitFor(() => expect(lastList()).toContain("account=a1"));
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(txFilters.transactions.account).toBe("");
     await waitFor(() => expect(lastList()).not.toContain("account="));
-  });
-
-  it("Pending shows only the pending rows loaded", async () => {
-    open([tx({ id: "p", payee: "Pend", pending: 1 }), tx({ id: "q", payee: "Posted" })], []);
-    render(Transactions);
-    await screen.findByText("Posted");
-    await userEvent.click(screen.getByRole("button", { name: "Pending" }));
-    expect(screen.queryByText("Posted")).not.toBeInTheDocument();
-    expect(screen.getByText("Pend")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "All" }));
-    expect(await screen.findByText("Posted")).toBeInTheDocument();
   });
 
   it("search sets the existing q filter", async () => {
