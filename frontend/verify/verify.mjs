@@ -1,5 +1,5 @@
 // Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone and desktop
-// widths (tablet is visited and checked but not screenshotted), plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
+// widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
 // demo database and the server; run alone it needs a server that already has the demo data.
 //
 //   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page…]
@@ -10,7 +10,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const VIEWPORTS = { phone: { width: 390, height: 844 }, tablet: { width: 768, height: 1024 }, desktop: { width: 1280, height: 800 } };
+// The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
+// tools/fleet_checks.py reads to know the names of the images `make verify` writes.
+export const VIEWPORTS = { phone: { width: 440, height: 956 }, desktop: { width: 1280, height: 800 } };
+export const DEFAULT_VIEWPORTS = ["phone", "desktop"];
 // Only a flow that lists it runs here (not every page): a phone turned sideways, which app.css still counts as a phone (short, touch-driven).
 export const LANDSCAPE = { landscape: { width: 844, height: 390 } };
 export const PAGES = ["overview", "transactions", "budget", "investments", "recurring", "networth", "reports", "churning", "setup"];
@@ -28,10 +31,6 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   }
   return undefined;
 }
-
-/** Widths that are visited and checked (console errors, 5xx, expect_* steps) but never screenshotted: no tablet screenshot is saved or committed. */
-export const NO_SCREENSHOT = new Set(["tablet"]);
-export const savesScreenshots = (viewport) => !NO_SCREENSHOT.has(viewport);
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
@@ -262,7 +261,6 @@ async function main() {
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     const files = [];
     const shot = async (name) => {
-      if (!savesScreenshots(viewport)) return;
       const file = screenshotFile(name, viewport);
       await page.screenshot({ path: join(out, file), fullPage: true });
       files.push(file);
@@ -271,7 +269,7 @@ async function main() {
       await work(page, shot);
     } catch (e) {
       problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
-      // Straight to page.screenshot, not shot(): a failure at tablet keeps its evidence in artifacts/verify/ (sync_screenshots never commits -FAILED- files).
+      // Straight to page.screenshot, not shot(): a failed step keeps its evidence in artifacts/verify/ (sync_screenshots never commits -FAILED- files).
       await page.screenshot({ path: join(out, screenshotFile(`${label.replace(/\W+/g, "-")}-FAILED`, viewport)), fullPage: true }).catch(() => { /* best effort: the step's own error is already recorded above */ });
     }
     for (const c of consoleErrors) problems.push(`${where}: console error: ${c.slice(0, 300)}`);
@@ -280,7 +278,7 @@ async function main() {
   }
 
   for (const name of pages) {
-    for (const viewport of Object.keys(VIEWPORTS)) {
+    for (const viewport of DEFAULT_VIEWPORTS) {
       await visit(name, viewport, async (page, shot) => {
         await page.goto(`${base}/#${name}`, { waitUntil: "networkidle" });
         await shot(name);
@@ -290,7 +288,7 @@ async function main() {
   for (const flow of flows) {
     if (args.length && !args.includes(flow.page ?? "overview")) continue;
     if (flow.signed_in && !(signedInUrl && session)) { notes.push(`flow ${flow.name}: skipped (no signed-in server: run it with make verify)`); continue; }
-    for (const viewport of flow.viewports ?? Object.keys(VIEWPORTS)) {
+    for (const viewport of flow.viewports ?? DEFAULT_VIEWPORTS) {
       await visit(`flow ${flow.name}`, viewport, async (page, shot) => {
         await page.goto(`${flow.signed_in ? signedInUrl : base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
         for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));

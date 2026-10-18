@@ -1,6 +1,6 @@
 # Scripted flows
 
-Each `*.json` file here is a flow that `make verify` runs after visiting the pages, at phone, tablet and desktop widths (or the `viewports` it lists). Screenshots are saved at phone and desktop only: a flow at tablet still runs its steps and `expect_*` checks, but its `screenshot` steps save nothing. A flow that lists only `tablet` (such as `transactions-delete-tablet`) therefore leaves no committed screenshot. A step that fails at tablet still saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
+Each `*.json` file here is a flow that `make verify` runs after visiting the pages, at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths (or the `viewports` it lists). There is no tablet width. A step that fails saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
 
 ```json
 {
@@ -16,7 +16,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
 }
 ```
 
-- `page` is the route the flow starts on (default `overview`); `viewports` defaults to all three; `landscape` (844×390, touch: a phone turned sideways) runs only when a flow lists it.
+- `page` is the route the flow starts on (default `overview`); `viewports` defaults to `phone` and `desktop`; `landscape` (844×390, touch: a phone turned sideways) runs only when a flow lists it.
 - `"signed_in": true` runs the flow signed in: against a second demo server with sign-in on (runway/verify.py), with a session made for it and a virtual platform authenticator (Chrome's DevTools WebAuthn) standing in for Face ID or Touch ID. The app lock's flow (`app-lock.json`) needs it. Each viewport is a new browser on the same session, so a flow that changes something about the session puts it back at the end.
 - A step has one action, and an optional `timeout` in milliseconds (default 10000). Selectors are [Playwright selectors](https://playwright.dev/docs/other-locators) (CSS, `text=…`, `role=…`).
   - `{"goto": "#route"}` opens a route of the app (or a full URL).

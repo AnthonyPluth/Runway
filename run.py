@@ -6,8 +6,8 @@ Backups:  poetry run python run.py backup [file.json.gz]   save everything to a 
           poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip;
                                                            stop Runway first)
 Sample:   poetry run python run.py demo                     fill an empty database with made-up data (for previews)
-Verify:   poetry run python run.py verify [page…]           run the app on made-up data in a browser at phone, tablet and
-                                                           desktop widths; phone and desktop screenshots and a report go to artifacts/verify/
+Verify:   poetry run python run.py verify [page…]           run the app on made-up data in a browser at phone and
+                                                           desktop widths; screenshots and a report go to artifacts/verify/
 """
 import argparse
 import os

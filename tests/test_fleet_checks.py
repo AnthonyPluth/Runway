@@ -1,9 +1,11 @@
 """tools/fleet_checks.py: the checks that replaced instructions (one migration head, migrations tested, agents' commit
 trailers, workflow conventions), each passing on the repository as it is and failing on the mistake it is for."""
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("fleet_checks", ROOT / "tools" / "fleet_checks.py")
@@ -126,6 +128,76 @@ class Workflows(unittest.TestCase):
 
     def test_a_list_read_without_paginate_fails(self):
         self.assertIn("without --paginate", fc.check_workflow("x.yml", self.GOOD.replace("--paginate ", ""))[0])
+
+
+class Images(unittest.TestCase):
+    VERIFY = 'export const PAGES = ["budget", "setup"];\nexport const DEFAULT_VIEWPORTS = ["phone", "desktop"];\n'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.flows = Path(tmp.name)
+        self.flow("emoji", steps=[{"goto": "#setup"}, {"screenshot": "open"}, {"click": "a"}])
+        self.flow("lock", viewports=["phone", "landscape"], steps=[{"screenshot": "locked"}])
+        self.made = fc.verify_images(self.VERIFY, self.flows)
+
+    def flow(self, name, **fields):
+        (self.flows / f"{name}.json").write_text(json.dumps({"name": name, **fields}))
+
+    def problems(self, *paths):
+        return fc.check_images(list(paths), self.made)
+
+    def test_the_names_come_from_the_pages_and_the_flows(self):
+        self.assertEqual(self.made, {
+            "budget-phone.png", "budget-desktop.png", "setup-phone.png", "setup-desktop.png",
+            "flow-emoji-phone.png", "flow-emoji-desktop.png", "flow-emoji-open-phone.png", "flow-emoji-open-desktop.png",
+            "flow-lock-phone.png", "flow-lock-landscape.png", "flow-lock-locked-phone.png", "flow-lock-locked-landscape.png"})
+
+    def test_the_real_pages_and_flows_are_read(self):
+        made = fc.verify_images()
+        self.assertIn("budget-phone.png", made)
+        self.assertIn("flow-more-sheet-focus-landscape.png", made)
+        self.assertFalse([n for n in made if "tablet" in n.rsplit("-", 1)[-1]])
+
+    def test_every_committed_screenshot_is_one_make_verify_writes(self):
+        committed = [str(p.relative_to(ROOT)) for p in (ROOT / "screenshots").glob("*.png")]
+        self.assertEqual(fc.check_images(committed, fc.verify_images()), [])
+
+    def test_a_screenshot_make_verify_writes_passes(self):
+        self.assertEqual(self.problems("screenshots/budget-phone.png", "screenshots/flow-emoji-open-desktop.png",
+                                       "screenshots/flow-lock-locked-landscape.png"), [])
+
+    def test_a_file_in_screenshots_make_verify_would_not_write_fails(self):
+        for name in ("before-after.png", "budget-tablet.png", "budget-phone-top.png", "nope-phone.png", "flow-emoji-open-landscape.png"):
+            self.assertEqual(len(self.problems(f"screenshots/{name}")), 1, name)
+
+    def test_the_screenshots_must_be_in_the_screenshots_folder(self):
+        self.assertEqual(len(self.problems("docs/src/assets/screenshots/budget-phone.png")), 1)
+        self.assertEqual(len(self.problems("budget-phone.png")), 1)
+
+    def test_icons_assets_and_the_docs_site_pictures_pass(self):
+        self.assertEqual(self.problems("extension/icons/icon-16.png", "runway/static/icon-192.png", "docs/src/assets/logo.png",
+                                       "docs/src/assets/screenshots/overview.png", "docs/src/assets/screenshots/phone.png"), [])
+
+    def test_a_hand_made_comparison_image_fails_wherever_it_is(self):
+        problems = self.problems("docs/src/assets/tabbar-before-after.png", "docs/src/assets/screenshots/before-after.png",
+                                 "screenshots/budget-phone.png")
+        self.assertEqual(len(problems), 2)
+        self.assertIn("docs/src/assets/tabbar-before-after.png: the only images a change commits", problems[0])
+
+    def test_a_file_exception_is_exact_not_a_prefix(self):
+        self.assertEqual(len(self.problems("docs/src/assets/logo.png-before.png", "docs/src/assets/logo.png.bak.png")), 2)
+        self.assertEqual(self.problems("docs/src/assets/logo.png"), [])
+
+    def test_every_raster_format_is_counted_and_vector_and_text_files_are_not(self):
+        raster = ["a.png", "b.JPG", "c.jpeg", "d.gif", "e.webp", "f.avif", "g.ico", "h.heic", "i.bmp", "j.tif", "k.TIFF"]
+        self.assertEqual([p for p in [*raster, "l.svg", "m.md"] if fc.IMAGE.search(p)], raster)
+
+    def test_the_branch_s_added_images_are_read_from_git(self):
+        done = mock.Mock(stdout="docs/a.png\0README.md\0frontend/a.svg\0screenshots/b-phone.PNG\0docs/é-ü.png\0")
+        with mock.patch.object(fc.subprocess, "run", return_value=done) as run:
+            self.assertEqual(fc.added_images("base"), ["docs/a.png", "screenshots/b-phone.PNG", "docs/é-ü.png"])
+        self.assertEqual(run.call_args.args[0], ["git", "diff", "--name-only", "-z", "--diff-filter=AMR", "base", "HEAD", "--"])
 
 
 if __name__ == "__main__":

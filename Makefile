@@ -107,10 +107,9 @@ docs: docs/node_modules
 docs-build: docs/node_modules
 	cd docs && $(NPM) run build
 
-# Runs the real app on made-up demo data and drives it with Playwright: each page at phone, tablet and desktop widths, plus
-# the scripted flows in frontend/verify/flows. Full-page screenshots (phone and desktop only; tablet is visited and checked, not
-# screenshotted), console errors and failed requests go to artifacts/verify/; it
-# fails on a console error or a 5xx. `make verify PAGES="budget setup"` visits only those pages.
+# Runs the real app on made-up demo data and drives it with Playwright: each page at phone and desktop widths, plus
+# the scripted flows in frontend/verify/flows. Full-page screenshots, console errors and failed requests go to
+# artifacts/verify/; it fails on a console error or a 5xx. `make verify PAGES="budget setup"` visits only those pages.
 verify: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify $(PAGES)
 
