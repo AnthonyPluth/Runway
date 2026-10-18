@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
+import { viewport } from "$lib/phone.svelte";
 import { categories } from "$lib/categories.svelte";
 import { category, tx, txSplit, txOrder } from "../../../test/fixtures";
 import TxRow from "./TxRow.svelte";
@@ -23,6 +24,19 @@ beforeEach(() => {
   categories.list = [category("Coffee", { icon: "☕" }), category("Groceries", { icon: "🛒" }), category("Salary", { is_income: true })];
   app.state = null;
   vi.mocked(api).mockClear();
+});
+
+describe("TxRow delete button", () => {
+  afterEach(() => { viewport.phone = false; });
+  it("shows the trash button off a phone", () => {
+    render(TxRow, props(tx()));
+    expect(screen.getByRole("button", { name: "Delete Blue Bottle" })).toBeInTheDocument();
+  });
+  it("does not render the trash button on a phone", () => {
+    viewport.phone = true;
+    render(TxRow, props(tx()));
+    expect(screen.queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
+  });
 });
 
 describe("TxRow", () => {
