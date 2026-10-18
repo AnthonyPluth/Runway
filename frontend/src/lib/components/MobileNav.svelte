@@ -68,13 +68,14 @@
 
 <!-- A floating pill, inset 12px from the screen's sides and lifted 12px (plus the safe-area inset, so the home indicator is
      below it) off the bottom, drawn as frosted glass: a solid popover surface where `backdrop-filter` isn't supported, and
-     where it is a 4% white tint over a 28px blur that also saturates and brightens what scrolls behind it. No outline (the
+     where it is the popover surface at 60% over a 28px blur that also saturates what scrolls behind it, so text behind the pill is soft and
+     doesn't read as words. No outline (the
      border is transparent, kept so the width doesn't change), a faint highlight along the top edge and a soft drop shadow.
      The tabs are 48px tall (56px less the 4px padding each side). The bar's top is `--tabbar-h` above the screen's bottom
      (app.css: 1px border twice + 56px + 12px + the inset: 70px with no inset, 104px with an iPhone's 34px); the page's bottom
      padding, the toasts and a sticky form footer all follow it. The inactive labels are #b9bec7, lighter than muted-foreground, so they stay at 4.5:1 or better over the glass
      (measured: docs/src/content/docs/contributing/development.md, "The phone tab bar"). -->
-<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 rounded-[22px] border border-transparent bg-popover shadow-[inset_0_1px_0_rgb(255_255_255/0.2),0_18px_40px_-16px_rgb(0_0_0/0.8)] supports-[backdrop-filter]:bg-white/[0.04] supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 supports-[backdrop-filter]:backdrop-brightness-110 desktop:hidden">
+<nav aria-label="Main" {...(open ? { inert: true } : {})} class="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 rounded-[22px] border border-transparent bg-popover shadow-[inset_0_1px_0_rgb(255_255_255/0.2),0_18px_40px_-16px_rgb(0_0_0/0.8)] supports-[backdrop-filter]:bg-popover/60 supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 desktop:hidden">
   <div class="grid h-[56px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}

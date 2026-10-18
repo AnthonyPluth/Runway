@@ -248,8 +248,9 @@ describe("MobileNav", () => {
     const bar = screen.getByRole("navigation", { name: "Main" });
     expect(bar).toHaveClass("fixed", "inset-x-3", "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]", "rounded-[22px]");
     // No outline (the border keeps its width but is transparent), a solid surface where backdrop-filter is missing, and the glass where it is.
-    expect(bar).toHaveClass("border", "border-transparent", "bg-popover", "supports-[backdrop-filter]:bg-white/[0.04]",
-      "supports-[backdrop-filter]:backdrop-blur-[28px]", "supports-[backdrop-filter]:backdrop-saturate-200", "supports-[backdrop-filter]:backdrop-brightness-110");
+    expect(bar).toHaveClass("border", "border-transparent", "bg-popover", "supports-[backdrop-filter]:bg-popover/60",
+      "supports-[backdrop-filter]:backdrop-blur-[28px]", "supports-[backdrop-filter]:backdrop-saturate-200");
+    expect(bar.className).not.toContain("backdrop-brightness");
     expect(bar.className).toContain("shadow-[inset_0_1px_0_rgb(255_255_255/0.2)");
     expect(bar).not.toHaveClass("border-t", "bg-popover/90", "backdrop-blur-xl");
     // 56px less 4px of padding each side: tabs 48px tall, over the 44px a finger needs.
