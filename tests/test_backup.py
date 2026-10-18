@@ -17,7 +17,7 @@ from runway.storage import backup, db
 from runway.domain import networth
 from runway import server
 from runway.storage import settings_keys as sk
-from runway.storage.models import (Account, AuthSession, Budget, Category, MonthBudget, OAuthClient, OAuthGrant,
+from runway.storage.models import (Account, AuthSession, Budget, Category, DeletedCharge, MonthBudget, OAuthClient, OAuthGrant,
                                    OAuthToken, PlaidItem, Rule, Transaction)
 from tests.shared import add_database, fetch, own_database, serve
 
@@ -90,6 +90,8 @@ class BackupTests(unittest.TestCase):
     def test_round_trip_keeps_awkward_values(self):
         src = db.connect(self.a)
         self.awkward(src)
+        src.execute(insert(DeletedCharge).values(id="a-card:1|2", account_id="a-card:1", posted="2026-02-28", amount=-0.1 - 0.2,
+                                                 category="Café ’ 🐶"))
         src.commit()
         data = backup.load(backup.dump(src))
         self.assertEqual(data["revision"], backup.head())   # made at this version's revision: restored as it is
@@ -133,7 +135,8 @@ class BackupTests(unittest.TestCase):
         dst.commit()
         then, now = self.rows_of(src), self.rows_of(dst)
         self.assertEqual({t: rows for t, rows in now.items() if t in then}, then)
-        self.assertEqual({t: rows for t, rows in now.items() if t not in then}, {"budget_months": []})   # tables added since: empty
+        self.assertEqual({t: rows for t, rows in now.items() if t not in then},
+                         {"budget_months": [], "deleted_charges": []})   # tables added since: empty
         if db.using_postgres():   # the database it was brought up to date in is gone, never committed
             self.assertEqual(dst.sa.exec_driver_sql("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'runway_restore_%%'").scalar(), 0)
         src.close(); dst.close()

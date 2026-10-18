@@ -595,10 +595,11 @@ def api_tx_import(conn, _q, body):
 _CHUNK = 500
 
 
-def remove(conn, ids: list[str]) -> int:
+def remove(conn, ids: list[str], today: date) -> int:
     """Delete these transactions (the ones there are), the way one is deleted: their parts go, the order charges that
-    matched them let go, and the transactions themselves. All or nothing: a failure part-way leaves every one in place.
-    Returns how many there were."""
+    matched them let go, and the transactions themselves. A posted charge on a card is kept for the forecast, which goes
+    on counting it while the card's balance has it (forecast.remember_deleted_charges). All or nothing: a failure
+    part-way leaves every one in place. Returns how many there were."""
     found = 0
     with conn.sa.begin_nested():   # a savepoint, so a failure part-way undoes the chunks already done even if the caller commits
         for i in range(0, len(ids), _CHUNK):
@@ -607,6 +608,7 @@ def remove(conn, ids: list[str]) -> int:
             if not there:
                 continue
             found += len(there)
+            forecast.remember_deleted_charges(conn, there, today)
             conn.execute(delete(TxSplit).where(TxSplit.tx_id.in_(there)))
             conn.execute(update(RetailCharge).where(RetailCharge.tx_id.in_(there)).values(tx_id=None, applied=None, match_source=None))
             conn.execute(delete(Transaction).where(Transaction.id.in_(there)))
@@ -616,7 +618,7 @@ def remove(conn, ids: list[str]) -> int:
 def api_tx_delete(conn, _q, _b, tx_id) -> Ok:
     """Delete a transaction; a later bank sync may import it again."""
     _tx(conn, tx_id)
-    remove(conn, [tx_id])
+    remove(conn, [tx_id], date.today())
     return {"ok": True}
 
 
@@ -633,7 +635,7 @@ def api_tx_bulk_delete(conn, _q, body: TxBulkDelete) -> TxDeleted:
         raise ApiError("Select some transactions first")
     if len(ids) > categorize.MAX_BULK:
         raise ApiError(f"Delete at most {categorize.MAX_BULK:,} transactions at once")
-    return {"ok": True, "deleted": remove(conn, ids)}
+    return {"ok": True, "deleted": remove(conn, ids, date.today())}
 
 
 def api_tx_brand_name(conn, _q, body, tx_id):

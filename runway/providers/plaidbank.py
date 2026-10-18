@@ -25,8 +25,8 @@ from ..storage import db
 from .. import validate
 from ..storage import settings_keys as sk
 from ..domain.categorize import bank_payee, clean_payee, kept_bank_names
-from ..storage.models import (Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Recurring,
-                              Transaction)
+from ..storage.models import (Account, CardStatement, DeletedAccount, DeletedCharge, LoanTerms, PlaidAccount, PlaidItem,
+                              Recurring, Transaction)
 from .banktx import PLAID_IDS as PLAID_IDS   # re-exported: what reads transactions tells Plaid's apart by it
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
@@ -438,8 +438,11 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         if merchant:
             conn.execute(update(Transaction).where(Transaction.id == key).values(merchant_id=merchant))
     for r in removed:
-        # By key in each account it could be in (a LIKE on the id would read the whole table for each one).
-        conn.execute(delete(Transaction).where(Transaction.id.in_(select(Account.id + ("|pl:" + r["transaction_id"])))))
+        # By key in each account it could be in (a LIKE on the id would read the whole table for each one). A card charge
+        # you deleted that the bank has taken back stops counting in the forecast too (forecast.deleted_still_owed).
+        keys = select(Account.id + ("|pl:" + r["transaction_id"]))
+        conn.execute(delete(Transaction).where(Transaction.id.in_(keys)))
+        conn.execute(delete(DeletedCharge).where(DeletedCharge.id.in_(keys)))
     if not item["cursor"]:
         # The whole history was read again: a hold the bank dropped in the meantime won't be in `removed`, so any
         # pending row of this connection's that isn't in the reply is gone.

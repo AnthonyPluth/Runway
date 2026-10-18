@@ -344,6 +344,18 @@ manual_statements = Table(
     info={'doc': "credit card statements you entered, one per statement, for a card Plaid has none for (statements.py)"},
 )
 
+deleted_charges = Table(
+    'deleted_charges', metadata,
+    Column('id', Text, primary_key=True, doc='the transaction you deleted (transactions.id)'),
+    Column('account_id', Text, refers('deleted_charges', 'account_id', 'accounts.id', 'CASCADE'), nullable=False),
+    Column('posted', Text, nullable=False),
+    Column('amount', Float, nullable=False, doc='money out, negative'),
+    Column('category', Text),
+    Column('deleted_at', Text, server_default=now_text()),
+    info={'doc': "posted card charges you deleted from the list, which the card's balance at the bank still has: the "
+                 "forecast keeps counting them in the statement in progress, as far as the balance says (card_cycle)"},
+)
+
 deleted_accounts = Table(
     'deleted_accounts', metadata,
     Column('id', Text, primary_key=True, doc='the account you deleted (accounts.id); syncs leave it out'),
