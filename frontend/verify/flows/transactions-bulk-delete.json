@@ -34,7 +34,6 @@
     }
   ],
   "viewports": [
-    "desktop",
-    "tablet"
+    "desktop"
   ]
 }

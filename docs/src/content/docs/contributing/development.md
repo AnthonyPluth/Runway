@@ -89,7 +89,7 @@ Link to another page by its address, base included: `[Configuration](/Runway/ref
 
 ## Verifying a change in the real app
 
-Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` (or `python run.py verify [page…]`) makes a temporary database, fills it with the demo data (the made-up data `python run.py demo` adds, never yours), starts Runway on a free port, and drives it with Playwright: each page (`overview`, `transactions`, `budget`, `recurring`, `networth`, `reports`, `churning`, `setup`) at phone (390 px), tablet (768 px) and desktop (1280 px) widths. Full-page screenshots (`<page>-<width>.png`) are saved at phone and desktop only; tablet is visited and checked but never screenshotted. The screenshots and `report.json` (console errors, failed requests) go to `artifacts/verify/`, which is not committed. It exits non-zero on a console error, an uncaught error in the page, a 5xx response or a failed scripted step, and says which page, width and request.
+Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` (or `python run.py verify [page…]`) makes a temporary database, fills it with the demo data (the made-up data `python run.py demo` adds, never yours), starts Runway on a free port, and drives it with Playwright: each page (`overview`, `transactions`, `budget`, `recurring`, `networth`, `reports`, `churning`, `setup`) at phone (440×956 px, an iPhone 17 Pro Max) and desktop (1280×800 px) widths, and saves a full-page screenshot of each (`<page>-<width>.png`). There is no tablet width: a change to the tablet rail (768 to 1023 px) is looked at by resizing a browser, and nothing of that is committed. The screenshots and `report.json` (console errors, failed requests) go to `artifacts/verify/`, which is not committed. It exits non-zero on a console error, an uncaught error in the page, a 5xx response or a failed scripted step, and says which page, width and request.
 
 ```bash
 make verify                          # every page, and the scripted flows
@@ -100,13 +100,13 @@ It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` 
 
 ### Screenshots in a pull request
 
-`screenshots/` holds one full-page screenshot of every page and scripted flow at phone and desktop widths (`<name>-<width>.png`; never tablet, so a flow that runs only at tablet width leaves no committed screenshot), all in the one directory and committed. A pull request that changes the UI runs
+`screenshots/` holds one full-page screenshot of every page and scripted flow at phone and desktop widths (`<name>-<width>.png`), all in the one directory and committed. They are the visual regression baselines, and the only images a change commits are the ones `make verify` writes: show a before and after through the changed screenshots' diff in the pull request, never a hand-made comparison image (`make fleet-checks` fails a raster image that is not a page or flow image `make verify` can write into `screenshots/`, or an icon or logo in `extension/icons/`, `runway/static/` or `docs/src/assets/`). A pull request that changes the UI runs
 
 ```bash
 make screenshots
 ```
 
-before its last push and commits what changed. `make screenshots` is a full `make verify` followed by `tools/sync_screenshots.py` (standard library only), which copies the new screenshots in, leaves identical files untouched and removes the ones whose page or flow is gone, and any tablet screenshot. The pull request's **Files changed** then shows each changed screenshot as an image diff (2-up, swipe or onion skin), so a reviewer sees what the change did to the page.
+before its last push and commits what changed. `make screenshots` is a full `make verify` followed by `tools/sync_screenshots.py` (standard library only), which copies the new screenshots in, leaves identical files untouched and removes the ones whose page or flow is gone. The pull request's **Files changed** then shows each changed screenshot as an image diff (2-up, swipe or onion skin), so a reviewer sees what the change did to the page.
 
 Commit every change in the directory, including pages you didn't mean to touch: an unexpected diff is how a change that leaks into another page gets noticed. The demo data's dates follow the day `make verify` runs, so a date or a chart's axis can differ for that reason alone. The repository is public: only `make verify`'s made-up demo data is ever committed, and the independent review opens every added or changed image to check it. `make verify` captures the dark theme only; check the light theme yourself for a change that depends on it, and say so. A pull request with no UI change has nothing to update, and says so.
 

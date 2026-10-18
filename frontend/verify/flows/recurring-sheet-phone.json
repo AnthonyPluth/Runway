@@ -1,0 +1,87 @@
+{
+  "name": "recurring-sheet-phone",
+  "page": "recurring",
+  "steps": [
+    {
+      "goto": "#recurring"
+    },
+    {
+      "wait_for": "button[aria-haspopup=dialog]:has-text('Gym')"
+    },
+    {
+      "click": "button[aria-haspopup=dialog]:has-text('Gym')"
+    },
+    {
+      "wait_for": "[data-recurring-sheet]"
+    },
+    {
+      "wait_for": "text=Skip the next one"
+    },
+    {
+      "screenshot": "open"
+    },
+    {
+      "scroll_to": "[data-recurring-sheet] >> text=Skip the next one"
+    },
+    {
+      "screenshot": "actions"
+    },
+    {
+      "click": "[data-recurring-sheet] >> text=Skip the next one"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> text=Put it back"
+    },
+    {
+      "scroll_to": "[data-recurring-sheet] >> text=Put it back"
+    },
+    {
+      "screenshot": "skipped"
+    },
+    {
+      "click": "[data-sonner-toast] [data-close-button]"
+    },
+    {
+      "click": "[data-recurring-sheet] >> text=Put it back"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> text=Skip the next one"
+    },
+    {
+      "click": "[data-recurring-sheet] >> button:text-is('Pause')"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> button:text-is('Resume')"
+    },
+    {
+      "scroll_to": "[data-recurring-sheet] >> button:text-is('Resume')"
+    },
+    {
+      "screenshot": "paused"
+    },
+    {
+      "click": "[data-recurring-sheet] >> button:text-is('Resume')"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> button:text-is('Pause')"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> text=Show matched transactions"
+    },
+    {
+      "click": "[data-recurring-sheet] >> text=Show matched transactions"
+    },
+    {
+      "wait_for": "[data-recurring-sheet] >> text=Hide matched transactions"
+    },
+    {
+      "scroll_to": "[data-recurring-sheet] >> table tr:last-child"
+    },
+    {
+      "screenshot": "matched"
+    }
+  ],
+  "viewports": [
+    "phone"
+  ]
+}

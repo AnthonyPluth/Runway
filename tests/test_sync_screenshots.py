@@ -47,15 +47,11 @@ class Sync(unittest.TestCase):
             sync_screenshots.sync(self.src, self.dest)
         self.assertTrue((self.dest / "keep-phone.png").exists())   # a missing verify run doesn't empty the directory
 
-    def test_ignores_tablet_screenshots_and_removes_stale_ones(self):
+    def test_removes_a_leftover_tablet_screenshot_as_it_has_no_counterpart(self):
         self.dest.mkdir()
         self.shot(self.src, "budget-phone.png", b"a")
-        self.shot(self.src, "budget-tablet.png", b"b")
-        self.shot(self.src, "flow-x-confirm-tablet.png", b"c")
         self.shot(self.dest, "budget-tablet.png", b"old")
         self.shot(self.dest, "flow-y-tablet.png", b"old")
-        self.shot(self.src, "flow-delete-tablet-desktop.png", b"d")   # a flow named …-tablet, at another width, is kept
         written, removed = sync_screenshots.sync(self.src, self.dest)
-        self.assertEqual(written, ["budget-phone.png", "flow-delete-tablet-desktop.png"])
-        self.assertEqual(removed, ["budget-tablet.png", "flow-y-tablet.png"])
-        self.assertEqual(sorted(p.name for p in self.dest.iterdir()), ["budget-phone.png", "flow-delete-tablet-desktop.png"])
+        self.assertEqual((written, removed), (["budget-phone.png"], ["budget-tablet.png", "flow-y-tablet.png"]))
+        self.assertEqual(sorted(p.name for p in self.dest.iterdir()), ["budget-phone.png"])

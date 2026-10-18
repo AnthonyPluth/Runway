@@ -8,6 +8,10 @@ one a correction that used to live as prose and now fails `make check` and CI in
 - Commits (`--commits BASE..HEAD`, a pull request's): an agent's commit (one with a `Claude-Session:` trailer, or any
   `Co-Authored-By:` trailer naming Claude) carries exactly one `Co-Authored-By: Claude <Model> <version>
   <noreply@anthropic.com>` trailer naming the model that wrote it.
+- Images (`--commits`): a raster image the branch adds or changes is one `make verify` writes to screenshots/ (a page or
+  flow image, `<name>-<phone|desktop>.png`, the names read from frontend/verify/verify.mjs and its flows) or sits where
+  images belong (the extension's icons, the served assets, the docs site's logo and home page images); a hand-made before
+  and after image fails.
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
   every action pinned by SHA has its version in a comment; and `gh api` with `per_page` paginates.
 
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import subprocess
@@ -120,6 +125,54 @@ def commits(revision_range: str) -> list[tuple[str, str]]:
     return [tuple(rec.strip("\n").split("\0", 1)) for rec in out.split("\x1e") if rec.strip()]  # type: ignore[misc]
 
 
+# --- Images -------------------------------------------------------------------------------------------------------
+
+IMAGE = re.compile(r"\.(png|jpe?g|gif|webp|avif|ico|heic|bmp|tiff?)$", re.IGNORECASE)
+SCREENSHOTS = "screenshots/"
+# Where an image belongs besides screenshots/: the extension's icons, the served assets (icons, logo), and the docs site's logo
+# and the home page's five hand-taken pictures (docs/src/assets/screenshots/: not `make verify`'s, which are 1440×900 and phone.png at 2x).
+IMAGE_HOMES = ("extension/icons/", "runway/static/", "docs/src/assets/logo.png")
+DOCS_PICTURES = tuple(f"docs/src/assets/screenshots/{n}.png" for n in ("overview", "transactions", "budget", "reports", "phone"))
+VERIFY = ROOT / "frontend/verify/verify.mjs"
+FLOWS = ROOT / "frontend/verify/flows"
+
+
+def _verify_list(text: str, name: str) -> list[str]:
+    found = re.search(r"export const " + name + r" = \[([^\]]*)\]", text)
+    return re.findall(r"""["']([\w-]+)["']""", found.group(1)) if found else []
+
+
+def verify_images(text: str | None = None, flows: Path = FLOWS) -> set[str]:
+    """The file names `make verify` can write: `<page>-<width>.png` for each page in verify.mjs's PAGES at its
+    DEFAULT_VIEWPORTS, and for each flow `flow-<name>-<width>.png` plus `flow-<name>-<step>-<width>.png` for each of its
+    `screenshot` steps, at the widths it lists (else the defaults)."""
+    text = VERIFY.read_text() if text is None else text
+    pages, widths = _verify_list(text, "PAGES"), _verify_list(text, "DEFAULT_VIEWPORTS")
+    names = {f"{page}-{w}.png" for page in pages for w in widths}
+    for path in sorted(flows.glob("*.json")):
+        flow = json.loads(path.read_text())
+        steps = [s["screenshot"] for s in flow.get("steps", []) if isinstance(s.get("screenshot"), str)]
+        for w in flow.get("viewports") or widths:
+            names |= {f"flow-{flow['name']}-{w}.png", *(f"flow-{flow['name']}-{n}-{w}.png" for n in steps)}
+    return names
+
+
+def added_images(base: str) -> list[str]:
+    """The images this branch adds, changes or renames since `base` (a deleted one is always fine)."""
+    out = subprocess.run(["git", "diff", "--name-only", "--diff-filter=AMR", base, "HEAD", "--"], cwd=ROOT, check=True,
+                         capture_output=True, text=True).stdout
+    return [path for path in out.splitlines() if IMAGE.search(path)]
+
+
+def check_images(paths: list[str], made: set[str]) -> list[str]:
+    return [f"{path}: the only images a change commits are the ones make verify writes to {SCREENSHOTS} (a page or flow "
+            "image named <name>-phone.png or <name>-desktop.png; they are the visual regression baselines), plus the icons and "
+            "logos in extension/icons/, runway/static/ and docs/src/assets/; show a before and after through those images' "
+            "diff, not a hand-made file"
+            for path in paths if not (path.startswith(IMAGE_HOMES) or path in DOCS_PICTURES
+                                      or (path.startswith(SCREENSHOTS) and path[len(SCREENSHOTS):] in made))]
+
+
 # --- Workflows ----------------------------------------------------------------------------------------------------
 
 USES = re.compile(r"^[ \t]*(?:-[ \t]*)?uses:[ \t]*([^\s#]+)(.*)$", re.MULTILINE)
@@ -165,10 +218,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.commits:
         for sha, message in commits(args.commits):
             problems += check_commit(sha, message)
+        base = subprocess.run(["git", "merge-base", *args.commits.split("..", 1)], cwd=ROOT, check=True, capture_output=True,
+                              text=True).stdout.strip() if ".." in args.commits else args.commits
+        problems += check_images(added_images(base), verify_images())
     for p in problems:
         print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p, file=sys.stderr)
     if not problems:
-        print("Fleet checks passed: one migration head, migrations tested" + (", commit trailers" if args.commits else "")
+        print("Fleet checks passed: one migration head, migrations tested" + (", commit trailers, images only where make verify puts them" if args.commits else "")
               + ", workflow conventions.")
     return 1 if problems else 0
 

@@ -10,5 +10,5 @@
     { "expect_text": { "selector": "[data-projected]:has([role=button][aria-expanded=true])", "text": "Charged so far" } },
     { "screenshot": "open" }
   ],
-  "viewports": ["tablet", "desktop"]
+  "viewports": ["desktop"]
 }

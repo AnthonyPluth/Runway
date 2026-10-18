@@ -1,7 +1,7 @@
 {
   "name": "investments-holding",
   "page": "investments",
-  "viewports": ["tablet", "desktop"],
+  "viewports": ["desktop"],
   "steps": [
     { "wait_for": "#inv-holdings tbody tr" },
     { "click": "#inv-holdings tbody tr a" },

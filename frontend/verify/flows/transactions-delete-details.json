@@ -1,8 +1,8 @@
 {
-  "name": "transactions-delete-tablet",
+  "name": "transactions-delete-details",
   "page": "transactions",
   "viewports": [
-    "tablet"
+    "desktop"
   ],
   "steps": [
     {

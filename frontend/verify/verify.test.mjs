@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findChromium, flowProblems, PAGES, savesScreenshots, screenshotFile, unknownPages } from "./verify.mjs";
+import { findChromium, flowProblems, DEFAULT_VIEWPORTS, PAGES, screenshotFile, unknownPages, VIEWPORTS } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -78,10 +78,10 @@ describe("findChromium", () => {
   });
 });
 
-describe("savesScreenshots", () => {
-  it("saves phone and desktop screenshots, never tablet", () => {
-    expect(savesScreenshots("phone")).toBe(true);
-    expect(savesScreenshots("desktop")).toBe(true);
-    expect(savesScreenshots("tablet")).toBe(false);
+describe("viewports", () => {
+  it("are the iPhone 17 Pro Max and a desktop, with no tablet", () => {
+    expect(VIEWPORTS).toEqual({ phone: { width: 440, height: 956 }, desktop: { width: 1280, height: 800 } });
+    expect(DEFAULT_VIEWPORTS).toEqual(["phone", "desktop"]);
+    expect(flowProblems({ name: "x", steps: [{ reload: true }], viewports: ["tablet"] })).toEqual(["unknown viewport tablet"]);
   });
 });
