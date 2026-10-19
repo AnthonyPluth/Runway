@@ -10,7 +10,6 @@ import secrets
 import threading
 from typing import TYPE_CHECKING
 
-from .. import monitoring
 from .common import header_value
 
 if TYPE_CHECKING:
@@ -64,11 +63,7 @@ def serve(h: Handler, path: str) -> None:
         nonce = secrets.token_urlsafe(16)
         with open(full, "rb") as f:
             data = f.read().replace(b"<script ", f'<script nonce="{nonce}" '.encode())
-        if meta := monitoring.trace_meta():   # the page-load trace in the browser continues this one
-            data = data.replace(b"</head>", meta.encode() + b"</head>", 1)
-        # The browser's JS profiler only runs on a page that asks for it.
-        extra = {"Document-Policy": "js-profiling"} if monitoring.browser_profiling() else None
-        return send_file(h, data, ctype, "no-store", None, gz_ok, nonce, extra=extra)
+        return send_file(h, data, ctype, "no-store", None, gz_ok, nonce)
     entry = _static_entry(full)
     cache = cache_control(full)
     if h.headers.get("If-None-Match") == entry["etag"]:
@@ -104,7 +99,7 @@ def cache_control(full: str) -> str:
 
 
 def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
-              gz: bytes | None = None, extra: dict[str, str] | None = None) -> None:
+              gz: bytes | None = None) -> None:
     if gz_ok and _compressible(ctype) and len(data) > 1024:
         data, encoded = gz or gzip.compress(data, 6), True
     else:
@@ -113,7 +108,6 @@ def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None,
     # anything is sent.
     ctype, cache = header_value(ctype), header_value(cache)
     etag = header_value(etag) if etag else None
-    extra = {header_value(k): header_value(v) for k, v in (extra or {}).items()}
     h.send_response(200)
     h.send_header("Content-Type", ctype)
     h.send_header("Content-Length", str(len(data)))
@@ -123,8 +117,6 @@ def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None,
         h.send_header("ETag", etag)
     if encoded:
         h.send_header("Content-Encoding", "gzip")
-    for k, v in extra.items():
-        h.send_header(k, v)
     h._security_headers(nonce)
     h.end_headers()
     if h.command != "HEAD":

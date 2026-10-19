@@ -1,7 +1,6 @@
 // What the whole app shares: Runway's state (/api/state), the current page, and syncing when you open Runway.
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
-import { startMonitoring } from "./monitoring";
 import { toast } from "svelte-sonner";
 import type { AppState, Overview } from "./types";
 import { errMsg } from "./act";
@@ -176,7 +175,6 @@ export async function boot(): Promise<void> {
   catch (err) { console.error(err); app.bootError = errMsg(err); return; }
   if (booted) return;
   booted = true;
-  startMonitoring(app.state?.sentry).catch((err) => console.error(err));   // error reports, if Runway sends them
   loadCategories().catch((err) => console.error(err));   // every page shows categories' emoji and colors
   onBoot.splice(0).forEach((fn) => fn());
   syncOnVisit();

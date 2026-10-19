@@ -4,14 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", () => ({ api: vi.fn(), forgetReplies: vi.fn(), newPage: vi.fn() }));
 vi.mock("./categories.svelte", () => ({ loadCategories: vi.fn().mockResolvedValue([]) }));
-vi.mock("./monitoring", () => ({ startMonitoring: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock("./deviceCache", async (real) => ({ ...(await real<typeof import("./deviceCache")>()), noteDataVersion: vi.fn() }));
 vi.mock("./webauthn", async (real) => ({ ...(await real<typeof import("./webauthn")>()), signChallenge: vi.fn() }));
 
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
-import { startMonitoring } from "./monitoring";
 import { dataVersionOf, noteDataVersion } from "./deviceCache";
 import { app, boot, checkIn, editing, refreshState, reload, route, syncOnVisit, whenBooted } from "./app.svelte";
 import { lock, unlock } from "./lock.svelte";
@@ -217,14 +215,13 @@ describe("boot", () => {
     expect(loadCategories).not.toHaveBeenCalled();
   });
 
-  it("loads state, categories and error reporting once, and runs whenBooted callbacks", async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state({ sentry: { dsn: "d", environment: "e", release: "r" } })) as never);
+  it("loads state and categories once, and runs whenBooted callbacks", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
     const early = vi.fn();
     whenBooted(early);
     expect(early).not.toHaveBeenCalled();
     await boot();
     expect(app.bootError).toBe("");
-    expect(startMonitoring).toHaveBeenCalledWith({ dsn: "d", environment: "e", release: "r" });
     expect(loadCategories).toHaveBeenCalledOnce();
     expect(early).toHaveBeenCalledOnce();
     const late = vi.fn();

@@ -61,7 +61,7 @@ def content_security_policy(nonce: str | None = None) -> str:
             f"script-src {scripts}; "
             "style-src 'self' 'unsafe-inline'; "     # inline style attributes (and Plaid Link) need this
             "img-src 'self' data:; font-src 'self'; "
-            f"connect-src 'self' {PLAID_API}{' ' + origin if (origin := monitoring.browser_origin()) else ''}; "
+            f"connect-src 'self' {PLAID_API}; "
             f"frame-src {PLAID_ORIGINS}; worker-src 'self'; manifest-src 'self'; "
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -70,8 +70,8 @@ AUTH_PATHS = {"/auth/login", "/auth/callback", "/auth/logout", "/auth/signed-out
 
 
 def trace_name(path: str) -> str:
-    """A request's name in Sentry: its route (/api/transactions/{id}/category), never the ids, names or searches in the
-    address, so requests group together and nothing of yours is in the name."""
+    """A request's name in the error log: its route (/api/transactions/{id}/category), never the ids, names or searches
+    in the address, so nothing of yours is in the name."""
     if path.startswith("/api/"):
         if path in EXT_ROUTES:
             return path
@@ -82,13 +82,6 @@ def trace_name(path: str) -> str:
     if path.startswith(("/.well-known/", "/oauth/")):
         return path[:path.index("/", 1)] + "/*"   # nothing answers it (a 404)
     return "/"   # the web app's page (and its own routes, like /plaid/oauth)
-
-
-def _traced(path: str) -> bool:
-    """Requests worth a trace: not the health check, the live-prices stream (open for minutes), or plain files."""
-    if path in ("/healthz", "/api/investments/stream") or path in PUBLIC_FILES:
-        return False
-    return path.startswith(("/api/", "/auth/", "/mcp", "/carta/", "/oauth/", "/.well-known/")) or "." not in path.rsplit("/", 1)[-1]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,11 +123,6 @@ class Handler(BaseHTTPRequestHandler):
         started = getattr(self, "_started", None)
         ms = f" {int((time.monotonic() - started) * 1000)}ms" if started else ""
         print(f"{self.client_address[0]} {getattr(self, 'command', '-')} {path} {code}{ms}", flush=True)
-        if _traced(path):   # Sentry Logs get the route (no ids, no address), not files or the health check
-            method, route = getattr(self, "command", "-"), trace_name(path)
-            monitoring.send_log(f"{method} {route} {code}{ms}", "info", **{
-                "http.request.method": method, "http.route": route, "http.response.status_code": str(code),
-                **({"duration_ms": int((time.monotonic() - started) * 1000)} if started else {})})
 
     def _security_headers(self, nonce: str | None = None, csp: str | None = None) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -381,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
                    (end, f"Sign out of {provider}") if end else None)
 
     def send_response(self, code, message=None):
-        self._responded, self._status = True, code
+        self._responded = True
         super().send_response(code, message)
 
     def send_header(self, keyword, value):
@@ -401,13 +389,7 @@ class Handler(BaseHTTPRequestHandler):
         self._ext_call = False
         self._session_key = None
         _current.session_key = None   # (a thread serves one connection's requests in turn: nothing carries over)
-        path = urllib.parse.urlsplit(self.path).path
-        if not _traced(path):
-            return self._handle(method)
-        with monitoring.request(method, trace_name(path), self.headers) as tx:
-            self._handle(method)
-            if tx is not None and getattr(self, "_status", None):
-                tx.set_http_status(self._status)
+        self._handle(method)
 
     def _handle(self, method: str) -> None:
         try:
@@ -469,7 +451,6 @@ class Handler(BaseHTTPRequestHandler):
         # The look of the sign-in pages is public; everything else needs you signed in.
         if url.path not in PUBLIC_FILES:
             self.user = self._user(renew=url.path.startswith("/api/"))   # API answers are never cached, so a new cookie is safe there
-            monitoring.set_user(self.user)   # its reports and traces say who (as a code; see monitoring.user_id)
             if not self.user:
                 if url.path.startswith("/api/"):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
@@ -608,9 +589,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not isinstance(msg, dict):   # a batch or something else: one message per POST
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
-        with monitoring.mcp_call(msg) as span:
-            reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
-            monitoring.mcp_result(span, reply)
+        reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
         if reply is None:
             return self._send(202, b"")
         return self._json(200, reply)
@@ -694,14 +673,13 @@ class Server(ThreadingHTTPServer):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> None:
-    monitoring.init()   # reports to Sentry, when SENTRY_DSN is set
     problems = secretbox.check_config()
     if problems:
         raise SystemExit("\n".join(problems))
     if not os.environ.get("RUNWAY_SECRET_KEY"):
         monitoring.log(f"Note: set RUNWAY_SECRET_KEY. Without it, the key that encrypts your saved bank access and API keys is "
               f"{secretbox.key_file_path()}: losing that file means reconnecting them, and whoever can read the data folder has "
-              f"the key along with the database.", "warning")
+              f"the key along with the database.")
     if oidc.enabled():
         problems = oidc.check_config()
         if problems:

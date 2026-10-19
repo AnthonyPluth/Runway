@@ -161,7 +161,6 @@ def old_api_state(conn):
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
-        "sentry": None,
         "owners": state.owner_choices(conn),
         "user": None,
         "setup": old_setup_steps(conn),

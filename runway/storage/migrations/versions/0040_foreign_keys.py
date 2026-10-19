@@ -102,8 +102,7 @@ def _save_copy(bind) -> None:
     from runway import monitoring
     where = os.path.dirname(bind.engine.url.database or "") if bind.dialect.name == "sqlite" else None
     path = backup.save_copy(db.Connection(bind), "runway-before-migration-0040", where or None)
-    monitoring.log(f"Migration 0040: saved a backup of the database first, to {path}", "warning",
-                   remote="Migration 0040: saved a backup of the database first")
+    monitoring.log(f"Migration 0040: saved a backup of the database first, to {path}")
 
 
 def _remove_orphans(bind) -> dict[tuple[str, str], int]:
@@ -150,7 +149,7 @@ def upgrade() -> None:
             for (t, how), n in sorted(done.items()):   # counts only: never ids or values
                 rows = f"{n} row{'s' if n != 1 else ''}"
                 monitoring.log(f"Migration 0040: removed {rows} from {t} that referred to something no longer there." if how == "removed"
-                               else f"Migration 0040: cleared what {rows} in {t} referred to: it's no longer there.", "warning")
+                               else f"Migration 0040: cleared what {rows} in {t} referred to: it's no longer there.")
     for t in dict.fromkeys(k[0] for k in KEYS):   # on SQLite, each table made again once, with all its keys
         with op.batch_alter_table(t) as batch:
             for _, col, parent, pcol, ondelete in (k for k in KEYS if k[0] == t):

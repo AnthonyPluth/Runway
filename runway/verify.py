@@ -58,9 +58,9 @@ def frozen_env(env: dict[str, str], lib: str) -> dict[str, str]:
 
 def clean_env(data: str, base: dict[str, str] | None = None) -> dict[str, str]:
     """The environment for the demo server: its own folder and SQLite database, nothing from the caller's setup that
-    could point it at real data (Postgres, sign-in, bank providers, error reports)."""
+    could point it at real data (Postgres, sign-in, bank providers)."""
     env = {k: v for k, v in (os.environ if base is None else base).items()
-           if not k.startswith(("OIDC_", "SIMPLEFIN", "PLAID", "SENTRY", "RUNWAY_SECRET_KEY"))
+           if not k.startswith(("OIDC_", "SIMPLEFIN", "PLAID", "RUNWAY_SECRET_KEY"))
            and k not in ("DATABASE_URL", "RUNWAY_PUBLIC_URL", "RUNWAY_ALLOW_NO_AUTH")}
     env.update(RUNWAY_DATA=data, RUNWAY_NO_SYNC="1", PYTHONUNBUFFERED="1")
     return env

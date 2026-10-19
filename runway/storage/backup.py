@@ -418,8 +418,7 @@ def restore(conn, data: dict) -> dict:
     _check_revision(data)
     rows = _as_given(data) if data.get("revision") == head() else _upgraded(conn, data)
     for t, n in sorted(_prune(rows, schema.metadata).items()):   # counts only: never what the rows held
-        monitoring.log(f"Restore: left out {n} row{'s' if n != 1 else ''} of {t} referring to something the backup doesn't have.",
-                       "warning")
+        monitoring.log(f"Restore: left out {n} row{'s' if n != 1 else ''} of {t} referring to something the backup doesn't have.")
     for t in reversed(tables()):
         conn.execute(delete(schema.metadata.tables[t]))
     # Rows can refer to rows of their own table restored after them (a card paid from an account listed later):

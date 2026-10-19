@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 
 from ...domain import brands, categorize, forecast, recurring
 from ...storage import db
-from ... import monitoring, validate
+from ... import validate
 from ...providers import plaid
 from ...storage import settings_keys as sk
 from ...storage.models import Account, Budget, Override, Recurring, SyncLog, Transaction, User
@@ -66,7 +66,6 @@ def api_state(conn, _q, _b):
         "logodev_configured": sk.LOGODEV_TOKEN in present,        # (merchants.configured)
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
-        "sentry": monitoring.browser_config(getattr(_current, "user", None)),   # the web app's error reports (runway/monitoring.py), or None
         "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
         "setup": setup_steps(conn, s, connected),

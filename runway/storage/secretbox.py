@@ -170,7 +170,7 @@ def encrypt_stored(conn) -> int:
         try:
             new = reencrypt(r["value"])
         except InvalidToken:
-            monitoring.log(f"Warning: the saved {r['key']} can't be decrypted with the current key; enter it again in Settings.", "warning")
+            monitoring.log(f"Warning: the saved {r['key']} can't be decrypted with the current key; enter it again in Settings.")
             continue
         if new != r["value"]:
             conn.execute(update(Setting).where(Setting.key == r["key"]).values(value=new))
@@ -179,7 +179,7 @@ def encrypt_stored(conn) -> int:
         try:
             new = reencrypt(r["access_token"])
         except InvalidToken:
-            monitoring.log("Warning: a Plaid connection's access can't be decrypted with the current key; reconnect it.", "warning")
+            monitoring.log("Warning: a Plaid connection's access can't be decrypted with the current key; reconnect it.")
             continue
         if new != r["access_token"]:
             conn.execute(update(PlaidItem).where(PlaidItem.item_id == r["item_id"]).values(access_token=new))
