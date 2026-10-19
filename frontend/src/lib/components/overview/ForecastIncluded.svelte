@@ -22,7 +22,7 @@
       <h4 class="font-semibold text-foreground">Everyday budgets</h4>
       {#if used.length}
         <ul>
-          {#each used as u (u.category + u.account_id)}
+          {#each used as u (`${u.category}\u0000${u.account_id}`)}
             <li class="flex justify-between gap-3"><span class="min-w-0">{u.category} · {u.account}</span><span class="tabular-nums">{fmt0(u.amount)} a month</span></li>
           {/each}
         </ul>
