@@ -79,6 +79,9 @@ describe("no hand-drawn month arrows outside MonthPicker", () => {
     expect(await flagged(prev, "frontend/src/Example.svelte")).toEqual(["no-restricted-syntax"]);
     expect(await flagged('<button aria-label="Next month">&gt;</button>\n', "frontend/src/Example.svelte")).toEqual(["no-restricted-syntax"]);
   });
+  it("flags the shared Button component MonthPicker itself draws them with", async () => {
+    expect(await flagged('<script lang="ts">\n  import { Button } from "$lib/components/ui/button";\n</script>\n<Button variant="ghost" size="icon" aria-label="Previous month" onclick={() => {}}>&lt;</Button>\n', "frontend/src/Example.svelte")).toEqual(["no-restricted-syntax"]);
+  });
   it("leaves MonthPicker, other labels and the picker's use alone", async () => {
     expect(await flagged(prev, "frontend/src/lib/components/MonthPicker.svelte")).toEqual([]);
     expect(await flagged('<button aria-label="Previous page">&lt;</button>\n', "frontend/src/Example.svelte")).toEqual([]);

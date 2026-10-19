@@ -28,7 +28,7 @@ const RESTRICTED = {
     message: "Don't list account kinds by hand: use ACCOUNT_KINDS, KIND_GROUPS, isCash, isBankKind or isPayingKind from lib/accounts.ts, and add the list there if it's missing.",
   },
   monthButton: {
-    selector: "SvelteElement[name.name='button'] > SvelteStartTag > SvelteAttribute[key.name='aria-label'] > SvelteLiteral[value=/^(Previous|Next) month$/]",
+    selector: "SvelteElement[name.name=/^[Bb]utton$/] > SvelteStartTag > SvelteAttribute[key.name='aria-label'] > SvelteLiteral[value=/^(Previous|Next) month$/]",
     message: "Don't draw a month's arrows by hand: use MonthPicker (lib/components/MonthPicker.svelte), which gives Budget and Reports one picker.",
   },
 };
