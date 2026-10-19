@@ -78,12 +78,6 @@
   const vsBench = $derived(pts == null ? null : pts === 0 ? "level with the S&P 500" : `${pts > 0 ? "+" : "−"}${Math.abs(pts).toFixed(2)} pts vs S&P 500`);
   const periodLabel = (p: string) => (p === "MAX" ? "All" : p);
   const PERIODS = ["1M", "3M", "YTD", "1Y", "2Y", "MAX"].map((p) => ({ value: p, label: periodLabel(p) }));
-  // The total in large type with its cents in the muted color.
-  const totalParts = $derived.by(() => {
-    const t = d ? fmt(d.total) : "";
-    const k = t.lastIndexOf(".");
-    return k < 0 ? { main: t, cents: "" } : { main: t.slice(0, k), cents: t.slice(k) };
-  });
   const accountCount = $derived(d ? d.accounts.filter((a) => !a.hidden).length : 0);
   const change = $derived(perf.gain ?? perf.return ?? 0);
   const stats = $derived.by((): Stat[] => {
@@ -185,7 +179,7 @@
       <p class="text-sm text-muted-foreground">Total value · {plural(accountCount, "account")}</p>
       {#if dates}<ValuationDates title="total value" total={fmt(d.total)} model={dates} listName="the accounts" onshow={showAccounts} />{/if}
     </div>
-    <p class="text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
+    <p class="text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{d ? fmt0(d.total) : ""}</p>
     <div class="mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
       {#if perf.gain != null || perf.return != null}
         <span class={cn("inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-medium", gainCls(change))} data-testid="period-chip">

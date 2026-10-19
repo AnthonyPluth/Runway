@@ -52,8 +52,6 @@
   const nextIn = $derived(fc.events.find((e) => e.amount > 0 && e.date > fc.today));
   const asOf = $derived(balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok));
   const note = $derived(balanceNote(asOf?.text, fc.accounts.reduce((s, a) => s + (a.pending ?? 0), 0)));
-  // The balance large, its cents muted.
-  const money = $derived.by(() => { const s = fmt(cashNow), i = s.lastIndexOf("."); return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i)]; });
   const lowName = $derived(lowEvents.length ? (lowEvents[0].kind === "card" ? `${lowEvents[0].name.replace(/ statement$/, "")} payment` : lowEvents[0].name) : "");
 </script>
 
@@ -67,8 +65,7 @@
   </div>
 
   <div class="mt-2 text-[40px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[48px]">
-    <span class="sr-only">{fmt(cashNow)}</span>
-    <span aria-hidden="true">{money[0]}<span class="text-[0.55em] font-semibold tracking-normal text-muted-foreground">{money[1]}</span></span>
+    <span data-testid="balance-total">{fmt0(cashNow)}</span>
   </div>
   {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-warning" : "text-muted-foreground")}>{note}</p>{/if}
   {#if low && fc.accounts.length}

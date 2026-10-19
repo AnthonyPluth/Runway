@@ -76,6 +76,8 @@ npm run coverage                      # the same, measuring how much of the web 
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 
+Typography: user-facing text uses real typographic characters (’ – −), and a page's headline number is in whole dollars (`fmt0`); cents stay in tiles, rows and tables.
+
 ## The documentation
 
 This site is [Astro Starlight](https://starlight.astro.build) in `docs/`, published to GitHub Pages by `.github/workflows/docs.yml` on every push to `main` that changes it. Each page is a Markdown file in `docs/src/content/docs/`, in a folder per sidebar group (`start/`, `using/`, `reference/`, `contributing/`); its front matter sets the title, the description and its place in the group (`sidebar.order`). Images go in `docs/src/assets/`.

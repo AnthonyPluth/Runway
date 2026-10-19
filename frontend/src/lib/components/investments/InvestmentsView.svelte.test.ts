@@ -378,8 +378,17 @@ describe("InvestmentsView", () => {
       await fireEvent.click(screen.getByRole("radio", { name: "All" }));
       expect(await screen.findByTestId("refresh-failed")).toHaveTextContent("Couldn’t refresh");
       expect(inv.period).toBe("1Y");
-      expect(screen.getByTestId("headline-total")).toHaveTextContent("$2,500.00");
+      expect(screen.getByTestId("headline-total")).toHaveTextContent("$2,500");
       expect(screen.getByText("Return · 1Y", { selector: "dt span" })).toBeInTheDocument();
+    });
+
+    it("shows the headline total in whole dollars, with no cents element", async () => {
+      serve((path: string) => path.startsWith("/api/investments?") ? page({ total: 18903.15 }) : { inv_accounts: 1, items: [] });
+      render(InvestmentsView);
+      await screen.findByText("Holdings");
+      const total = screen.getByTestId("headline-total");
+      expect(total).toHaveTextContent(/^\$18,903$/);
+      expect(total.querySelector("span")).toBeNull();
     });
 
     it("shows dividends over 12 months with the fees under them", async () => {
@@ -405,13 +414,13 @@ describe("InvestmentsView", () => {
       await waitFor(() => expect(screen.getByRole("radio", { name: "1Y" })).toHaveAttribute("data-state", "on"));
       expect(screen.getByText("Return · 1Y", { selector: "dt span" })).toBeInTheDocument();
       const total = () => screen.getByTestId("headline-total");
-      expect(total()).toHaveTextContent("$2,500.00");
+      expect(total()).toHaveTextContent("$2,500");
       fail = false;
       await fireEvent.click(within(banner).getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByTestId("refresh-failed")).toBeNull());
-      expect(total()).toHaveTextContent("$2,500.00");
+      expect(total()).toHaveTextContent("$2,500");
       await fireEvent.click(screen.getByRole("radio", { name: "3M" }));
-      await waitFor(() => expect(total()).toHaveTextContent("$2,600.00"));
+      await waitFor(() => expect(total()).toHaveTextContent("$2,600"));
       expect(inv.period).toBe("3M");
       expect(screen.getByText("Return · 3M", { selector: "dt span" })).toBeInTheDocument();
     });
