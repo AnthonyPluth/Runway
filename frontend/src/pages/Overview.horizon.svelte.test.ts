@@ -124,6 +124,8 @@ describe("forecast length", () => {
     await userEvent.selectOptions(await screen.findByLabelText("Primary account"), "sav");
     await waitFor(() => expect(asked["/api/overview?days=90"]).toHaveLength(2));
     await userEvent.keyboard("{Escape}");
+    // The sheet locks the page (pointer-events on <body>) until its close finishes; Retry can't be clicked before then.
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
     last("/api/overview?days=90").fail("Service unavailable");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t refresh the 90 days forecast. Showing the previous data.");
