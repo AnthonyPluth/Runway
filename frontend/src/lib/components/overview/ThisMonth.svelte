@@ -6,7 +6,9 @@
   // latest transactions.
   import type { Pace } from "./pace";
   // What was last on screen, drawn at once when Overview is drawn afresh (after a change) until the new numbers arrive.
-  let last: [Pace, BudgetMonth, TxList] | null = null;
+  // A failed load clears it, so old numbers are never left looking current.
+  let lastSpend: [Pace, BudgetMonth] | null = null;
+  let lastRecent: TxList | null = null;
 </script>
 
 <script lang="ts">
@@ -28,13 +30,20 @@
   // `after` is drawn under the month's spending, or alone if the rest can't load (Overview's Investments card).
   let { after }: { after?: Snippet } = $props();
   const month = thisMonth();
-  const fresh = Promise.all([
-    api<Pace>("/api/month_pace"),
-    apiCall<"GET /api/budget">(`/api/budget?month=${month}`),
-    apiCall<"GET /api/transactions">("/api/transactions?limit=5&ignored=0"),   // what you marked Ignore stays off Overview, as on Transactions
-  ]);
-  let data = $state.raw(last ?? fresh);
-  fresh.then((r) => { data = last = r; }, () => {});
+  // The spending (pace and budgets) and Recent load and fail on their own, so one can't take the other down.
+  const loadSpend = () => Promise.all([api<Pace>("/api/month_pace"), apiCall<"GET /api/budget">(`/api/budget?month=${month}`)]);
+  // what you marked Ignore stays off Overview, as on Transactions
+  const loadRecent = () => apiCall<"GET /api/transactions">("/api/transactions?limit=5&ignored=0");
+  const freshSpend = loadSpend();
+  const freshRecent = loadRecent();
+  let spend = $state.raw<Promise<[Pace, BudgetMonth]> | [Pace, BudgetMonth]>(lastSpend ?? freshSpend);
+  let recent = $state.raw<Promise<TxList> | TxList>(lastRecent ?? freshRecent);
+  const settleSpend = (p: Promise<[Pace, BudgetMonth]>) => p.then((r) => { spend = lastSpend = r; }, () => { lastSpend = null; spend = p; });
+  const settleRecent = (p: Promise<TxList>) => p.then((r) => { recent = lastRecent = r; }, () => { lastRecent = null; recent = p; });
+  settleSpend(freshSpend);
+  settleRecent(freshRecent);
+  const retrySpend = () => { const p = loadSpend(); spend = p; settleSpend(p); };
+  const retryRecent = () => { const p = loadRecent(); recent = p; settleRecent(p); };
   const chart = (p: Pace) => {
     const [y, m] = p.month.split("-").map(Number);
     const n = new Date(y, m, 0).getDate();   // this month's days (a longer last month's final day isn't drawn)
@@ -49,16 +58,12 @@
   };
 </script>
 
-{#await data}
-  <!-- The Investments card has its own request, so a slow month doesn't hide it. -->
-  <div class="flex min-w-0 flex-col gap-6">
-    <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
-    {@render after?.()}
-  </div>
-{:then [pace, budget, latest]}
+<!-- The Investments card has its own request, so a slow or failed month doesn't hide it. -->
+<div class="flex min-w-0 flex-col gap-6">
+{#await spend}
+  <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
+{:then [pace, budget]}
   {@const diff = pace.spent - pace.last_same_point}
-  {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
-    .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
   {@const c = chart(pace)}
   <!-- The bar is what the budgeted categories have spent of what they're budgeted; the marker is how far through the
        month we are, so a bar past the marker is ahead of pace. With no budgets, the pace is last month's at this point. -->
@@ -67,7 +72,6 @@
   {@const used = budgeted.reduce((s, c) => s + c.spent, 0)}
   {@const through = budget.days_in_month ? budget.day / budget.days_in_month : 0}
   {@const ahead = used - total * through}
-  <div class="flex min-w-0 flex-col gap-6">
     <Group title="This month" href="#budget" label={`Spending this month, ${fmt0(pace.spent)}. Open Budget`}>
       <div class="px-4 pt-3 pb-2">
         <div class="text-[13px] text-muted-foreground">Spent so far in {monthShort(pace.month)}</div>
@@ -90,8 +94,17 @@
         <div class="mt-2"><LineChart xs={c.xs} series={c.series} labels zero height={180} fmtY={fmt0} fmtTip={fmt} table={false} /></div>
       </div>
     </Group>
-    {@render after?.()}
+{:catch}
+  <div class="tile flex min-w-0 flex-col justify-center gap-1 text-[13px] text-muted-foreground" data-failed="spending">
+    <span>Couldn’t load spending</span>
+    <button type="button" class="self-start font-medium text-primary" onclick={retrySpend}>Try again</button>
+  </div>
+{/await}
+{@render after?.()}
 
+{#await spend then [, budget]}
+  {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
+    .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
     {#if budgets.length}
     <Group title="Budgets" inset="3.75rem">
       {#snippet action()}<a href="#budget" class="text-[13px] text-primary">See all</a>{/snippet}
@@ -116,7 +129,11 @@
       {/each}
     </Group>
     {/if}
+{:catch}
+  <!-- The This month card above says the spending couldn't load; the budgets just aren't shown. -->
+{/await}
 
+{#await recent then latest}
     {#if latest.items.length}
     <Group title="Recent" inset="3.75rem">
       {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
@@ -139,8 +156,10 @@
       {/each}
     </Group>
     {/if}
-  </div>
 {:catch}
-  <!-- The forecast is the main thing; if this part can't load, it just isn't shown. -->
-  {@render after?.()}
+  <div class="tile flex min-w-0 flex-col justify-center gap-1 text-[13px] text-muted-foreground" data-failed="recent">
+    <span>Couldn’t load recent transactions</span>
+    <button type="button" class="self-start font-medium text-primary" onclick={retryRecent}>Try again</button>
+  </div>
 {/await}
+</div>

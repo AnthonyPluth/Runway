@@ -310,6 +310,46 @@ describe("ThisMonth", () => {
     expect(screen.getByText(/more than this point in Feb/)).toBeInTheDocument();
   });
 
+  const paceData = { month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 640, last_same_point: 500, last_total: 1200 };
+  const budgetData = (day = 15) => ({ month: "2026-03", days_in_month: 30, day, categories: [mcat("Dining", 400, 300), mcat("Travel", 600, 340)],
+    income: 0, uncategorized: 0, pay_accounts: [] });
+
+  it("says the spending couldn't load, keeps Recent, and loads it on Try again", async () => {
+    vi.mocked(api)
+      .mockRejectedValueOnce(new Error("down"))
+      .mockResolvedValueOnce(budgetData())
+      .mockResolvedValueOnce({ items: [tx({ id: "a", amount: -12.5 })], total: 1 });
+    const { container } = render(ThisMonth);
+    expect(await screen.findByText("Couldn’t load spending")).toBeInTheDocument();
+    expect(screen.getByText("−$12.50")).toBeInTheDocument();
+    expect(container.querySelector("[data-pace-marker]")).toBeNull();
+    vi.mocked(api).mockResolvedValueOnce(paceData).mockResolvedValueOnce(budgetData());
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("$140 over pace")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t load spending")).not.toBeInTheDocument();
+    expect(api).toHaveBeenCalledTimes(5);   // each of the two requests once more, Recent not asked again
+  });
+
+  it("doesn't leave the last month's spending on screen when a reload fails", async () => {
+    vi.mocked(api).mockResolvedValueOnce(paceData).mockResolvedValueOnce(budgetData()).mockResolvedValueOnce({ items: [], total: 0 });
+    render(ThisMonth);
+    expect(await screen.findByText("$140 over pace")).toBeInTheDocument();
+    cleanup();   // Overview is drawn afresh after a change
+    vi.mocked(api).mockRejectedValueOnce(new Error("down")).mockResolvedValueOnce(budgetData()).mockResolvedValueOnce({ items: [], total: 0 });
+    render(ThisMonth);
+    expect(await screen.findByText("Couldn’t load spending")).toBeInTheDocument();
+    expect(screen.queryByText("$140 over pace")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Spending this month/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the pace bar when Recent can't load, and says so", async () => {
+    vi.mocked(api).mockResolvedValueOnce(paceData).mockResolvedValueOnce(budgetData()).mockRejectedValueOnce(new Error("down"));
+    const { container } = render(ThisMonth);
+    expect(await screen.findByText("Couldn’t load recent transactions")).toBeInTheDocument();
+    expect(await screen.findByText("$140 over pace")).toBeInTheDocument();
+    expect(container.querySelector("[data-pace-marker]")).not.toBeNull();
+  });
+
   it("signs Recent's amounts, and shows a dash, not 0%, for a budget with nothing spent", async () => {
     const cat = (name: string, budget: number, spent: number) => ({ name, parent: null, path: [name], depth: 0, top: name, has_children: false,
       budget, pay_with: null, usual_account: null, available: budget, spent, own_spent: spent, left: budget - spent });
