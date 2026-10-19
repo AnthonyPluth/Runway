@@ -9,7 +9,6 @@
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
   import ValuationDates from "$lib/components/ValuationDates.svelte";
   import { investmentDates } from "$lib/valuationDates";
-  import WorthALook from "$lib/components/investments/WorthALook.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
@@ -269,8 +268,6 @@
     <AllocationCard allocation={d.allocation} />
     <AccountsCard accounts={d.accounts} holdings={d.holdings} checks={d.xray} />
   </div>
-
-  <WorthALook checks={d.xray} />
 
   <Card.Root class="mb-6">
     <Card.Header>

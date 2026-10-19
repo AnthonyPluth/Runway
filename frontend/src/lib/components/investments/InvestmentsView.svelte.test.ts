@@ -172,6 +172,7 @@ describe("InvestmentsView", () => {
         render(InvestmentsView);
         await screen.findByText("Holdings");
       };
+      const acct = { id: "a1", account_id: "p1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: null, tracked: 0, drift: null, balance: 10 };
       const legend = () => within(screen.getByTestId("alloc-legend")).getAllByTestId("alloc-row").map((r) => r.textContent?.replace(/\s+/g, " ").trim() ?? "");
 
       it("lists up to six groups as they are, in a bar of the same number of segments", async () => {
@@ -202,14 +203,14 @@ describe("InvestmentsView", () => {
         inv.allocTab = "asset_class";
       });
 
-      it("shows only the checks that aren't fine, as cards, with a note in the muted color", async () => {
-        await load({ xray: [
+      it("shows only the checks that aren't fine, as cards in the Accounts card, with a note in the muted color", async () => {
+        await load({ accounts: [acct], xray: [
           { name: "Concentration", ok: false, detail: "One fund is most of it." },
           { name: "Fees", ok: true, detail: "Low." },
           { name: "Cash drag", ok: false, info: true, detail: "Two holdings lack one." },
         ] });
-        expect(screen.getAllByTestId("check-card")).toHaveLength(2);
-        expect(within(screen.getByTestId("worth-a-look")).getByText("Worth a look", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
+        expect(within(screen.getByTestId("accounts-card")).getAllByTestId("check-card")).toHaveLength(2);
+        expect(within(screen.getByTestId("worth-a-look")).getByText("Worth a look")).toBeInTheDocument();
         expect(screen.getByText("Concentration")).toHaveClass("text-warning");
         expect(screen.getByText("Cash drag")).toHaveClass("text-muted-foreground");
         expect(screen.getByText("Two holdings lack one.")).toBeInTheDocument();
@@ -218,7 +219,6 @@ describe("InvestmentsView", () => {
       });
 
       it("says all checks look fine, instead of the card, when none is failing", async () => {
-        const acct = { id: "a1", account_id: "p1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: null, tracked: 0, drift: null, balance: 10 };
         await load({ xray: [{ name: "Fees", ok: true, detail: "Low." }], accounts: [acct] });
         expect(within(screen.getByTestId("accounts-card")).getByTestId("checks-fine")).toHaveTextContent("All checks look fine");
         expect(screen.queryByTestId("worth-a-look")).toBeNull();
