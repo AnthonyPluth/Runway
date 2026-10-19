@@ -15,7 +15,7 @@
       "wait_for": "[data-tx]"
     },
     {
-      "scroll_to": "[data-tx] >> nth=-1"
+      "scroll_to": "[data-tx] >> nth=5"
     },
     {
       "wait_for": "[data-review-bar]"

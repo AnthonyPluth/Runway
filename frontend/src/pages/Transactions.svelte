@@ -360,7 +360,7 @@
 
   {#if review}<ReviewBar {rv} />{/if}
   {#if !review && queue.length}
-    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} bind:open={reviewOpen} bind:barShown onsubmit={decideCard} onmore={moreQueue} />
+    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} bind:open={reviewOpen} onbar={(v) => (barShown = v)} onsubmit={decideCard} onmore={moreQueue} />
   {/if}
 
   {#if !review && txs.list}
