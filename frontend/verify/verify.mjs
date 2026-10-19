@@ -339,7 +339,8 @@ async function main() {
       await page.evaluate(settle, !!page.scrolledByFlow);
       // A modal (a confirm dialog, a sheet) is shot as the window shows it, not the whole page: a full-page capture resizes the
       // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
-      const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible").count();
+      // The To review bar is the same: a full-page capture makes the whole card visible again, and the bar goes with it.
+      const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible").count();
       await page.screenshot({ path: join(out, file), fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}` });
       files.push(file);
     };
