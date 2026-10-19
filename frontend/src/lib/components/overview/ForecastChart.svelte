@@ -3,8 +3,11 @@
   import YAxis from "../YAxis.svelte";
   import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
   import type { ForecastEvent, Overview } from "$lib/types";
+  import { Button } from "$lib/components/ui/button";
 
-  // The projected balance, day by day: what each day brings (hover or drag for a day's readout).
+  // The projected balance, day by day: what each day brings (hover or drag for a day's readout). The chart is one
+  // focus stop, like a slider: the arrow keys step the readout a day (a tenth of the chart with Shift), Home and End go
+  // to the first and last day, Escape puts it away, and "Lowest balance" puts it on the lowest day.
   // `compact` is the Overview card's version: about 120px tall, the value axis kept, the lowest day marked and the last
   // day's balance written at the line's end.
   let { fc, compact = false }: { fc: Overview; compact?: boolean } = $props();
@@ -16,8 +19,11 @@
   const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const series = $derived(fc.total);
   const n = $derived(series.length);
-  // The first day of the lowest balance, for the compact chart's mark.
-  const lowAt = $derived(n ? series.indexOf(Math.min(...series)) : 0);
+  // The first day of the lowest balance (the forecast's own low), for the compact chart's mark and "Lowest balance".
+  const lowAt = $derived.by(() => {
+    const at = fc.low ? fc.dates.indexOf(fc.low.date) : -1;
+    return at >= 0 && at < n ? at : n ? series.indexOf(Math.min(...series)) : 0;
+  });
 
   // The days on show, v0 to v1: every day of the forecast.
   const v0 = 0, v1 = $derived(Math.max(0, n - 1));
@@ -59,7 +65,9 @@
   });
   // Hovering (or dragging sideways on a phone) shows that day's balance and what happens on it.
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
-  // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  // The day the readout is on. A refreshed, shorter forecast that no longer has that day clears it for good, so a
+  // longer one coming back doesn't bring the old readout back with it.
+  $effect(() => { if (pointed != null && pointed >= n) pointed = null; });
   const hover = $derived(pointed != null && pointed < n ? pointed : null);
   // On a phone the readout stays put, in the top left of the chart, instead of riding along under the finger: it's
   // readable there, and two days are compared by dragging between them. A mouse's readout follows the pointer.
@@ -79,6 +87,53 @@
   // A tap sends a mouse move of its own right after the touch; that one doesn't unpin the readout.
   function mouse(clientX: number) { if (Date.now() - lastTouch > 1000) pinned = false; move(clientX); }
 
+  // The keys step the readout as a slider's would; with no day chosen it starts from today.
+  function key(e: KeyboardEvent) {
+    const from = hover ?? 0, big = Math.max(1, Math.round(n / 10));
+    const to = e.key === "ArrowLeft" || e.key === "ArrowDown" ? from - (e.shiftKey ? big : 1)
+      : e.key === "ArrowRight" || e.key === "ArrowUp" ? from + (e.shiftKey ? big : 1)
+      : e.key === "PageDown" ? from - big : e.key === "PageUp" ? from + big
+      : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (e.key === "Escape" && hover != null) { e.preventDefault(); pointed = null; return; }
+    if (to == null) return;
+    e.preventDefault();
+    pointed = Math.max(0, Math.min(n - 1, to));
+  }
+  // Reaching the chart with the keyboard shows today's readout at once; a click or a tap leaves the readout to the pointer.
+  function focused() {
+    if (hover != null) return;
+    let keyboard = true;
+    try { keyboard = svgEl!.matches(":focus-visible"); } catch { /* no :focus-visible (an old browser, jsdom): count it as the keyboard */ }
+    if (keyboard) pointed = 0;
+  }
+  // "Lowest balance" puts the readout on the lowest day and the focus on the chart, to step on from there.
+  function showLow(e: MouseEvent) {
+    pinned = (e as PointerEvent).pointerType === "touch";
+    pointed = lowAt;
+    svgEl?.focus();
+  }
+
+  // What a day holds, the same for the readout and for screen readers: its events, then what the budgets take out that
+  // day (in the balance, but not an event of its own).
+  function dayRows(i: number) {
+    const rows = (eventsByDate[fc.dates[i]] ?? []).map((ev) => ({ name: ev.name, estimated: !!ev.estimated, amount: ev.amount }));
+    const spent = fc.spend?.[fc.dates[i]] ?? 0;
+    if (spent > 0) rows.push({ name: "Budgeted spending", estimated: true, amount: -spent });
+    return rows;
+  }
+  // Spoken, not laid out, so plain spaces (fmtDate's are non-breaking).
+  const longDate = (i: number) => parseDate(fc.dates[i]).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  // What a screen reader hears for a day: "Monday, October 19, 2026: balance $1,300.00. Card statement (estimated) −$2,684.92."
+  function spoken(i: number) {
+    const rows = dayRows(i);
+    const what = rows.length ? rows.map((r) => `${r.name}${r.estimated ? " (estimated)" : ""} ${fmtSigned(r.amount)}`).join("; ") : "Nothing scheduled";
+    return `${longDate(i)}: balance ${fmt(series[i])}. ${what}.`;
+  }
+  const summary = $derived(n === 1 ? `Projected balance for today, ${fmt(series[0])}`
+    : `Projected balance over the next ${n - 1} ${n === 2 ? "day" : "days"}, ${fmt(series[0])} today to ${fmt(series[v1])} on ${longDate(v1)}`);
+  // The day the slider is on: the readout's, or today's while there's none.
+  const at = $derived(hover ?? 0);
+
   const tipPos = $derived.by(() => {
     if (hover == null || !svgEl) return { left: 0, top: 0 };
     const r = svgEl.getBoundingClientRect(), tw = tipEl?.offsetWidth ?? 180;
@@ -95,8 +150,9 @@
   {#if !n}
     <p class="py-6 text-center text-sm text-muted-foreground">No cash accounts in the forecast yet.</p>
   {:else}
-    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full select-none text-xs" role="img"
-      aria-label={`Projected balance over the next ${n - 1} days`}>
+    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full rounded-md text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-ring"
+      role="slider" tabindex="0" aria-label={summary} aria-valuemin={0} aria-valuemax={n - 1} aria-valuenow={at}
+      aria-valuetext={spoken(at)} onkeydown={key} onfocus={focused} onblur={() => (pointed = null)} data-testid="forecast-chart">
       <defs>
         <linearGradient id="fc-area" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
@@ -124,18 +180,19 @@
         onmousemove={(e) => mouse(e.clientX)} onmouseleave={() => (pointed = null)}
         use:touched use:sideways={move} />
     </svg>
+    <div class="flex justify-end">
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-muted-foreground" onclick={showLow} data-testid="forecast-low">Lowest balance</Button>
+    </div>
     {#if hover != null}
-      {@const spent = fc.spend?.[fc.dates[hover]] ?? 0}
-      <!-- A row's name wraps when it's long; its amount always stays whole on one line. -->
+      <!-- A row's name wraps when it's long; its amount always stays whole on one line. The same rows whether the pointer
+           or the keyboard chose the day. -->
       <div bind:this={tipEl} class="pointer-events-none absolute z-10 max-w-80 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
-        style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>
+        style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`} data-testid="forecast-readout">
         <div class="text-muted-foreground">{fmtDow(fc.dates[hover])}</div>
         <div class="text-base font-semibold tabular-nums">{fmt(series[hover])}</div>
-        {#each eventsByDate[fc.dates[hover]] ?? [] as ev, j (j)}
-          {@render row(`${ev.name}${ev.estimated ? " (est.)" : ""}`, ev.amount)}
+        {#each dayRows(hover) as r, j (j)}
+          {@render row(`${r.name}${r.estimated ? " (est.)" : ""}`, r.amount)}
         {/each}
-        <!-- What the budgets take out that day: in the balance, but not an event of its own. -->
-        {#if spent > 0}{@render row("Budgeted spending (est.)", -spent)}{/if}
       </div>
     {/if}
   {/if}
