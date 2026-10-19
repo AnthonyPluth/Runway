@@ -1,23 +1,17 @@
 <script lang="ts" module>
-  // Survives redraws (a sync, an edited amount), like the classic app.
-  let horizon: number | null = null;
   let comingAll = $state(false);   // Coming up's "Show all"
   // Alerts put away on Needs attention, by their message: one stays hidden while its message reads the same, so a
   // warning worded differently (or one you ask to see again) comes back. Saved with the other settings.
   let dismissed = $state<string[]>([]);
   let showDismissed = $state(false);
   const DISMISSED_MAX = 50;   // the most the server keeps
-  // The forecast last on screen, drawn at once when the page is drawn afresh (after a change) until the new one arrives.
-  let last: { fc: Overview; days: number } | null = null;
-  /** For tests: the page starts as if opened for the first time. */
-  export function forgetForecast() { horizon = null; last = null; }
 </script>
 
 <script lang="ts">
   import { act } from "$lib/act";
   import { api } from "$lib/api";
   import { overviewFor, takeEarlyOverview } from "$lib/prefetch";
-  import { app } from "$lib/app.svelte";
+  import { app, overviewMemory } from "$lib/app.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
@@ -31,10 +25,9 @@
   import { Button } from "$lib/components/ui/button";
   import { parseDate } from "$lib/format";
   import { syncDot, syncStatus } from "$lib/nav.svelte";
-  import type { Overview } from "$lib/types";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
-    import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Group from "$lib/components/ui/group/Group.svelte";
 
@@ -46,13 +39,13 @@
   const setupLeft = $derived((!!setup && !setup.dismissed) || setupReview.open);
   $effect(() => () => { setupReview.open = false; });   // a reopened review doesn't outlive leaving Overview
   const toForecast = () => document.getElementById("forecast")?.scrollIntoView({ block: "start" });
-  const initial = horizon ?? app.state?.horizon_days ?? 90;
+  const initial = overviewMemory.horizon ?? app.state?.horizon_days ?? 90;
 
   // The selected length is always the one on screen: a request only replaces `shown` (data, chart label, sentence and
   // the length controls together) when it succeeds. Another length (or a change) keeps the forecast on screen until
   // the new one arrives, and only the latest request draws, if you click through lengths quickly.
-  let shown = $state.raw(last);
-  let requested = $state<number | null>(last && last.days !== initial ? initial : null);   // a different length is on its way
+  let shown = $state.raw(overviewMemory.last);
+  let requested = $state<number | null>(overviewMemory.last && overviewMemory.last.days !== initial ? initial : null);   // a different length is on its way
   const days = $derived(shown?.days ?? requested ?? initial);
   let failed = $state<{ days: number } | null>(null);   // the last request that failed while a forecast is on screen
   let error = $state<Error | null>(null);
@@ -71,8 +64,8 @@
     reply.then(
       (fc) => {
         if (n !== seq) return;
-        shown = last = { fc, days: d }; requested = null; failed = null; error = null;
-        if (picked) horizon = d;   // the successful length is the one remembered, never a failed request
+        shown = { fc, days: d }; overviewMemory.last = shown; requested = null; failed = null; error = null;
+        if (picked) overviewMemory.horizon = d;   // the successful length is the one remembered, never a failed request
         dismissed = fc.dismissed_warnings ?? []; showDismissed = false;
       },
       (e: Error) => {
@@ -132,7 +125,7 @@
   {#if error && !shown}
     <div class="rounded-2xl bg-card p-5">
       <p class="text-sm">Something went wrong: {error.message}</p>
-      <Button class="mt-3" variant="outline" onclick={() => load(intent)}>Try again</Button>
+      <Button class="mt-3" variant="outline" onclick={() => { error = null; load(intent); }}>Try again</Button>
     </div>
   {:else if !shown}
     <div class="space-y-4" aria-busy="true"><div class="h-24 w-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div><div class="h-64 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div></div>
