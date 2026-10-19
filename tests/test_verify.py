@@ -19,7 +19,7 @@ class ServerCommandTests(unittest.TestCase):
 class CleanEnvTests(unittest.TestCase):
     def test_the_demo_server_never_sees_real_data_settings(self):
         base = {"PATH": "/bin", "DATABASE_URL": "postgresql://real", "RUNWAY_DATA": "/real", "OIDC_ISSUER": "https://idp",
-                "SENTRY_DSN": "https://k@sentry", "RUNWAY_SECRET_KEY": "real", "SIMPLEFIN_TOKEN": "t", "RUNWAY_PUBLIC_URL": "https://r"}
+                "RUNWAY_SECRET_KEY": "real", "SIMPLEFIN_TOKEN": "t", "RUNWAY_PUBLIC_URL": "https://r"}
         env = verify.clean_env("/tmp/demo", base)
         self.assertEqual(env, {"PATH": "/bin", "RUNWAY_DATA": "/tmp/demo", "RUNWAY_NO_SYNC": "1", "PYTHONUNBUFFERED": "1"})
 

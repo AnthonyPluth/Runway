@@ -124,7 +124,6 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
     return counts
 
 
-@monitoring.ai_agent("Order item categorizer", "orders")
 def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]) -> int:
     """Ask the model about items, AI_BATCH at a time, and save its answers. Items it answered are marked done.
     Stops at the first failed request (recorded in the AI log); what's left falls back to departments. Returns how
@@ -191,8 +190,7 @@ def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
     conn.commit()   # don't hold the database while the model thinks
     began, reply = time.time(), None
     try:
-        with monitoring.ai_agent("Order item categorizer", "orders"):
-            reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload, allow_new=True))
+        reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload, allow_new=True))
         answers = categorize.parse_ai_reply(reply, cats, allow_new=True)
     except Exception as e:   # network or API error (its text quotes the provider's answer: kept scrubbed)
         said = monitoring.public_text(str(e))

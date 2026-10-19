@@ -92,7 +92,7 @@ describe("RetirementPlanner", () => {
   it("shows an empty state, not a projection, with nothing invested and no plan", () => {
     setup(data({ is_default: true, current: 0 }));
     expect(screen.getByText("Nothing to plan from yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#networth/investments");
+    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#investments");
     expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: /Projected/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Born in")).not.toBeInTheDocument();

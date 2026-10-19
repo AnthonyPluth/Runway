@@ -99,8 +99,7 @@
       ],
       "tests": [
         "tests/test_http_pinned.py",
-        "tests/test_investments.py",
-        "tests/test_monitoring.py"
+        "tests/test_investments.py"
       ],
       "docs": [
         "using/features"
@@ -372,8 +371,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "contributing/development",
-        "start/docker"
+        "contributing/development"
       ]
     },
     {
@@ -392,8 +390,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "contributing/development",
-        "start/docker"
+        "contributing/development"
       ]
     },
     {
@@ -467,7 +464,7 @@
         "tests/test_splits.py"
       ],
       "docs": [
-        "start/docker"
+        "using/features"
       ]
     },
     {
@@ -538,7 +535,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "start/docker"
+        "using/features"
       ]
     },
     {
@@ -555,7 +552,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "start/docker"
+        "using/features"
       ]
     },
     {

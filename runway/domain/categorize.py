@@ -399,34 +399,30 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
             "X-Title": "Runway",
         },
     )
-    # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
-    with monitoring.ai_call(model, prompt, provider=name.lower(), max_tokens=4096, temperature=0,
-                            **({"web_search": web} if web else {})) as span:
-        try:
-            with tls.urlopen(req, timeout=OLLAMA_TIMEOUT if ollama else OPENROUTER_TIMEOUT, allow_http=True) as resp:
-                data = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:300]
-            if private and not ollama and "data policy" in detail.lower():
-                raise RuntimeError(f"{NO_PRIVATE_PROVIDER} (OpenRouter HTTP {e.code})") from e
-            raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
-                f"{name} HTTP {e.code}: {detail}") from e
-        except urllib.error.URLError as e:
-            if ollama:   # nothing answered: say which address, so a wrong host or port is easy to spot
-                raise RuntimeError(f"Ollama isn't reachable at {api_key}: {e.reason}") from e
-            raise
-        if data.get("error"):
-            err = data["error"]
-            if private and not ollama and "data policy" in str(err).lower():
-                raise RuntimeError(NO_PRIVATE_PROVIDER)
-            code = err.get("code") if isinstance(err, dict) else None
-            raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
-                f"{name}: {err}")
-        message = (data.get("choices") or [{}])[0].get("message") or {}
-        content = message.get("content") or ""
-        if isinstance(content, list):  # some providers return content parts
-            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        monitoring.ai_result(span, data, model, content)
+    try:
+        with tls.urlopen(req, timeout=OLLAMA_TIMEOUT if ollama else OPENROUTER_TIMEOUT, allow_http=True) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        if private and not ollama and "data policy" in detail.lower():
+            raise RuntimeError(f"{NO_PRIVATE_PROVIDER} (OpenRouter HTTP {e.code})") from e
+        raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
+            f"{name} HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        if ollama:   # nothing answered: say which address, so a wrong host or port is easy to spot
+            raise RuntimeError(f"Ollama isn't reachable at {api_key}: {e.reason}") from e
+        raise
+    if data.get("error"):
+        err = data["error"]
+        if private and not ollama and "data policy" in str(err).lower():
+            raise RuntimeError(NO_PRIVATE_PROVIDER)
+        code = err.get("code") if isinstance(err, dict) else None
+        raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
+            f"{name}: {err}")
+    message = (data.get("choices") or [{}])[0].get("message") or {}
+    content = message.get("content") or ""
+    if isinstance(content, list):  # some providers return content parts
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
     return content, _citations(message)
 
 
@@ -623,38 +619,36 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
         if len(examples) >= 60:
             break
     out: list[tuple[str | None, float]] = []
-    # One agent run in Sentry's Agent Tracing (monitoring.py): its batches are the turns of one conversation.
-    with monitoring.ai_agent("Transaction categorizer", purpose):
-        for start in range(0, len(groups), 40):
-            batch = groups[start : start + 40]
-            payload = [
-                {"i": i, "date": g[-1]["posted"], "amount": round(g[-1]["amount"], 2), "account_type": g[-1]["kind"],
-                 "payee": g[-1]["payee"], "description": g[-1]["description"]}
-                for i, g in enumerate(batch)
-            ]
-            began, reply = time.time(), None
-            try:
-                reply = caller(api_key, model, build_prompt(categories, examples, payload, subcategory_hints(conn), allow_new))
-                if extract_json_array(reply) is None:
-                    snippet = " ".join((reply or "(empty reply)").split())[:160]
-                    raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                     + ("Small models often do this; try a larger one in Settings." if isinstance(api_key, OllamaServer)
-                                        else f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings."))
-                results = parse_ai_reply(reply, categories, allow_new)
-                db.set_setting(conn, sk.LAST_LLM_ERROR, None)
-                answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
-                new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
-                log_call(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
-                         f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
-                         reply)
-            except Exception as e:  # network or API error (its text quotes the provider's answer: kept scrubbed)
-                said = monitoring.public_text(str(e))
-                db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
-                log_call(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
-                conn.commit()
-                raise RuntimeError(f"The AI request failed: {said[:300]}") from e
+    for start in range(0, len(groups), 40):
+        batch = groups[start : start + 40]
+        payload = [
+            {"i": i, "date": g[-1]["posted"], "amount": round(g[-1]["amount"], 2), "account_type": g[-1]["kind"],
+             "payee": g[-1]["payee"], "description": g[-1]["description"]}
+            for i, g in enumerate(batch)
+        ]
+        began, reply = time.time(), None
+        try:
+            reply = caller(api_key, model, build_prompt(categories, examples, payload, subcategory_hints(conn), allow_new))
+            if extract_json_array(reply) is None:
+                snippet = " ".join((reply or "(empty reply)").split())[:160]
+                raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
+                                 + ("Small models often do this; try a larger one in Settings." if isinstance(api_key, OllamaServer)
+                                    else f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings."))
+            results = parse_ai_reply(reply, categories, allow_new)
+            db.set_setting(conn, sk.LAST_LLM_ERROR, None)
+            answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
+            new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
+            log_call(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
+                     f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
+                     reply)
+        except Exception as e:  # network or API error (its text quotes the provider's answer: kept scrubbed)
+            said = monitoring.public_text(str(e))
+            db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
+            log_call(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
             conn.commit()
-            out += [results.get(i, empty) for i in range(len(batch))]
+            raise RuntimeError(f"The AI request failed: {said[:300]}") from e
+        conn.commit()
+        out += [results.get(i, empty) for i in range(len(batch))]
     return out
 
 

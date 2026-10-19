@@ -58,7 +58,7 @@
   warn={!!st.ai_configured && !!st.last_llm_error}>
   <p class={helpCls}>
     {#if ollama}
-      Ask a model on your own <a class={linkCls} href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> server. The requests go only to that server (unless you’ve turned on Sentry, whose AI tracing records prompts),
+      Ask a model on your own <a class={linkCls} href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> server. The requests go only to that server,
       and its model has to be pulled there first (<code>ollama pull</code>). Ollama can’t search the web, so card lookups answer from the model’s memory.
     {:else}
       Get an <a class={linkCls} href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter key</a>.

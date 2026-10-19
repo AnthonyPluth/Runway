@@ -595,7 +595,7 @@ def get_settings(conn, keys) -> dict[str, str | None]:
             try:
                 value = secretbox.decrypt(value)
             except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
-                monitoring.log(f"Warning: {key}: {e}", "warning")
+                monitoring.log(f"Warning: {key}: {e}")
                 value = None
         out[key] = value
     return out

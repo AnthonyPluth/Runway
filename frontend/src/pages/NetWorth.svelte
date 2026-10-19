@@ -11,7 +11,6 @@
   import EquityView from "$lib/components/networth/EquityView.svelte";
   import RefreshFailed from "$lib/components/networth/RefreshFailed.svelte";
   import RetirementView from "$lib/components/networth/RetirementView.svelte";
-  import InvestmentsView from "$lib/components/investments/InvestmentsView.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import { valueSource } from "$lib/components/networth/homeValues";
   import type { NetWorth, NwGroup } from "$lib/components/networth/types";
@@ -153,7 +152,9 @@
           <button type="button" class="inline-flex cursor-pointer items-center gap-1 rounded-sm max-md:min-h-10 max-md:min-w-10" aria-expanded={!folded[g.key]} aria-label={`${g.label}, ${folded[g.key] ? "expand" : "collapse"}`}
             onclick={() => (folded[g.key] = !folded[g.key])}><ChevronDown class={cn("size-4 text-muted-foreground transition-transform", folded[g.key] && "-rotate-90")} /></button>
           {#if g.side === "asset" && g.total > 0}<i class="mr-0.5 inline-block size-2.5 shrink-0 rounded-[3px]" style:background={colorOf(g.key)} aria-hidden="true" data-color={g.key}></i>{/if}
-          {#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}
+          {#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>
+          {:else if g.key === "investments"}<a href="#investments" class="underline-offset-4 hover:underline" aria-label="Investments, open the Investments page">{g.label}</a>
+          {:else}{g.label}{/if}
           {#if ADDABLE[g.key]}<button type="button" class="ml-1 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground max-md:min-h-10 max-md:px-2" aria-label={`Add to ${g.label}`}
             onclick={() => openAdd(ADDABLE[g.key])}>+ Add</button>{/if}
         </span>
@@ -191,9 +192,9 @@
 <div class="mb-4 flex items-center gap-1">
   <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Net worth</h1>
 </div>
-<SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
+<!-- Investments has a page of its own (#investments, in the main nav); the breakdown's Investments heading links there. -->
+<SubTabs label="Net worth" current={sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
-  { id: "investments", label: "Investments", href: "#networth/investments" },
   { id: "equity", label: "Equity", href: "#networth/equity" },
   { id: "retirement", label: "Retirement", href: "#networth/retirement" },
 ]} />
@@ -202,8 +203,6 @@
   <EquityView />
 {:else if sub === "retirement"}
   <RetirementView />
-{:else if sub === "investments"}
-  <InvestmentsView />
 {:else if error && !d}
   <Card.Root>
     <Card.Content>

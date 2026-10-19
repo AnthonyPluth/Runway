@@ -1,7 +1,6 @@
 // What the whole app shares: Runway's state (/api/state), the current page, and syncing when you open Runway.
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
-import { startMonitoring } from "./monitoring";
 import { toast } from "svelte-sonner";
 import type { AppState, Overview } from "./types";
 import { errMsg } from "./act";
@@ -66,18 +65,16 @@ export function keepScroll(y: number): void {
 // `query`: what follows "?" (Transactions keeps its filters there).
 export const route = $state({ page: "overview", sub: "" as string, query: "" as string });
 
-// Old routes that moved: they resolve to the new route here, so everything downstream (the page, the nav highlight) sees
-// only the current routes. (#budget/recurring was Bills & income, now the Recurring page, handled in readHash.
-// #investments is a page of its own; Net worth's Investments tab, #networth/investments, shows the same view and
-// lights the same nav item.)
-const MOVED: Record<string, [page: string, sub: string]> = {};
+// Old routes that moved, by their full path: they resolve to the new route here, so everything downstream (the page, the
+// nav highlight) sees only the current routes. #budget/recurring was Bills & income, now the Recurring page;
+// #networth/investments was Net worth's Investments tab, the same view as the Investments page.
+const MOVED: Record<string, [page: string, sub: string]> = { "budget/recurring": ["recurring", ""], "networth/investments": ["investments", ""] };
 
 function readHash(): void {
   const [path, query = ""] = (location.hash || "#overview").slice(1).split(/\?(.*)/s);
   const [name, ...rest] = path.split("/");
   const rawSub = rest.join("/");   // (more than one part after the page: #investments/holding/<id>)
-  const [page, sub] = name === "budget" && rawSub === "recurring" ? ["recurring", ""]
-    : MOVED[name] ?? [name === "settings" ? "setup" : name, rawSub];
+  const [page, sub] = MOVED[path] ?? [name === "settings" ? "setup" : name, rawSub];
   if ((page || "overview") !== route.page) newPage();   // a tab inside the same page keeps its data and place
   route.page = page || "overview";
   route.sub = sub;
@@ -178,7 +175,6 @@ export async function boot(): Promise<void> {
   catch (err) { console.error(err); app.bootError = errMsg(err); return; }
   if (booted) return;
   booted = true;
-  startMonitoring(app.state?.sentry).catch((err) => console.error(err));   // error reports, if Runway sends them
   loadCategories().catch((err) => console.error(err));   // every page shows categories' emoji and colors
   onBoot.splice(0).forEach((fn) => fn());
   syncOnVisit();
