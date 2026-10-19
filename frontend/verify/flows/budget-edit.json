@@ -1,0 +1,23 @@
+{
+  "name": "budget-edit",
+  "page": "budget",
+  "steps": [
+    { "wait_for": "button[aria-label^='Edit Coffee & Snacks budget']" },
+    { "scroll_to": "button[aria-label^='Edit Coffee & Snacks budget']" },
+    { "click": "button[aria-label^='Edit Coffee & Snacks budget']" },
+    { "wait_for": "[role=dialog]:has-text('Edit Coffee & Snacks budget') [data-budget-editor]" },
+    { "expect_focus": "[data-budget-editor] input" },
+    { "expect_text": { "selector": "[role=dialog]:has-text('Edit Coffee & Snacks budget') [data-scope-note]", "text": "Used in months without their own amount" } },
+    { "screenshot": "usual" },
+    { "click": "[role=dialog]:has-text('Edit Coffee & Snacks budget') [role=radio]:has-text('This month only')" },
+    { "expect_text": { "selector": "[role=dialog]:has-text('Edit Coffee & Snacks budget') [data-scope-note]", "text": "only. Other months keep $" } },
+    { "screenshot": "this-month" },
+    { "click": "[role=dialog]:has-text('Edit Coffee & Snacks budget') button:text-is('Cancel')" },
+    { "click": "button[aria-label^='Edit Shopping budget']" },
+    { "wait_for": "[role=dialog]:has-text('Edit Shopping budget') [data-budget-editor]" },
+    { "expect_text": { "selector": "[role=dialog]:has-text('Edit Shopping budget') [role=radio][aria-checked=true]", "text": "This month only" } },
+    { "expect_text": { "selector": "[role=dialog]:has-text('Edit Shopping budget') [data-scope-note]", "text": "only. Other months keep $" } },
+    { "screenshot": "own-month" },
+    { "click": "[role=dialog]:has-text('Edit Shopping budget') button:text-is('Cancel')" }
+  ]
+}
