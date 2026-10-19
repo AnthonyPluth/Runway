@@ -68,7 +68,7 @@ jobs:
         if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
         with:
           cache-name: screenshot-diff
-          install-args: --only main   # Pillow is a main dependency
+          install-args: --only dev   # Pillow, which the tool needs, is in the dev group (pyproject.toml)
       - name: Compare the screenshots
         if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
         run: poetry run python tools/screenshot_diff.py --base "$BASE_SHA" --head "$HEAD_SHA" --out "$OUT" --run-url "$RUN_URL"

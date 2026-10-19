@@ -65,6 +65,11 @@ class Comparing(unittest.TestCase):
         self.assertEqual(count, 3)
         self.assertEqual(boxes, [(10, 10, 13, 12), (380, 280, 381, 281)])
 
+    def test_boxes_come_in_reading_order_by_their_top_edge(self):
+        # both pixels are in the grid's row 5, but the right one is higher: found left to right, listed top to bottom
+        count, boxes = changed(image((600, 200)), image((600, 200), p_5_95=(255, 0, 0, 255), p_400_80=(255, 0, 0, 255)))
+        self.assertEqual((count, boxes), (2, [(400, 80, 401, 81), (5, 95, 6, 96)]))
+
     def test_changes_close_together_are_one_box(self):
         count, boxes = changed(image(), image(p_10_10=(1, 2, 3, 255), p_30_10=(1, 2, 3, 255)))
         self.assertEqual((count, boxes), (2, [(10, 10, 31, 11)]))

@@ -1,8 +1,8 @@
 """Shows which pixels of the committed screenshots a pull request changed (.github/workflows/screenshot-diff.yml posts
 the result as a comment). Standard library and Pillow only.
 
-    python tools/screenshot_diff.py --base origin/main --head HEAD --out artifacts/screenshot-diff [--run-url URL]
-    python tools/screenshot_diff.py --base origin/main --head HEAD --dry-run     # prints the comment, writes nothing
+    poetry run python tools/screenshot_diff.py --base origin/main --head HEAD --out artifacts/screenshot-diff [--run-url URL]
+    poetry run python tools/screenshot_diff.py --base origin/main --head HEAD --dry-run     # prints the comment, writes nothing
 
 It reads every PNG under screenshots/ that was added, deleted or modified between the merge base of BASE..HEAD and HEAD
 straight from git's objects (nothing is checked out). A modified file is compared pixel by pixel, exactly: any difference in
