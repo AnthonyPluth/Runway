@@ -27,6 +27,10 @@ const RESTRICTED = {
     selector: `ArrayExpression:has(> Literal[value=${ACCOUNT_KIND}] ~ Literal[value=${ACCOUNT_KIND}])`,
     message: "Don't list account kinds by hand: use ACCOUNT_KINDS, KIND_GROUPS, isCash, isBankKind or isPayingKind from lib/accounts.ts, and add the list there if it's missing.",
   },
+  monthButton: {
+    selector: "SvelteElement[name.name=/^[Bb]utton$/] > SvelteStartTag > SvelteAttribute[key.name='aria-label'] > SvelteLiteral[value=/^(Previous|Next) month$/]",
+    message: "Don't draw a month's arrows by hand: use MonthPicker (lib/components/MonthPicker.svelte), which gives Budget and Reports one picker.",
+  },
 };
 const restrict = (...names) => ["error", ...names.map((n) => RESTRICTED[n])];
 
@@ -70,14 +74,16 @@ export default defineConfig(
       // It flags every Date, Set and URLSearchParams in a Svelte file, but ours are throwaway locals or memos kept
       // non-reactive on purpose; reactive state here is replaced, not mutated in place.
       "svelte/prefer-svelte-reactivity": "off",
-      "no-restricted-syntax": restrict("errorCast", "fetch", "accountKinds"),
+      "no-restricted-syntax": restrict("errorCast", "fetch", "accountKinds", "monthButton"),
       "runway/no-silent-catch": "error",
     },
     plugins: { runway },
   },
   // lib/api.ts is the one place that calls fetch, and lib/accounts.ts (with its test) the one that lists account kinds.
-  { files: ["frontend/src/lib/api.ts"], rules: { "no-restricted-syntax": restrict("errorCast", "accountKinds") } },
-  { files: ["frontend/src/lib/accounts.ts", "frontend/src/lib/accounts.test.ts"], rules: { "no-restricted-syntax": restrict("errorCast", "fetch") } },
+  { files: ["frontend/src/lib/api.ts"], rules: { "no-restricted-syntax": restrict("errorCast", "accountKinds", "monthButton") } },
+  // MonthPicker.svelte is the one component that draws the Previous month and Next month buttons.
+  { files: ["frontend/src/lib/components/MonthPicker.svelte"], rules: { "no-restricted-syntax": restrict("errorCast", "fetch", "accountKinds") } },
+  { files: ["frontend/src/lib/accounts.ts", "frontend/src/lib/accounts.test.ts"], rules: { "no-restricted-syntax": restrict("errorCast", "fetch", "monthButton") } },
   {
     rules: {
       // A leading underscore marks a name that's unused on purpose (a page's unused route props, `catch (_)`).
