@@ -86,8 +86,8 @@
   {#if collapsed}
     <Card.Content class="flex flex-wrap items-center gap-x-3 gap-y-2">
       <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-good/15 text-good"><Check class="size-4" aria-label="Done" /></span>
-      <span class="min-w-0 flex-1 text-sm font-medium">Set up · {doneCount} of 4 done</span>
-      <Button variant="link" size="sm" class="h-10 sm:h-8" onclick={() => (expanded = true)}>Review your forecast</Button>
+      <span class="min-w-0 flex-1 basis-[calc(100%-2.75rem)] text-sm font-medium sm:basis-0">Set up · {doneCount} of 4 done</span>
+      <Button variant="link" size="sm" class="h-10 sm:h-8" aria-expanded="false" aria-controls="setup-review" onclick={() => (expanded = true)}>Review your forecast</Button>
       <Button variant="ghost" size="sm" class="h-10 sm:h-8" onclick={dismiss}>Dismiss</Button>
     </Card.Content>
   {:else}
@@ -97,13 +97,13 @@
     {#if !welcome}
       <Card.Action class="flex items-center gap-1">
         {#if foldable}
-          <Button variant="ghost" size="sm" aria-label="Collapse setup" aria-expanded="true" onclick={() => (expanded = false)}><ChevronUp class="size-4" /></Button>
+          <Button variant="ghost" size="sm" aria-label="Collapse setup" aria-expanded="true" aria-controls="setup-review" onclick={() => (expanded = false)}><ChevronUp class="size-4" /></Button>
         {/if}
         <Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button>
       </Card.Action>
     {/if}
   </Card.Header>
-  <Card.Content>
+  <Card.Content id="setup-review">
     <div class="mb-4 flex items-center gap-3">
       <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={4} aria-valuenow={doneCount} aria-label="Setup progress">
         <div class="h-full rounded-full bg-good transition-[width] duration-500" style:width={barWidth(doneCount / 4)}></div>

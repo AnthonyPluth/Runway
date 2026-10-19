@@ -148,7 +148,9 @@ describe("SetupChecklist final review", () => {
     expect(screen.queryByText("Finish setting up")).toBeNull();
     expect(screen.queryByRole("link", { name: "Edit income" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Finish setup" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Review your forecast" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(screen.getByRole("button", { name: "Review your forecast" }));
+    expect(screen.getByRole("button", { name: "Collapse setup" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Edit income" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finish setup" })).toBeInTheDocument();
