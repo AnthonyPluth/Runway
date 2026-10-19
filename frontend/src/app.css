@@ -41,6 +41,7 @@
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
+  --nav-inactive: var(--muted-foreground);   /* the phone tab bar's inactive labels and icons (MobileNav); the dark theme lightens them */
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -75,6 +76,7 @@
   --secondary-foreground: #ffffff;
   --muted: #1d2025;
   --muted-foreground: #9aa0aa;
+  --nav-inactive: #b9bec7;   /* lighter than muted-foreground, so the tab bar's labels stay at 4.5:1 or better over the glass (docs: contributing/development, "The phone tab bar") */
   --accent: #1d2025;
   --accent-foreground: #ffffff;
   --destructive: #ff8a7a;
