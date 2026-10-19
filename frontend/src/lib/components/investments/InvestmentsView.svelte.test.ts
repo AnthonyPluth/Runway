@@ -218,10 +218,19 @@ describe("InvestmentsView", () => {
       });
 
       it("says all checks look fine, instead of the card, when none is failing", async () => {
-        await load({ xray: [{ name: "Fees", ok: true, detail: "Low." }] });
-        expect(screen.getByTestId("checks-fine")).toHaveTextContent("All checks look fine");
+        const acct = { id: "a1", account_id: "p1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: null, tracked: 0, drift: null, balance: 10 };
+        await load({ xray: [{ name: "Fees", ok: true, detail: "Low." }], accounts: [acct] });
+        expect(within(screen.getByTestId("accounts-card")).getByTestId("checks-fine")).toHaveTextContent("All checks look fine");
         expect(screen.queryByTestId("worth-a-look")).toBeNull();
         expect(screen.queryByTestId("check-card")).toBeNull();
+      });
+
+      it("keeps the period table behind Show as table, absent until it is pressed", async () => {
+        await load({});
+        expect(screen.queryByText("Gain", { selector: "td" })).toBeNull();
+        await fireEvent.click(screen.getByText("Show as table"));
+        expect(await screen.findByText("Gain", { selector: "td" })).toBeInTheDocument();
+        expect(screen.getByText("S&P 500", { selector: "td" })).toBeInTheDocument();
       });
 
       it("links each account by the id Settings knows it by: a Plaid account's account_id, a SimpleFIN one's id without sf:", async () => {
@@ -274,7 +283,8 @@ describe("InvestmentsView", () => {
       expect(tile("Total gain")).toHaveTextContent("−16.7% on $3,000 cost basis");
       expect(tile("Return · 1Y")).toHaveTextContent("S&P 500 +10.0%");
       expect(screen.getByTestId("vs-bench-chip")).toHaveTextContent("level with the S&P 500");
-      expect(screen.getByText("−$40.00")).toHaveClass("text-loss");
+      await fireEvent.click(screen.getByText("Show as table"));
+      expect(await screen.findByText("−$40.00")).toHaveClass("text-loss");
       expect(screen.getByText("Gain", { selector: "td" })).toBeInTheDocument();
       expect(screen.getByText("33%", { selector: "[data-testid=alloc-legend] span" })).toBeInTheDocument();
     });

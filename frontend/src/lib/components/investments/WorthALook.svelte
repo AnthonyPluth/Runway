@@ -4,7 +4,7 @@
   import type { Investments } from "./types";
 
   // The checks that aren't fine: a card each (amber title for "worth a look", muted for a note). When all are fine,
-  // one line says so instead. What the checks compute is the server's (`xray`); this only picks what to show.
+  // the Accounts card says so in one line instead (AccountsCard). What the checks compute is the server's (`xray`); this only picks what to show.
   let { checks }: { checks: Investments["xray"] } = $props();
   const open = $derived(checks.filter((c) => !c.ok));
 </script>
@@ -23,6 +23,4 @@
       </ul>
     </Card.Content>
   </Card.Root>
-{:else if checks.length}
-  <p class="mb-6 text-sm text-muted-foreground" data-testid="checks-fine">All checks look fine</p>
 {/if}

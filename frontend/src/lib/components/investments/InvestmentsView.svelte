@@ -25,6 +25,7 @@
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDateTime, plural, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { tick } from "svelte";
   import { errMsg } from "$lib/act";
@@ -39,6 +40,8 @@
   let live = $state<LiveQuotes | null>(null);
   let shownPeriod = $state(inv.period);
   let chartMode = $state<"value" | "return">("value");
+  // The period table is behind "Show as table", closed on every width, and only drawn once opened.
+  let periodTable = $state(false);
 
   async function load(period = inv.period) {
     busy = true;
@@ -234,17 +237,24 @@
       {/if}
       <p class="mt-2 text-sm text-muted-foreground tabular-nums" data-testid="chart-legend-line">You {pct(perf.return)} · S&amp;P 500 {pct(perf.benchmark_return)}</p>
       <Segmented label="Period" class={cn("mt-3 w-full", busy && "opacity-70")} bind:value={shownPeriod} onchange={setPeriod} options={PERIODS} />
-      <div class="mt-4 hidden overflow-x-auto md:block">
-        <table class="w-full text-sm">
-          <thead><tr class="text-xs text-muted-foreground"><th class="pb-1 text-left font-medium">Period</th>
-            {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-2 text-right font-medium sm:pl-3">{p}</th>{/each}</tr></thead>
-          <tbody class="tabular-nums [&_td]:py-1.5 [&_td:not(:first-child)]:pl-2 sm:[&_td:not(:first-child)]:pl-3 [&_td]:whitespace-nowrap">
-            <tr class="border-t border-border"><td>Return</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right", gainCls(p.return))}>{pct(p.return)}</td>{/each}</tr>
-            <tr class="border-t border-border"><td>S&amp;P 500</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right text-muted-foreground">{pct(p.benchmark_return)}</td>{/each}</tr>
-            <tr class="border-t border-border"><td>Gain</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right text-muted-foreground", gainCls(p.gain))}>{signed(p.gain)}</td>{/each}</tr>
-          </tbody>
-        </table>
-      </div>
+      <details class="group mt-3" ontoggle={(e) => (periodTable = e.currentTarget.open)}>
+        <summary class="flex w-fit cursor-pointer list-none items-center gap-1.5 text-sm text-muted-foreground select-none hover:text-foreground phone:min-h-11 [&::-webkit-details-marker]:hidden">
+          <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />Show as table
+        </summary>
+        {#if periodTable}
+            <div class="mt-2 overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead><tr class="text-xs text-muted-foreground"><th class="pb-1 text-left font-medium">Period</th>
+                  {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-2 text-right font-medium sm:pl-3">{p}</th>{/each}</tr></thead>
+                <tbody class="tabular-nums [&_td]:py-1.5 [&_td:not(:first-child)]:pl-2 sm:[&_td:not(:first-child)]:pl-3 [&_td]:whitespace-nowrap">
+                  <tr class="border-t border-border"><td>Return</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right", gainCls(p.return))}>{pct(p.return)}</td>{/each}</tr>
+                  <tr class="border-t border-border"><td>S&amp;P 500</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right text-muted-foreground">{pct(p.benchmark_return)}</td>{/each}</tr>
+                  <tr class="border-t border-border"><td>Gain</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right text-muted-foreground", gainCls(p.gain))}>{signed(p.gain)}</td>{/each}</tr>
+                </tbody>
+              </table>
+            </div>
+        {/if}
+      </details>
     </Card.Content>
   </Card.Root>
 
@@ -257,7 +267,7 @@
 
   <div class="mb-6 grid gap-6 lg:grid-cols-2">
     <AllocationCard allocation={d.allocation} />
-    <AccountsCard accounts={d.accounts} holdings={d.holdings} />
+    <AccountsCard accounts={d.accounts} holdings={d.holdings} checks={d.xray} />
   </div>
 
   <WorthALook checks={d.xray} />

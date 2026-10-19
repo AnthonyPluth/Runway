@@ -4,10 +4,12 @@
   import { cn } from "$lib/utils";
   import { accountDayChange } from "./allocation";
   import { gainCls, signed } from "./numbers";
-  import type { Holding, InvAccount } from "./types";
+  import type { Holding, InvAccount, Investments } from "./types";
 
   // Each visible investment account: its value and today's change, linking to the account in Settings → Accounts.
-  let { accounts, holdings }: { accounts: InvAccount[]; holdings: Holding[] } = $props();
+  let { accounts, holdings, checks = [] }: { accounts: InvAccount[]; holdings: Holding[]; checks?: Investments["xray"] } = $props();
+  // The checks line closes the card: "All checks look fine", or nothing here when some need a look (Worth a look shows them).
+  const checksFine = $derived(checks.length > 0 && checks.every((c) => c.ok));
   const shown = $derived(accounts.filter((a) => !a.hidden));
   // Settings → Accounts knows an account by its own id: SimpleFIN's is the position id without "sf:", Plaid's the account_id it is matched to (none: the list without a row to open).
   const settingsId = (a: InvAccount) => (a.source === "simplefin" ? a.id.slice(3) : a.account_id);
@@ -37,6 +39,7 @@
           </li>
         {/each}
       </ul>
+      {#if checksFine}<p class="mt-2 border-t border-border pt-3 text-sm text-muted-foreground" data-testid="checks-fine">All checks look fine</p>{/if}
     </Card.Content>
   </Card.Root>
 {/if}
