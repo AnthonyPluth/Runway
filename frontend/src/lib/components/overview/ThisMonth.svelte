@@ -60,11 +60,28 @@
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
     .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
   {@const c = chart(pace)}
+  <!-- The bar is what the budgeted categories have spent of what they're budgeted; the marker is how far through the
+       month we are, so a bar past the marker is ahead of pace. With no budgets, the pace is last month's at this point. -->
+  {@const budgeted = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)}
+  {@const total = budgeted.reduce((s, c) => s + (c.available ?? c.budget!), 0)}
+  {@const used = budgeted.reduce((s, c) => s + c.spent, 0)}
+  {@const through = budget.days_in_month ? budget.day / budget.days_in_month : 0}
+  {@const ahead = used - total * through}
   <div class="flex min-w-0 flex-col gap-6">
-    <Group title="This month">
+    <Group title="This month" href="#budget" label={`Spending this month, ${fmt0(pace.spent)}. Open Budget`}>
       <div class="px-4 pt-3 pb-2">
         <div class="text-[13px] text-muted-foreground">Spent so far in {monthShort(pace.month)}</div>
         <div class="text-[28px] font-semibold tracking-tight tabular-nums">{fmt(pace.spent)}</div>
+        {#if total > 0}
+          <span class="relative mt-2.5 block h-1.5 rounded-full bg-muted" role="img"
+            aria-label={`${fmt0(used)} of ${fmt0(total)} budgeted, ${Math.round(through * 100)}% through the month`}>
+            <span class={cn("block h-full rounded-full", used > total ? "bg-destructive" : "bg-primary")} style:width={barWidth(used / total)}></span>
+            <span class="absolute -top-1 h-3.5 w-0.5 rounded-full bg-foreground" style:left={barWidth(through)} data-pace-marker></span>
+          </span>
+          <span class={cn("mt-2 mb-2 block text-[13px] font-medium tabular-nums", Math.abs(ahead) < 1 ? "text-muted-foreground" : ahead > 0 ? "text-warning" : "text-good")}>
+            {#if Math.abs(ahead) < 1}On pace{:else}{fmt0(Math.abs(ahead))} {ahead > 0 ? "over" : "under"} pace{/if}
+          </span>
+        {/if}
         <p class={cn("text-[13px] font-medium tabular-nums", Math.abs(diff) < 1 ? "text-muted-foreground" : diff > 0 ? "text-warning" : "text-good")}>
           {#if Math.abs(diff) < 1}About the same as this point in {monthShort(pace.prev_month)}
           {:else}{diff > 0 ? "▲" : "▼"} {fmt0(Math.abs(diff))} {diff > 0 ? "more" : "less"} than this point in {monthShort(pace.prev_month)}{/if}

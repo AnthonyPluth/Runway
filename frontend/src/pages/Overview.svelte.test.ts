@@ -61,6 +61,16 @@ describe("Overview", () => {
     expect(screen.queryByText(/Includes 1 bill/)).not.toBeInTheDocument();
   });
 
+  it("asks for the month's pace and budget once, for the This month card alone", async () => {
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/networth"));
+    const paths = vi.mocked(api).mock.calls.map((c) => String(c[0]));
+    expect(paths.filter((p) => p === "/api/month_pace")).toHaveLength(1);
+    expect(paths.filter((p) => p.startsWith("/api/budget?"))).toHaveLength(1);
+  });
+
   it("links each warning to where it's put right", async () => {
     serve(() => fc({
       warnings: ["Enter Visa’s latest statement so its payment is in the forecast.", "Amex: choose which account pays it in Settings."],

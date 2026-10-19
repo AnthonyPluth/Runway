@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -277,6 +277,37 @@ describe("ThisMonth", () => {
     for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));
     render(ThisMonth);
     expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
+  });
+
+  const mcat = (name: string, budget: number, spent: number) => ({ name, parent: null, path: [name], depth: 0, top: name, has_children: false,
+    budget, pay_with: null, usual_account: null, available: budget, spent, own_spent: spent, left: budget - spent });
+  const monthData = (day: number, cats: ReturnType<typeof mcat>[]) => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({ month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 640, last_same_point: 500, last_total: 1200 })
+      .mockResolvedValueOnce({ month: "2026-03", days_in_month: 30, day, categories: cats, income: 0, uncategorized: 0, pay_accounts: [] })
+      .mockResolvedValueOnce({ items: [], total: 0 });
+  };
+
+  it("links its heading to Budget, and draws the pace bar with its marker and wording", async () => {
+    // $640 of $1,000 budgeted, half way through: $140 ahead of an even pace
+    monthData(15, [mcat("Dining", 400, 300), mcat("Travel", 600, 340)]);
+    const { container } = render(ThisMonth);
+    expect(await screen.findByRole("link", { name: "Spending this month, $640. Open Budget" })).toHaveAttribute("href", "#budget");
+    expect(screen.getByText("$140 over pace")).toBeInTheDocument();
+    expect(container.querySelector("[data-pace-marker]")).toHaveStyle({ left: "50%" });
+    expect(screen.getByRole("img", { name: "$640 of $1,000 budgeted, 50% through the month" })).toBeInTheDocument();
+    expect(screen.getByText(/more than this point in Feb/)).toBeInTheDocument();
+  });
+
+  it("says under pace later in the month, and draws no bar when nothing is budgeted", async () => {
+    monthData(24, [mcat("Dining", 400, 300), mcat("Travel", 600, 340)]);
+    render(ThisMonth);
+    expect(await screen.findByText("$160 under pace")).toBeInTheDocument();
+    cleanup();
+    monthData(15, []);
+    const { container } = render(ThisMonth);   // the last month drawn is on screen until this one arrives
+    await waitFor(() => expect(container.querySelector("[data-pace-marker]")).toBeNull());
+    expect(screen.getByText(/more than this point in Feb/)).toBeInTheDocument();
   });
 
   it("signs Recent's amounts, and shows a dash, not 0%, for a budget with nothing spent", async () => {
