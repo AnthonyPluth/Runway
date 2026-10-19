@@ -400,6 +400,20 @@ describe("BudgetRow", () => {
       expect(editor()).toBeNull();
     });
 
+    it.each(["25", "123.45"])("saves %s from Enter: the 10 step is only the arrow keys' increment, not a rule", async (v) => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      expect(document.querySelector("[data-budget-editor]")).toHaveAttribute("novalidate");
+      await retype(v);
+      await userEvent.keyboard("{Enter}");
+      expect(posts()).toEqual([{ category: "Groceries", amount: v }]);
+      await open();
+      await userEvent.click(radio("This month only"));
+      await retype(v);
+      await userEvent.keyboard("{Enter}");
+      expect(posts()[1]).toEqual({ category: "Groceries", month: "2026-03", amount: v });
+    });
+
     it("saves this month's amount for the month it was opened on, from Enter too", async () => {
       const { onchanged } = setup(cat({ usual_budget: 500 }), { budgets: true });
       await open();

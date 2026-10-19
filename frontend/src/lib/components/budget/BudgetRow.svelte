@@ -316,7 +316,8 @@
 
 <!-- The editor: the amount, which months it's for and what that means, then Save and Cancel. -->
 {#snippet editor()}
-  <form class="flex flex-col gap-3" data-budget-editor onsubmit={(e) => { e.preventDefault(); save(); }}>
+  <!-- novalidate: step="10" is only the arrow keys' increment; any amount (25, 123.45) is a valid budget. -->
+  <form class="flex flex-col gap-3" data-budget-editor novalidate onsubmit={(e) => { e.preventDefault(); save(); }}>
     <div class="flex flex-col gap-1.5">
       <label for={`${uid}-amount`} class="text-xs text-muted-foreground">Amount</label>
       <span class="relative">
