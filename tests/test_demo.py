@@ -4,7 +4,7 @@ from datetime import date
 from sqlalchemy import func, select
 
 from runway.storage import db
-from runway.domain import demo, forecast, portfolio
+from runway.domain import demo, forecast, networth, portfolio
 from runway.domain import retail
 from runway.storage.models import Account, Category, Recurring, RetailItem, RetailOrder, Transaction
 from tests.shared import DbCase
@@ -80,6 +80,19 @@ class DemoTests(DbCase):
         self.assertAlmostEqual(by["DEMOTM"]["day_change"], 42 * (284.95 - 281.40), places=2)
         self.assertAlmostEqual(by["DEMOIN"]["day_change_pct"], 67.55 / 68.20 - 1, places=5)
         self.assertLess(abs(by["DEMOSI"]["day_change_pct"]), 0.001)
+
+    def test_the_brokerage_is_in_net_worth_with_the_investments_total(self):
+        today = date(2026, 10, 9)
+        demo.seed(self.c, today=today)
+        before = networth.summary(self.c, today, save=False)
+        self.assertNotIn("investments", [g["key"] for g in before["groups"]])
+        demo.seed_investments(self.c, today)
+        after = networth.summary(self.c, today, save=False)
+        group = next(g for g in after["groups"] if g["key"] == "investments")
+        self.assertEqual([i["id"] for i in group["items"]], ["pl:demo-brokerage"])
+        self.assertEqual(group["total"], portfolio.summary(self.c, today)["total"])
+        self.assertGreater(group["total"], 0)
+        self.assertAlmostEqual(after["assets"] - before["assets"], group["total"], places=2)
 
     def test_the_card_has_a_part_payment_since_its_statement(self):
         demo.seed(self.c, today=date(2026, 10, 9))
