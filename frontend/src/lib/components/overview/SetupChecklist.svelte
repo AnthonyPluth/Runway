@@ -7,6 +7,7 @@
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import Check from "@lucide/svelte/icons/check";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import { openForecastSettings, setupReview } from "./forecastSheet.svelte";
   import ForecastReview from "./ForecastReview.svelte";
   import { act, errMsg } from "$lib/act";
@@ -19,7 +20,9 @@
   // that wait for a decision come first: those steps point at Settings → Accounts, where they're added.
   // Once all four are done (or when it's brought back from the forecast settings) it ends with a review of what the
   // forecast uses, from `fc` (the Overview's own figures: loading until it arrives, or its error), and Finish setup puts
-  // the checklist away like Dismiss does, then `onfinish` brings the forecast into view.
+  // the checklist away like Dismiss does, then `onfinish` brings the forecast into view. With every step done the card
+  // starts as one row (its review one tap away, a chevron folds it back); that's per visit, not remembered. A review
+  // brought back from the forecast settings opens in full.
   let { welcome = false, fc = null, fcError = null, onretry, onfinish }: {
     welcome?: boolean; fc?: Overview | null; fcError?: Error | null; onretry?: () => void; onfinish?: () => void;
   } = $props();
@@ -45,6 +48,9 @@
   const doneCount = $derived(steps.filter((x) => x.done).length);
   const next = $derived(steps.findIndex((x) => !x.done));
   const reviewing = $derived(!welcome && (doneCount === 4 || setupReview.open));
+  let expanded = $state(false);
+  const foldable = $derived(!welcome && doneCount === 4 && !setupReview.open);
+  const collapsed = $derived(foldable && !expanded);
 
   const setDismissed = async (on: boolean) => {
     await api("/api/settings", { method: "POST", body: { setup_dismissed: on } });
@@ -77,10 +83,25 @@
 </script>
 
 <Card.Root id="setup-checklist" class={cn(welcome ? "mx-auto mt-6 max-w-2xl md:mt-12" : "mb-6")}>
+  {#if collapsed}
+    <Card.Content class="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-good/15 text-good"><Check class="size-4" aria-label="Done" /></span>
+      <span class="min-w-0 flex-1 text-sm font-medium">Set up · {doneCount} of 4 done</span>
+      <Button variant="link" size="sm" class="h-10 sm:h-8" onclick={() => (expanded = true)}>Review your forecast</Button>
+      <Button variant="ghost" size="sm" class="h-10 sm:h-8" onclick={dismiss}>Dismiss</Button>
+    </Card.Content>
+  {:else}
   <Card.Header>
     {#if welcome}<img src="/logo.svg" alt="" width="40" height="40" class="mb-2" />{/if}
     <Card.Title class={welcome ? "text-2xl" : ""}>{welcome ? "Welcome to Runway" : "Finish setting up"}</Card.Title>
-    {#if !welcome}<Card.Action><Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button></Card.Action>{/if}
+    {#if !welcome}
+      <Card.Action class="flex items-center gap-1">
+        {#if foldable}
+          <Button variant="ghost" size="sm" aria-label="Collapse setup" aria-expanded="true" onclick={() => (expanded = false)}><ChevronUp class="size-4" /></Button>
+        {/if}
+        <Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button>
+      </Card.Action>
+    {/if}
   </Card.Header>
   <Card.Content>
     <div class="mb-4 flex items-center gap-3">
@@ -117,4 +138,5 @@
       </div>
     {/if}
   </Card.Content>
+  {/if}
 </Card.Root>

@@ -135,10 +135,47 @@ describe("SetupChecklist final review", () => {
     budget: { monthly: 450, used: [{ category: "Groceries", amount: 450, account_id: "chk", account: "Checking", chosen: false }], skipped: [] },
     ...extra,
   });
-  const finishing = (props = {}) => { app.state = { connected: true, setup: done }; render(SetupChecklist, props); };
+  const finishing = async (props = {}, expand = true) => {
+    app.state = { connected: true, setup: done };
+    render(SetupChecklist, props);
+    if (expand) await userEvent.click(screen.getByRole("button", { name: "Review your forecast" }));
+  };
+
+  it("collapses to one row when all four steps are done, expands in place and collapses again", async () => {
+    await finishing({ fc: forecast() }, false);
+    expect(screen.getByText("Set up · 4 of 4 done")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(screen.queryByText("Finish setting up")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Edit income" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finish setup" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Review your forecast" }));
+    expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit income" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finish setup" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse setup" }));
+    expect(screen.getByText("Set up · 4 of 4 done")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit income" })).toBeNull();
+  });
+
+  it("opens in full when brought back from the forecast settings", () => {
+    app.state = { connected: true, setup: { ...done, dismissed: true } };
+    setupReview.open = true;
+    render(SetupChecklist, { fc: forecast() });
+    expect(screen.getByRole("link", { name: "Edit income" })).toBeInTheDocument();
+    expect(screen.queryByText("Set up · 4 of 4 done")).toBeNull();
+  });
+
+  it("keeps the full card with three steps done", () => {
+    app.state = { connected: true, setup: { ...done, budgets: false } };
+    render(SetupChecklist, { fc: forecast() });
+    expect(screen.getByText("Finish setting up")).toBeInTheDocument();
+    expect(screen.getByText("3 of 4 done")).toBeInTheDocument();
+    expect(screen.queryByText(/Set up · /)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Collapse setup" })).toBeNull();
+  });
 
   it("shows the review once all four steps are done, with what the forecast uses and an Edit link for each", async () => {
-    finishing({ fc: forecast() });
+    await finishing({ fc: forecast() });
     expect(screen.getByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
     expect(screen.getByText("4 of 4 done")).toBeInTheDocument();
     expect(screen.getByText("Everyday Checking")).toBeInTheDocument();
@@ -163,8 +200,8 @@ describe("SetupChecklist final review", () => {
     expect(screen.queryByRole("button", { name: "Finish setup" })).toBeNull();
   });
 
-  it("says specifically what is missing", () => {
-    finishing({ fc: forecast({ accounts: [], events: [], budget: null, warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
+  it("says specifically what is missing", async () => {
+    await finishing({ fc: forecast({ accounts: [], events: [], budget: null, warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
     expect(screen.getByText("No forecast account chosen")).toBeInTheDocument();
     expect(screen.getByText("No income scheduled")).toBeInTheDocument();
     expect(screen.getByText("No bills scheduled")).toBeInTheDocument();
@@ -174,10 +211,10 @@ describe("SetupChecklist final review", () => {
 
   it("says when the forecast is loading, or couldn't load, and tries again", async () => {
     const onretry = vi.fn();
-    finishing({ fc: null });
+    await finishing({ fc: null });
     expect(screen.getByText("Loading your forecast…")).toBeInTheDocument();
     cleanup();
-    finishing({ fc: null, fcError: new Error("Offline"), onretry });
+    await finishing({ fc: null, fcError: new Error("Offline"), onretry });
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t load your forecast: Offline");
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(onretry).toHaveBeenCalled();
@@ -187,7 +224,7 @@ describe("SetupChecklist final review", () => {
     const onfinish = vi.fn();
     vi.mocked(api).mockResolvedValue({});
     vi.mocked(toast).mockClear();
-    finishing({ fc: forecast({ events: [], budget: null }), onfinish });
+    await finishing({ fc: forecast({ events: [], budget: null }), onfinish });
     await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: true } });
     expect(onfinish).toHaveBeenCalledOnce();
@@ -201,7 +238,7 @@ describe("SetupChecklist final review", () => {
     const onfinish = vi.fn();
     vi.mocked(api).mockRejectedValueOnce(new Error("Nope"));
     vi.mocked(toast).mockClear();
-    finishing({ fc: forecast(), onfinish });
+    await finishing({ fc: forecast(), onfinish });
     await userEvent.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t finish setup: Nope");
     expect(onfinish).not.toHaveBeenCalled();
@@ -220,10 +257,10 @@ describe("SetupChecklist final review", () => {
     expect(setupReview.open).toBe(false);
   });
 
-  it("leaves out the APR warning and ones put away on Overview", () => {
+  it("leaves out the APR warning and ones put away on Overview", async () => {
     const apr = "Visa: the forecast carries part of its statements to the next one, but doesn’t count the interest on it: enter the card’s APR in Settings.";
     const away = "Amex: choose which account pays it in Settings.";
-    finishing({ fc: forecast({ dismissed_warnings: [away], warning_links: [
+    await finishing({ fc: forecast({ dismissed_warnings: [away], warning_links: [
       { text: apr, href: "#setup/accounts" }, { text: away, href: "#setup/accounts" }] }) });
     expect(screen.getByText("No card payments need attention")).toBeInTheDocument();
   });
@@ -255,15 +292,15 @@ describe("SetupChecklist final review", () => {
     expect(setupReview.open).toBe(true);
   });
 
-  it("counts a card with a statement but no paying account as needing attention", () => {
-    finishing({ fc: forecast({ warning_links: [{ text: "Amex: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
+  it("counts a card with a statement but no paying account as needing attention", async () => {
+    await finishing({ fc: forecast({ warning_links: [{ text: "Amex: choose which account pays it in Settings.", href: "#setup/accounts" }] }) });
     expect(screen.getByText("1 card payment to look at")).toBeInTheDocument();
     expect(screen.getByText("Amex: choose which account pays it in Settings.")).toBeInTheDocument();
     expect(screen.queryByText("No card payments need attention")).toBeNull();
   });
 
-  it("keeps the early Dismiss and leaves the welcome screen without a review", () => {
-    finishing({ fc: forecast() });
+  it("keeps the early Dismiss and leaves the welcome screen without a review", async () => {
+    await finishing({ fc: forecast() });
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
     cleanup();
     app.state = { connected: false, setup: { ...done, bank: false } };
