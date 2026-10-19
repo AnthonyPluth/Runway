@@ -11,15 +11,16 @@
 
   // On a phone (lib/phone.svelte.ts): a tab bar docked to the bottom edge with the four pages you use most, and More for
   // the rest (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring and
-  // Reports are in the sidebar's main group but go in More here: more tabs wouldn't fit a phone's width.
+  // Reports are in the sidebar's Day to day group but go in More here: more tabs wouldn't fit a phone's width.
   // The shared sheet turns into a right-hand panel from 768px (md:). A phone turned sideways is wider than that but still a phone
   // (app.css `desktop:`), and this sheet only shows there, so keep the bottom sheet at every width.
   const SHEET = "gap-0 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:top-auto md:bottom-0 md:inset-x-0 md:h-auto md:max-h-[90dvh] md:w-auto md:max-w-none md:rounded-t-2xl md:rounded-b-none md:border-t md:border-l-0 md:pb-[calc(env(safe-area-inset-bottom)+1rem)] md:data-[state=open]:slide-in-from-bottom md:data-[state=open]:slide-in-from-right-0 md:data-[state=closed]:slide-out-to-bottom md:data-[state=closed]:slide-out-to-right-0";
   // The colour of an inactive tab's label and icon: `--nav-inactive` (app.css), the one place its value is set.
   const INACTIVE = "text-[var(--nav-inactive)]";
-  const IN_MORE = ["recurring", "reports"];
-  const TABS = MAIN_NAV.filter((x) => !IN_MORE.includes(x.page));
-  const MORE: NavItem[] = [...MAIN_NAV.filter((x) => IN_MORE.includes(x.page)), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
+  const ALL = [...MAIN_NAV.items, ...MONEY_NAV.items];
+  const TAB_PAGES = ["overview", "transactions", "budget", "investments"];
+  const TABS = TAB_PAGES.map((p) => ALL.find((x) => x.page === p)!);
+  const MORE: NavItem[] = [...ALL.filter((x) => !TAB_PAGES.includes(x.page)), { page: "setup", label: "Settings", icon: Settings }];
 
   const current = $derived(currentPage());
   const s = $derived(app.state);
