@@ -769,6 +769,12 @@ class MissedGroupTests(LedgerCase):
         with self.assertRaises(ApiError) as e:
             self.call(self.api.api_recurring_skip_missed, self.conn, None, {}, "999")
         self.assertEqual(e.exception.status, 404)
+        # Undo for an item that's gone since: not found, and no dates written.
+        self.api.api_recurring_delete(self.conn, None, None, str(self.rid))
+        with self.assertRaises(ApiError) as e:
+            self.api.api_recurring_skip_missed(self.conn, None, {"restore": r["previous"]}, str(self.rid))
+        self.assertEqual(e.exception.status, 404)
+        self.assertEqual(self.overrides(), [])
 
     def test_mark_as_ended_ends_it_the_day_before_the_first_missed_and_nothing_after_is_expected(self):
         item = self.listed()

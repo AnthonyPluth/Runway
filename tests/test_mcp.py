@@ -462,7 +462,8 @@ class AllowlistTests(unittest.TestCase):
                      ("POST", "/api/recurring/{id}/skip-missed")):
             self.assertTrue(mcp_access.destructive(m, p), p)
         for m, p in (("POST", "/api/transactions"), ("POST", "/api/transactions/import"), ("POST", "/api/rules/{id}"),
-                     ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore")):
+                     ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore"),
+                     ("POST", "/api/recurring/{id}/end")):   # one item's end date, undoable: not "many"
             self.assertFalse(mcp_access.destructive(m, p), p)
 
 

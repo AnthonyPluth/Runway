@@ -327,6 +327,8 @@ def api_recurring_skip_missed(conn, _q, body, rid):
     of those dates had before ({key, amount}, amount null for no edit), which {restore} puts back exactly."""
     rid = row_id(rid, NOT_FOUND)
     if "restore" in body:
+        if not conn.execute(select(Recurring.id).where(Recurring.id == rid)).fetchone():
+            raise ApiError(NOT_FOUND, 404)   # as api_recurring_end: no dates written for an item that's gone
         _restore_overrides(conn, rid, body["restore"])
         return {"ok": True}
     _item, missed, _run = _missed_now(conn, rid)

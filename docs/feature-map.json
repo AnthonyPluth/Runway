@@ -1416,6 +1416,7 @@
         "frontend/src/lib/components/recurring/MissedGroup.svelte"
       ],
       "tests": [
+        "tests/test_mcp.py",
         "tests/test_recurring.py"
       ],
       "docs": [
@@ -1448,7 +1449,8 @@
       ],
       "tests": [
         "tests/test_api_validation.py",
-        "tests/test_categories_recurring_pinned.py"
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_recurring.py"
       ],
       "docs": [
         "using/features"
