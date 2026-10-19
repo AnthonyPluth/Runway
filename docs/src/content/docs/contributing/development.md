@@ -104,7 +104,7 @@ It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` 
 sudo apt-get install -y libfaketime
 ```
 
-So that two runs give identical images, each shot also stops CSS animations, waits for the page to stop changing, scrolls to the top, moves the pointer off the page, writes the demo servers' port as a fixed number, and leaves toasts out. Check it with `sha256sum artifacts/verify/*.png` after two runs.
+So that two runs give identical images, each shot also stops the endless CSS animations, waits for the page to stop changing, scrolls to the top (unless the flow scrolled with `scroll_to`), moves the pointer off the page, writes the demo servers' port as a fixed number, and leaves toasts out. A shot with a modal open (a confirm dialog, a sheet) is the window as it shows, not the whole page, since resizing the window for a full-page capture could close the dialog. The app's once-a-minute refresh is switched off in the browser during the flows. Check it with `sha256sum artifacts/verify/*.png` after two runs.
 
 ![A page `make verify` saved: Runway's Budget page at phone width, with demo data](../../../../../screenshots/budget-phone.png)
 

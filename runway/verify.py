@@ -25,7 +25,7 @@ OUT = os.path.join(ROOT, "artifacts", "verify")
 
 # The frozen clock. Demo data is built relative to today (transactions, due dates, the budget month, chart axes), so an
 # image would change every day it's taken. The server and the demo seed run under libfaketime as if it were this moment
-# (the clock then runs on from it), and verify.mjs sets the browser's clock to the same day with Playwright's page.clock
+# (stopped there: the wall clock does not advance, the monotonic clocks do, so timeouts and waits still work; nothing in the demo servers waits for time.time() to move), and verify.mjs sets the browser's clock to the same day with Playwright's page.clock
 # (the run passes it FROZEN_DAY as --day). Linux only: macOS has no LD_PRELOAD.
 FROZEN_DAY = "2026-06-17"
 FROZEN_TIME = f"{FROZEN_DAY} 12:00:00"

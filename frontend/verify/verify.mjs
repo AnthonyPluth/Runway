@@ -33,12 +33,12 @@ export function findChromium(env = process.env, exists = existsSync, list = read
 }
 
 /** The moment the browser's clock starts at for a run frozen at `day` (YYYY-MM-DD): noon local time, as runway/verify.py's
- *  FROZEN_TIME is for the server (both read in the machine's time zone). The clock then runs on from it. */
+ *  FROZEN_TIME is for the server (both read in the machine's time zone). The browser keeps it fixed for every visit but the device cache check, which installs a running clock from it so it can jump ahead. */
 export const frozenTime = (day) => new Date(`${day}T12:00:00`);
 
 /** Run in the page before a screenshot: waits for the fonts, and writes the demo servers' port (a free one each run) as a
  *  fixed number wherever the page shows it (the assistant's MCP address), so the image doesn't change with the port. */
-export async function settle() {
+export async function settle(keepScroll = false) {
   await globalThis.document.fonts.ready;
   // Wait until the page has stopped changing (a list that grows as it loads, a panel that opens over a few frames): its
   // height and text the same for 8 samples in a row, at most 4 seconds.
@@ -52,8 +52,12 @@ export async function settle() {
   // A last beat for what a frame-by-frame look can't see: focus moving into a popover, an icon settling.
   await new Promise((r) => setTimeout(r, 300));
   // Back to the top: a full-page capture draws sticky and fixed parts (the sidebar, a date header) where the page was scrolled
-  // to, which depends on how far a click scrolled it.
-  globalThis.scrollTo(0, 0);
+  // to, which depends on how far a click scrolled it. Not after a flow's own scroll_to, which put its target where it should
+  // be (centred, a fixed place) and is what that flow shows.
+  if (!keepScroll) globalThis.scrollTo({ top: 0, left: 0, behavior: "instant" });   // not the page's smooth scrolling, which would still be moving
+  await new Promise((r) => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(r)));
+  // A list that scrolls its active option into view (the category picker) is caught part way or at the end, run to run: start it at the top.
+  for (const el of globalThis.document.querySelectorAll("[role=listbox]")) el.scrollTop = 0;
   await new Promise((r) => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(r)));
   const fixed = (t) => t.replace(/\b(localhost|127\.0\.0\.1):\d{2,5}/g, "$1:8080");
   const walker = globalThis.document.createTreeWalker(globalThis.document.body, 4);
@@ -62,7 +66,10 @@ export async function settle() {
 }
 
 /** Toasts come and go on timers and stack with whatever else the run did, so what's on screen depends on timing: left out of the images. */
-export const HIDE_TOASTS = "[data-sonner-toaster] { visibility: hidden !important; }";
+export const HIDE_TOASTS = "[data-sonner-toaster] { visibility: hidden !important; } .just-saved::after, [style*=saved-fade] { display: none !important; }";
+/** Infinite animations (pulsing dots, skeletons, spinners) stopped for the capture. Not every animation (`animations: "disabled"`
+ *  cancels them all, which closed a confirm dialog that was still waiting for its own): only these, which never end. */
+export const STILL = ".animate-pulse, .animate-spin, .live-dot { animation: none !important; }";
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
@@ -94,6 +101,16 @@ export function flowProblems(flow) {
 
 async function runStep(page, step, shot) {
   const timeout = step.timeout ?? 10000;
+  // A scroll_to sets where the page is scrolled for the shots after it, until a goto or reload moves to another page.
+  if ("scroll_to" in step) page.scrolledByFlow = true;
+  else if ("goto" in step || "reload" in step) page.scrolledByFlow = false;
+  await doStep(page, step, shot, timeout);
+  // What a click, a fill or a key press sets off (a fetch for a row's details) has landed before the next step looks at the
+  // page, so a step that picks the first match picks the same one every run.
+  if ("click" in step || "fill" in step || "press" in step) await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => { /* a page that keeps a request open: the next step's own wait applies */ });
+}
+
+async function doStep(page, step, shot, timeout) {
   if ("goto" in step) {
     await page.goto(step.goto.startsWith("#") ? `${page.url().split("#")[0]}${step.goto}` : step.goto);
   } else if ("click" in step) {
@@ -291,6 +308,20 @@ async function main() {
     // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
     const moves = label === "device cache";
     if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
+    // No smooth scrolling and no caret in the page from the start (not `animation: none`: a dialog that waits for its animation
+    // to end is then never there for the next step; the capture stops only the endless ones, STILL).
+    // Nor the app's check-in every minute (setInterval(checkIn, 60_000) in lib/app.svelte.ts): its refresh re-renders the lists, which
+    // drops an open confirm dialog or an expanded row wherever in a flow it lands (a guess at the transactions-delete flake, and the card
+    // projection that's sometimes collapsed in its shot). The device cache check keeps it: it tests the app as it runs.
+    if (!moves) await ctx.addInitScript(() => {
+      const real = globalThis.setInterval.bind(globalThis);
+      globalThis.setInterval = (fn, ms, ...rest) => (ms >= 30000 ? 0 : real(fn, ms, ...rest));
+    });
+    await ctx.addInitScript(() => {
+      const style = globalThis.document.createElement("style");
+      style.textContent = "*, *::before, *::after { scroll-behavior: auto !important; caret-color: transparent !important; }";
+      globalThis.document.addEventListener("DOMContentLoaded", () => globalThis.document.head.append(style));
+    });
     const page = await ctx.newPage();
     page.frozen = !!day && moves;
     if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
@@ -305,10 +336,11 @@ async function main() {
       const file = screenshotFile(name, viewport);
       await page.waitForLoadState("networkidle").catch(() => { /* a page that keeps a request open: the stability wait below still runs */ });
       await page.mouse.move(0, 0);   // no row under the pointer: a hovered row shows its checkbox and buttons
-      await page.evaluate(settle);
-      // animations "disabled": a running CSS animation (the Not synced dot's pulse, a sheet sliding in) would be caught at a
-      // different moment each run; this settles finite ones at their end and stops infinite ones at their start.
-      await page.screenshot({ path: join(out, file), fullPage: true, animations: "disabled", style: HIDE_TOASTS });
+      await page.evaluate(settle, !!page.scrolledByFlow);
+      // A modal (a confirm dialog, a sheet) is shot as the window shows it, not the whole page: a full-page capture resizes the
+      // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
+      const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible").count();
+      await page.screenshot({ path: join(out, file), fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}` });
       files.push(file);
     };
     try {
