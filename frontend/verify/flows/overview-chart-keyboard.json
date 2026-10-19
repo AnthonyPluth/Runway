@@ -1,0 +1,25 @@
+{
+  "name": "overview-chart-keyboard",
+  "page": "overview",
+  "viewports": ["phone", "desktop"],
+  "steps": [
+    { "goto": "#overview" },
+    { "wait_for": "[data-testid=balance-card] [data-testid=forecast-chart]" },
+    { "press": { "selector": "[data-testid=balance-card] button[aria-label='Forecast settings']", "key": "Tab" } },
+    { "expect_focus": "[data-testid=forecast-chart][role=slider]" },
+    { "wait_for": "[data-testid=forecast-readout]" },
+    { "press": { "selector": "[data-testid=forecast-chart]", "key": "ArrowRight" } },
+    { "press": { "selector": "[data-testid=forecast-chart]", "key": "End" } },
+    { "expect_focus": "[data-testid=forecast-chart]" },
+    { "wait_for": "[data-testid=forecast-readout]" },
+    { "screenshot": "last-day" },
+    { "press": { "selector": "[data-testid=forecast-chart]", "key": "Home" } },
+    { "press": { "selector": "[data-testid=forecast-chart]", "key": "Tab" } },
+    { "expect_focus": "[data-testid=balance-card] [data-testid=forecast-low]" },
+    { "press": { "selector": "[data-testid=balance-card] [data-testid=forecast-low]", "key": "Enter" } },
+    { "expect_focus": "[data-testid=forecast-chart]" },
+    { "wait_for": "[data-testid=forecast-readout]" },
+    { "screenshot": "lowest" },
+    { "press": { "selector": "[data-testid=forecast-chart]", "key": "Escape" } }
+  ]
+}
