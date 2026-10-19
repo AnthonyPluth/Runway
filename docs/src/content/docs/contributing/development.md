@@ -98,6 +98,16 @@ make verify PAGES="budget setup"     # only these pages (and the flows that star
 
 It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` by default); without one, run `npx playwright install chromium` in `frontend/` once. A scripted flow is a small JSON file in `frontend/verify/flows/`: a list of steps such as opening Settings → Categories and tapping a category's emoji. A pull request that changes the UI adds or edits a flow for it; the format is in `frontend/verify/flows/README.md`. A flow that needs a sign-in (`"signed_in": true`, the app lock) runs against a second demo server with sign-in on and a session made for it, with Chrome's virtual WebAuthn authenticator standing in for Face ID or Touch ID. Pull requests that change the UI commit the updated screenshots (below).
 
+**Verify runs on Linux** (the dev container and CI). Demo data is built relative to today, so `make verify` freezes the clock: the server and the demo seed run under `libfaketime` (`LD_PRELOAD`, with the day set by `FROZEN_DAY` in `runway/verify.py`), and the browser's clock is set to the same day with Playwright's `page.clock` (`--day`, in `frontend/verify/verify.mjs`). macOS doesn't support `LD_PRELOAD`, so use the dev container there. Without `libfaketime`, `make verify` exits non-zero and prints the install line for Debian and Ubuntu:
+
+```bash
+sudo apt-get install -y libfaketime
+```
+
+So that two runs give identical images, each shot also stops the endless CSS animations, waits for the page to stop changing, scrolls to the top (unless the flow scrolled with `scroll_to`), moves the pointer off the page, writes the demo servers' port as a fixed number, and leaves toasts out. A shot with a modal open (a confirm dialog, a sheet) is the window as it shows, not the whole page, since resizing the window for a full-page capture could close the dialog. The app's once-a-minute refresh is switched off in the browser during the flows. Check it with `sha256sum artifacts/verify/*.png` after two runs.
+
+![A page `make verify` saved: Runway's Budget page at phone width, with demo data](../../../../../screenshots/budget-phone.png)
+
 ### The phone tab bar
 
 On a phone `frontend/src/lib/components/MobileNav.svelte` draws the navigation as a floating pill, inset 12px from the screen's sides and lifted 12px (plus the safe-area inset) off the bottom edge, as frosted glass: the popover surface at 60% (`bg-popover/60`) over a 28px backdrop blur with `saturate(2)`, no outline (the border is kept, for the layout, but transparent), a faint inner highlight along the top edge and a soft drop shadow. A browser without `backdrop-filter` gets the solid popover surface. `--tabbar-h` in `app.css` is the distance from the screen's bottom to the pill's top (70px plus the inset); the page's bottom padding, the toasts and a sticky form footer are measured from it.
@@ -116,7 +126,7 @@ make screenshots
 
 before its last push and commits what changed. `make screenshots` is a full `make verify` followed by `tools/sync_screenshots.py` (standard library only), which copies the new screenshots in, leaves identical files untouched and removes the ones whose page or flow is gone. The pull request's **Files changed** then shows each changed screenshot as an image diff (2-up, swipe or onion skin), so a reviewer sees what the change did to the page.
 
-Commit every change in the directory, including pages you didn't mean to touch: an unexpected diff is how a change that leaks into another page gets noticed. The demo data's dates follow the day `make verify` runs, so a date or a chart's axis can differ for that reason alone. The repository is public: only `make verify`'s made-up demo data is ever committed, and the independent review opens every added or changed image to check it. `make verify` captures the dark theme only; check the light theme yourself for a change that depends on it, and say so. A pull request with no UI change has nothing to update, and says so.
+Commit every change in the directory, including pages you didn't mean to touch: an unexpected diff is how a change that leaks into another page gets noticed. The clock is frozen (below), so a date or a chart's axis doesn't change with the day: an image changes only when the UI or its data does. The repository is public: only `make verify`'s made-up demo data is ever committed, and the independent review opens every added or changed image to check it. `make verify` captures the dark theme only; check the light theme yourself for a change that depends on it, and say so. A pull request with no UI change has nothing to update, and says so.
 
 ## Changing the database
 
