@@ -331,7 +331,9 @@ describe("BudgetRow", () => {
     const button = (name: string | RegExp) => { reveal(); return screen.getByRole("button", { name }); };
     const alert = () => { reveal(); return screen.getByRole("alert"); };
     const editor = () => document.querySelector("[data-budget-editor]");
-    const posts = () => vi.mocked(api).mock.calls.map((x) => (x[1] as { body: unknown }).body);
+    // What was sent to POST /api/budget (other requests, such as the app reloading its state, aren't budget changes).
+    const posts = () => vi.mocked(api).mock.calls.filter(([path, o]) => path === "/api/budget" && (o as { method?: string } | undefined)?.method === "POST")
+      .map((x) => (x[1] as { body: unknown }).body);
     const open = async (name = "Groceries") => { await userEvent.click(field(name)); reveal(); return amount(); };
     const retype = async (v: string) => { await userEvent.clear(amount()); if (v) await userEvent.type(amount(), v); };
     const undoAction = () => {
@@ -352,7 +354,7 @@ describe("BudgetRow", () => {
       expect(screen.getByRole("dialog", { name: "Edit Groceries budget" })).toBeInTheDocument();
       expect(amount()).toHaveFocus();
       expect(amount().value).toBe("500");
-      expect(api).not.toHaveBeenCalled();
+      expect(posts()).toEqual([]);
     });
 
     it("starts on the usual amount when the month has none of its own, and says what that means", async () => {
@@ -384,7 +386,7 @@ describe("BudgetRow", () => {
       await retype("650");
       await userEvent.click(radio("Usual monthly amount"));
       expect(amount().value).toBe("650");
-      expect(api).not.toHaveBeenCalled();
+      expect(posts()).toEqual([]);
     });
 
     it("saves the usual amount with the existing payload, and says which amount it was", async () => {
@@ -434,7 +436,7 @@ describe("BudgetRow", () => {
         await retype("1");
         await close();
         expect(editor()).toBeNull();
-        expect(api).not.toHaveBeenCalled();
+        expect(posts()).toEqual([]);
         expect(onchanged).not.toHaveBeenCalled();
         // Opened again, it starts from what's saved, not what was typed.
         await open();
@@ -490,7 +492,7 @@ describe("BudgetRow", () => {
       expect(screen.getByText("Enter an amount for March 2026.")).toBeInTheDocument();
       expect(button("Save")).toBeDisabled();
       await userEvent.keyboard("{Enter}");
-      expect(api).not.toHaveBeenCalled();
+      expect(posts()).toEqual([]);
     });
 
     it("sets a first budget as the usual amount, without offering a month of its own", async () => {
@@ -564,7 +566,7 @@ describe("BudgetRow", () => {
       expect(button("Save")).toBeDisabled();
       expect(screen.getByText("Saving is off until the page’s figures are up to date.")).toBeInTheDocument();
       await userEvent.keyboard("{Enter}");
-      expect(api).not.toHaveBeenCalled();
+      expect(posts()).toEqual([]);
     });
 
     describe("when another month comes on screen", () => {
@@ -577,7 +579,7 @@ describe("BudgetRow", () => {
         await retype("800");
         await rerender({ ...props, month: "2026-04" });
         expect(editor()).toBeNull();
-        expect(api).not.toHaveBeenCalled();
+        expect(posts()).toEqual([]);
       });
 
       it("finishes a save already sent for the month it was opened on, and says that month", async () => {
@@ -620,7 +622,7 @@ describe("BudgetRow", () => {
       expect(radio("This month only")).toHaveAttribute("aria-checked", "true");
       await userEvent.click(button("Cancel"));
       expect(editor()).toBeNull();
-      expect(api).not.toHaveBeenCalled();
+      expect(posts()).toEqual([]);
     });
   });
 
