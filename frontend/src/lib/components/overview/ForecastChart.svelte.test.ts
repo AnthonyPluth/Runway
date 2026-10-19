@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ForecastEvent, Overview } from "$lib/types";
@@ -69,6 +70,22 @@ describe("ForecastChart's readout on a phone", () => {
     expect(tip(container).style.top).toBe("0px");
   });
 
+  it("leaves a drag up or down to scroll the page, and a sideways one still scrubs", async () => {
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    const drag = (clientX: number, clientY: number) => {
+      const e = Object.assign(new Event("touchmove", { cancelable: true }), { touches: [{ clientX, clientY }] });
+      fireEvent(container.querySelector("rect.cursor-crosshair")!, e);
+      return e;
+    };
+    await finger(container, "touchstart", 182);
+    expect(drag(184, 160).defaultPrevented).toBe(false);
+    expect(tip(container)).toBeNull();
+    await finger(container, "touchstart", 182);
+    expect(drag(260, 100).defaultPrevented).toBe(true);
+    await tick();
+    expect(screen.getByText("Mon, Oct 19")).toBeInTheDocument();
+  });
+
   it("follows the mouse again once the pointer is a mouse, but not for the mouse move a tap sends", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { container } = render(ForecastChart, { props: { fc: fc() } });
@@ -84,12 +101,167 @@ describe("ForecastChart's readout on a phone", () => {
   });
 });
 
+describe("ForecastChart from the keyboard", () => {
+  const slider = () => screen.getByRole("slider");
+  const press = (key: string, extra: KeyboardEventInit = {}) => fireEvent.keyDown(slider(), { key, ...extra });
+  const readout = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-testid=forecast-readout]");
+  const rows = (container: HTMLElement) => [...container.querySelectorAll("[data-testid=forecast-readout] > div.flex")].map((r) => r.textContent);
+
+  it("is one focus stop, a slider over the days that starts on today", async () => {
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    expect(container.querySelectorAll("[tabindex='0']")).toHaveLength(1);
+    expect(slider()).toHaveAttribute("aria-valuemin", "0");
+    expect(slider()).toHaveAttribute("aria-valuemax", "2");
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    expect(slider()).toHaveAttribute("aria-label", "Projected balance over the next 2 days, $4,000.00 today to $1,300.00 on Monday, October 19, 2026");
+    expect(readout(container)).toBeNull();
+    slider().focus();
+    await tick();
+    expect(readout(container)).toHaveTextContent("Fri, Oct 16");
+    expect(readout(container)).toHaveTextContent("$4,000.00");
+  });
+
+  it("steps a day with the arrows and goes to the ends with Home and End, never past them", async () => {
+    render(ForecastChart, { props: { fc: fc() } });
+    await press("ArrowRight");
+    expect(slider()).toHaveAttribute("aria-valuenow", "1");
+    await press("ArrowRight");
+    await press("ArrowRight");
+    expect(slider()).toHaveAttribute("aria-valuenow", "2");
+    await press("ArrowLeft");
+    expect(slider()).toHaveAttribute("aria-valuenow", "1");
+    await press("Home");
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    await press("ArrowLeft");
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    await press("End");
+    expect(slider()).toHaveAttribute("aria-valuenow", "2");
+  });
+
+  it("announces the day's date, balance and events, and says so when a day has none", async () => {
+    render(ForecastChart, { props: { fc: fc({ spend: { "2026-10-19": 15.08 } }) } });
+    await press("ArrowRight");
+    expect(slider().getAttribute("aria-valuetext")).toBe("Saturday, October 17, 2026: balance $4,000.00. Nothing scheduled.");
+    await press("End");
+    expect(slider().getAttribute("aria-valuetext")).toBe(
+      "Monday, October 19, 2026: balance $1,300.00. Venture X (Sam) statement (estimated) −$2,684.92; Budgeted spending (estimated) −$15.08.");
+  });
+
+  it("shows the same readout for a day as the pointer does", async () => {
+    const props = { fc: fc({ spend: { "2026-10-19": 15.08 } }) };
+    const pointer = render(ForecastChart, { props });
+    await hover(pointer.container, 312);
+    const byPointer = rows(pointer.container);
+    pointer.unmount();
+    const { container } = render(ForecastChart, { props });
+    await press("End");
+    expect(rows(container)).toEqual(byPointer);
+    expect(rows(container)).toEqual(["Venture X (Sam) statement (est.)−$2,684.92", "Budgeted spending (est.)−$15.08"]);
+  });
+
+  it("reads a negative balance as negative", async () => {
+    render(ForecastChart, { props: { fc: fc({ total: [400, -250.5, 100], low: { date: DATES[1], balance: -250.5 } }) } });
+    await press("ArrowRight");
+    expect(slider().getAttribute("aria-valuetext")).toContain("balance -$250.50");
+  });
+
+  it("jumps a tenth of the chart with Shift, and Escape puts the readout away", async () => {
+    const dates = Array.from({ length: 31 }, (_, i) => `2026-10-${String(i + 1).padStart(2, "0")}`);
+    const { container } = render(ForecastChart, { props: { fc: fc({ dates, total: dates.map((_, i) => 1000 + i), events: [], low: { date: dates[0], balance: 1000 } }) } });
+    await press("ArrowRight", { shiftKey: true });
+    expect(slider()).toHaveAttribute("aria-valuenow", "3");
+    await press("Escape");
+    expect(readout(container)).toBeNull();
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("puts the readout on the forecast's lowest day with Lowest balance, and the focus on the chart", async () => {
+    const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, -120, -120], low: { date: DATES[1], balance: -120 } }) } });
+    await fireEvent.click(screen.getByRole("button", { name: "Lowest balance" }));
+    expect(slider()).toHaveAttribute("aria-valuenow", "1");
+    expect(slider()).toHaveFocus();
+    expect(readout(container)).toHaveTextContent("Sat, Oct 17");
+    expect(readout(container)).toHaveTextContent("-$120.00");
+    await press("ArrowRight");
+    expect(slider()).toHaveAttribute("aria-valuenow", "2");
+  });
+
+  it("finds the lowest day itself when the forecast's low isn't on the chart", async () => {
+    render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low: { date: "2027-01-01", balance: 0 } }) } });
+    await fireEvent.click(screen.getByRole("button", { name: "Lowest balance" }));
+    expect(slider()).toHaveAttribute("aria-valuenow", "1");
+  });
+
+  it("puts the readout away when the focus leaves", async () => {
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    await press("End");
+    expect(readout(container)).not.toBeNull();
+    await fireEvent.blur(slider());
+    expect(readout(container)).toBeNull();
+  });
+
+  it("drops a day a shorter forecast no longer has, and keeps one it still has", async () => {
+    const { container, rerender } = render(ForecastChart, { props: { fc: fc() } });
+    await press("End");
+    await rerender({ fc: fc({ dates: DATES.slice(0, 2), total: [4000, 4000], events: [], low: { date: DATES[0], balance: 4000 } }) });
+    expect(readout(container)).toBeNull();
+    expect(slider()).toHaveAttribute("aria-valuemax", "1");
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    await press("End");
+    await rerender({ fc: fc() });
+    expect(slider()).toHaveAttribute("aria-valuenow", "1");
+    expect(readout(container)).toHaveTextContent("Sat, Oct 17");
+  });
+
+  it("doesn't bring back a dropped day's readout when the longer forecast returns", async () => {
+    const { container, rerender } = render(ForecastChart, { props: { fc: fc() } });
+    await press("End");
+    await rerender({ fc: fc({ dates: DATES.slice(0, 2), total: [4000, 4000], events: [], low: { date: DATES[0], balance: 4000 } }) });
+    await rerender({ fc: fc() });
+    expect(readout(container)).toBeNull();
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("has a valid slider for a single day, and none for an empty forecast", async () => {
+    const one = render(ForecastChart, { props: { fc: fc({ dates: [DATES[0]], total: [4000], events: [], low: { date: DATES[0], balance: 4000 } }) } });
+    expect(slider()).toHaveAttribute("aria-valuemax", "0");
+    expect(slider()).toHaveAttribute("aria-label", "Projected balance for today, $4,000.00");
+    await press("ArrowRight");
+    await press("End");
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    expect(slider().getAttribute("aria-valuetext")).toBe("Friday, October 16, 2026: balance $4,000.00. Nothing scheduled.");
+    one.unmount();
+    render(ForecastChart, { props: { fc: fc({ dates: [], total: [], events: [] }) } });
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Lowest balance" })).toBeNull();
+    expect(screen.getByText("No cash accounts in the forecast yet.")).toBeInTheDocument();
+  });
+
+  it("shows a visible focus ring for the keyboard only", () => {
+    render(ForecastChart, { props: { fc: fc() } });
+    expect(slider()).toHaveClass("focus-visible:ring-2", "outline-none");
+  });
+});
+
 describe("ForecastChart, compact", () => {
   it("marks the lowest day and writes the last day's balance at the line's end", () => {
     const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, 1300, 2500] }), compact: true } });
     expect(container.querySelector("svg")).toHaveAttribute("viewBox", expect.stringMatching(/ 120$/));
     expect(container.querySelectorAll("[data-low]")).toHaveLength(1);
     expect(container.querySelector("[data-end]")).toHaveTextContent("$2,500");
+  });
+
+  it("marks the forecast's own low, not the series minimum, when they differ", () => {
+    const mark = (low: Overview["low"]) => {
+      const r = render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low }), compact: true } });
+      const c = r.container.querySelector("[data-low]")!;
+      const at = { cx: Number(c.getAttribute("cx")), cy: Number(c.getAttribute("cy")) };
+      r.unmount();
+      return at;
+    };
+    const ownLow = mark({ date: DATES[2], balance: 1300 }), seriesMin = mark({ date: DATES[1], balance: 900 });
+    expect(ownLow.cx).toBeGreaterThan(seriesMin.cx);
+    expect(ownLow.cy).toBeLessThan(seriesMin.cy);
   });
 
   it("keeps the value axis on the compact chart", () => {

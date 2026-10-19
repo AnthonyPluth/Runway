@@ -6,9 +6,13 @@
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { Button } from "$lib/components/ui/button";
   import { showTransactions } from "$lib/filters.svelte";
-  import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
+  import * as Popover from "$lib/components/ui/popover";
+  import * as Sheet from "$lib/components/ui/sheet";
+  import { Segmented } from "$lib/components/ui/toggle-group";
+  import { barWidth, fmt, fmt0, monthLabel, monthShort } from "$lib/format";
+  import { viewport } from "$lib/phone.svelte";
   import Repeat from "@lucide/svelte/icons/repeat";
-  import Calendar1 from "@lucide/svelte/icons/calendar-1";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import { cn } from "$lib/utils";
   import { commas } from "$lib/commas";
@@ -17,9 +21,9 @@
   import { act } from "$lib/act";
   import { undoable } from "$lib/undo";
 
-  // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
-  // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
-  // budget box is always shown. `account` is the card or account its spending goes on (its own, else its parent's,
+  // One line per category: its name, spent "of" its budget (a button that opens its editor), then the bar underneath (a
+  // top-level category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card,
+  // where the budget's button is always shown. `account` is the card or account its spending goes on (its own, else its parent's,
   // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji. What's still
   // expected this month (recurring payments that haven't come yet, `expected`) is the bar's lighter part after what's spent.
   // `income`: an income category, whose budget is what's expected to come in and `spent` what has. More is good: its
@@ -27,9 +31,10 @@
   // switched in the row's ⋯ menu; a blue "Rolls over" label on the row only says when it's on and isn't a button.
   // `locked`: the page isn't sure these figures are the month it's showing (another month is loading, or a reload
   // failed), so every control that changes a budget is off until it is.
-  let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, locked = false, onsave, onchanged }: {
+  // `onchanged` reloads the page after a change (and after a failed reset, so the row shows what's saved).
+  let { c, month, sub = false, budgets = false, income = false, pace, payAccounts, account = null, locked = false, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; income?: boolean; pace: number; payAccounts: PayAccount[];
-    account?: string | null; locked?: boolean; onsave: (category: string, amount: string) => void; onchanged: () => void;
+    account?: string | null; locked?: boolean; onchanged: () => void;
   } = $props();
 
   const brand = $derived(account ? app.state?.brands?.[account] : undefined);
@@ -64,34 +69,106 @@
   }
 
   // A month of its own: a budget's amount for the month on screen only (December's gifts), every other month keeping
-  // the usual one. The calendar button beside the amount switches the box to this month's (or, once the month has its
-  // own, back to the usual amount); while it's on, a change to the box is this month's alone. An empty box takes the
-  // month back to the usual amount.
-  let choosingFor = $state<string | null>(null);   // the month being given its own amount (not another one shown later)
-  const choosing = $derived(choosingFor === month);
-  let box = $state<HTMLInputElement>();
+  // the usual one (`usual_budget`). The amount is a button that opens its editor (a popover; a sheet from the bottom on a
+  // phone): the amount and, in the Budgets card once there's a budget, which months it's for ("This month only" or
+  // "Usual monthly amount"), with what that means beside it. Nothing is sent until Save; Cancel (or Escape, or a click
+  // away) sends nothing. Amounts mean what POST /api/budget says: as the usual amount, an empty box or 0 removes the
+  // budget; for the month, an empty box takes it back to the usual amount and 0 budgets nothing that month.
   const ownMonth = $derived(c.month_budget != null);
-  const monthOnly = $derived(ownMonth || choosing);
   const usual = $derived(c.usual_budget ?? c.budget);
   const monthName = $derived(monthShort(month, true));
-  async function saveMonth(amount: string) {
-    if (!amount && ownMonth) { await resetMonth(); return; }
-    await act(async () => {
-      const r = await apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: c.name, month, amount } });
-      const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)} in ${monthName}`);
-      toast.success(amount ? [`${c.name}: ${fmt0(Number(amount))} in ${monthName} only`, ...raised].join(" · ")
-        : `${c.name} is back to ${fmt0(usual)} in ${monthName}`);
-    });
-    choosingFor = null;
-    onchanged();   // the page reloads either way, so a box whose save failed shows what's saved again
+  const canMonth = $derived(budgets && c.budget != null);   // a month's own amount needs a budget (the API says so too)
+
+  const uid = $props.id();
+  const title = $derived(`Edit ${c.name} budget`);
+  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : "not set"}`
+    + (c.budget == null ? "" : canMonth && ownMonth ? `, ${monthName} only` : ", usual monthly amount"));
+  const fieldCls = "inline-flex h-9 min-w-[5.25rem] cursor-pointer items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50 sm:h-7 sm:min-w-24 dark:bg-input/30";
+
+  type Scope = "month" | "usual";
+  let editing = $state(false);
+  let at = $state("");   // the month the editor was opened on: what it saves to, whatever is on screen by then
+  let scope = $state<Scope>("usual");
+  let draft = $state("");
+  let typed = false;   // the amount was changed by hand: switching scope keeps it rather than showing that scope's amount
+  let saving = $state(false);
+  let error = $state("");
+  let amountBox = $state<HTMLInputElement>();
+  const atName = $derived(monthShort(at || month, true));
+  const atLong = $derived(monthLabel(at || month));
+  const scopeOf = $derived<Scope>(canMonth ? scope : "usual");
+  function amountIn(s: Scope): string {
+    const v = s === "month" ? (c.month_budget ?? c.budget) : usual;
+    return v == null ? "" : String(v);
   }
-  // The month goes back to the usual amount (the "Reset to usual" button, the calendar button once the month has its own,
-  // or an empty box). The toast's Undo sets the month's own amount again, exactly as it was (0 included), for the month
-  // and category it was taken from, whatever is on screen by then. A failed reset leaves the month's amount as it is.
+  const blank = $derived(draft.trim() === "");
+  const zero = $derived(!blank && Number(draft) === 0);
+  // Nothing to save: an empty box where there's nothing to clear.
+  const nothing = $derived(blank && (scopeOf === "month" ? !ownMonth : c.budget == null));
+  // What saving would do, said before anything is sent.
+  const scopeNote = $derived(scopeOf === "month"
+    ? `Applies to ${atLong} only. Other months keep ${money(usual)}.`
+    : `Used in months without their own amount.${ownMonth ? ` ${atLong} keeps its own ${money(c.month_budget)}.` : ""}`);
+  const outcome = $derived(scopeOf === "month"
+    ? (blank ? (ownMonth ? `No amount takes ${atLong} back to the usual ${money(usual)}.` : `Enter an amount for ${atLong}.`)
+      : zero ? `$0 budgets nothing in ${atLong}; other months keep ${money(usual)}.` : "")
+    : (blank || zero) && c.budget != null ? `No amount removes the ${c.name} budget from every month, months with their own amount included.` : "");
+
+  function start() {
+    if (locked) return;
+    at = month; scope = ownMonth ? "month" : "usual"; draft = amountIn(scope); typed = false; error = ""; editing = true;
+  }
+  function cancel() { editing = false; error = ""; }
+  function pickScope(v: string) {
+    scope = v as Scope; error = "";
+    if (!typed) draft = amountIn(scope);
+  }
+  function focusAmount(e: Event) {
+    e.preventDefault();
+    amountBox?.focus();
+    amountBox?.select();
+  }
+  // Another month on screen while the editor is open (and not saving): it closes without sending anything, so nothing
+  // can land on a month other than the one it names.
+  $effect(() => { if (editing && month !== at && !saving) cancel(); });
+
+  async function save() {
+    if (saving || locked || nothing || !editing) return;
+    const [name, m, label, s, amount, kept] = [c.name, at, atName, scopeOf, draft.trim(), c.month_budget];
+    if (s === "month" && amount === "") { await resetMonth(true); return; }
+    error = "";
+    let failed = "";
+    const ok = await act(async () => {
+      const body = s === "month" ? { category: name, month: m, amount } : { category: name, amount };
+      const r = await apiCall<"POST /api/budget">("/api/budget", { method: "POST", body });
+      if (s === "month") {
+        const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)} in ${label} only`);
+        toast.success([`${name}: ${money(Number(amount))} in ${label} only`, ...raised].join(" · "));
+      } else if (amount === "" || Number(amount) === 0) {
+        toast.success(`${name} budget removed`);
+      } else {
+        const raised = (r.raised ?? []).map((x) => `${x.category} usual amount raised to ${fmt0(x.amount)}`);
+        toast.success([`${name}: usual amount ${money(Number(amount))} a month`, ...raised,
+          ...(kept != null ? [`${label} keeps its own ${money(kept)}`] : [])].join(" · "));
+      }
+    }, { busy: (on) => (saving = on), onError: (msg) => (failed = msg) });
+    if (ok) { editing = false; onchanged(); return; }
+    // The editor stays open with the error, so it can be tried again; if it was closed (or another month came on
+    // screen) meanwhile, the error is a toast instead.
+    if (editing && month === m) error = failed;
+    else { editing = false; toast.error(failed); }
+  }
+
+  // The month goes back to the usual amount ("Reset to usual" under the row; "Reset this month to usual", or saving an
+  // empty amount for the month, in the editor). The toast's Undo sets the month's own amount again, exactly as it was
+  // (0 included), for the month and category it was taken from, whatever is on screen by then. A failed reset leaves
+  // the month's amount as it is.
   let resetting = $state(false);
-  async function resetMonth() {
-    const [name, was, at, label, back] = [c.name, c.month_budget, month, monthName, usual];
-    const post = (amount: string) => apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: name, month: at, amount } });
+  async function resetMonth(fromEditor = false) {
+    const m = fromEditor ? at : month;
+    const [name, was, label, back] = [c.name, c.month_budget, monthShort(m, true), usual];
+    const post = (amount: string) => apiCall<"POST /api/budget">("/api/budget", { method: "POST", body: { category: name, month: m, amount } });
+    let failed = "";
     const done = await act(async () => {
       await post("");
       if (was != null) {
@@ -101,15 +178,13 @@
           return `${name}: ${money(was)} in ${label} only`;
         });
       }
-    }, { busy: (on) => (resetting = on) });
-    if (done) choosingFor = null;
+    }, { busy: (on) => { resetting = on; if (fromEditor) saving = on; }, onError: fromEditor ? (msg) => (failed = msg) : undefined });
+    if (fromEditor) {
+      if (done) editing = false;
+      else if (editing && month === m) error = failed;
+      else { editing = false; toast.error(failed); }
+    }
     onchanged();   // the page reloads either way, so a failed reset shows what's saved again
-  }
-  function toggleMonth() {
-    if (ownMonth) { resetMonth(); return; }
-    const on = !choosing;
-    choosingFor = on ? month : null;
-    if (on) box?.focus();
   }
 
   // Rolling over: what's left at the end of a month adds to the next, starting this month.
@@ -142,25 +217,19 @@
       <a href="#transactions" onclick={open} class={cn("hover:underline", sub && warnOver && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
         title={subNote || undefined}>{money(c.spent)}{#if subNote}<span class="sr-only">{` (${subNote})`}</span>{/if}</a>
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
-      <!-- The "$" sits just before the number, so it reads "$60" like the spent figure beside it. -->
-      <span class="group/money relative inline-flex items-center">
-        <span aria-hidden="true" class={cn("pointer-events-none absolute left-1.5 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
-        <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : income ? "Expected" : "Budget") : ""}
-          bind:this={box} disabled={locked} aria-label={monthOnly ? `Budget for ${c.name} in ${monthName}` : `Budget for ${c.name}`}
-          onchange={(e) => (monthOnly ? saveMonth(e.currentTarget.value) : onsave(c.name, e.currentTarget.value))}
-          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
-            c.budget == null ? "pl-2 placeholder:text-primary focus:pl-[15px]" : "pl-[15px] phone:w-[4.25rem]", monthOnly && "text-primary")} />
-      </span>
-      {#if budgets && c.budget != null}
-        <button type="button" aria-pressed={monthOnly} onclick={toggleMonth} disabled={locked}
-          aria-label={ownMonth ? `Use the usual ${fmt0(usual)} for ${c.name} in ${monthName}` : `A different budget for ${c.name} in ${monthName} only`}
-          title={ownMonth ? `${monthName} has its own amount. Click to use the usual ${fmt0(usual)} again.`
-            : `A different amount for ${monthName} only; other months keep ${fmt0(usual)}`}
-          class={cn("-ml-1 inline-flex size-9 shrink-0 cursor-pointer disabled:cursor-default disabled:opacity-50 items-center justify-center rounded-md hover:bg-muted focus-visible:bg-muted focus-visible:outline-none sm:size-7",
-            monthOnly ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
-          <Calendar1 class="size-3.5" aria-hidden="true" />
-        </button>
-      {:else if budgets}<span class="-ml-1 size-9 shrink-0 sm:size-7" aria-hidden="true"></span><!-- keeps the boxes in line -->
+      <!-- The amount looks like a field, with a pencil, so it reads as something to change; it opens the editor. Its name
+           says the amount and which months it is. -->
+      {#if viewport.phone}
+        <button type="button" disabled={locked} onclick={start} aria-haspopup="dialog" aria-expanded={editing}
+          aria-label={fieldName} class={fieldCls} data-budget-field>{@render field()}</button>
+      {:else}
+        <Popover.Root bind:open={() => editing, (o) => (o ? start() : cancel())}>
+          <Popover.Trigger disabled={locked} aria-label={fieldName} class={fieldCls} data-budget-field>{@render field()}</Popover.Trigger>
+          <Popover.Content role="dialog" class="w-80" align="end" onOpenAutoFocus={focusAmount} aria-labelledby={`${uid}-title`}>
+            <h2 id={`${uid}-title`} class="mb-3 text-[15px] font-semibold">{title}</h2>
+            {@render editor()}
+          </Popover.Content>
+        </Popover.Root>
       {/if}
     </span>
   </div>
@@ -216,16 +285,70 @@
   {#if c.budget != null && carried > 0.005}
     <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
   {/if}
-  {#if budgets && c.budget != null && monthOnly}
+  {#if canMonth && ownMonth}
     <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")} data-month-note>
-      {ownMonth ? `${monthName} only` : `Changing ${monthName} only`} · {money(usual)} other months
-      {#if ownMonth}
-        <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
-        <button type="button" onclick={resetMonth} disabled={resetting || locked} data-month-reset
-          aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
-          class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
-          Reset to usual</button>
-      {/if}
+      {monthName} only · {money(usual)} other months
+      <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
+      <button type="button" onclick={() => resetMonth()} disabled={resetting || locked} data-month-reset
+        aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
+        class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
+        Reset to usual</button>
     </p>
   {/if}
 </div>
+
+{#if viewport.phone}
+  <Sheet.Root bind:open={() => editing, (o) => { if (!o) cancel(); }}>
+    <Sheet.Content onOpenAutoFocus={focusAmount} data-budget-sheet>
+      <Sheet.Header class="pb-0">
+        <Sheet.Title>{title}</Sheet.Title>
+      </Sheet.Header>
+      <div class="px-4 pb-4">{@render editor()}</div>
+    </Sheet.Content>
+  </Sheet.Root>
+{/if}
+
+{#snippet field()}
+  <span class={cn("min-w-0 truncate", c.budget == null ? "text-primary" : ownMonth && canMonth && "text-primary")}>
+    {c.budget != null ? money(c.budget) : sub ? "—" : income ? "Expected" : "Budget"}</span>
+  <Pencil class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+{/snippet}
+
+<!-- The editor: the amount, which months it's for and what that means, then Save and Cancel. -->
+{#snippet editor()}
+  <!-- novalidate: step="10" is only the arrow keys' increment; any amount (25, 123.45) is a valid budget. -->
+  <form class="flex flex-col gap-3" data-budget-editor novalidate onsubmit={(e) => { e.preventDefault(); save(); }}>
+    <div class="flex flex-col gap-1.5">
+      <label for={`${uid}-amount`} class="text-xs text-muted-foreground">Amount</label>
+      <span class="relative">
+        <span aria-hidden="true" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base text-muted-foreground md:text-sm">$</span>
+        <!-- 16px text on a phone, so the browser doesn't zoom in on it. Read-only (not disabled) while saving, so it keeps focus. -->
+        <input bind:this={amountBox} id={`${uid}-amount`} type="number" min="0" step="10" value={draft} {@attach commas} readonly={saving}
+          placeholder={income ? "Expected" : "No budget"} aria-describedby={`${uid}-scope-note ${uid}-outcome`}
+          oninput={(e) => { draft = e.currentTarget.value; typed = true; error = ""; }}
+          class="h-11 w-full rounded-lg border border-input bg-transparent pr-3 pl-6 text-base tabular-nums outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:h-9 md:text-sm dark:bg-input/30" />
+      </span>
+    </div>
+    {#if canMonth}
+      <div class="flex flex-col gap-1.5">
+        <span class="text-xs text-muted-foreground" aria-hidden="true">Applies to</span>
+        <Segmented label="Applies to" value={scope} class="w-full" onchange={pickScope}
+          options={[{ value: "month", label: "This month only", disabled: saving }, { value: "usual", label: "Usual monthly amount", disabled: saving }]} />
+      </div>
+    {:else}
+      <p class="text-xs text-muted-foreground">Applies to: <span class="font-medium text-foreground">usual monthly amount</span></p>
+    {/if}
+    <p id={`${uid}-scope-note`} class="text-xs text-muted-foreground" data-scope-note>{scopeNote}</p>
+    <p id={`${uid}-outcome`} class="text-xs text-foreground empty:hidden" data-outcome>{outcome}</p>
+    {#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
+    {#if locked}<p class="text-xs text-muted-foreground" data-locked>Saving is off until the page’s figures are up to date.</p>{/if}
+    {#if canMonth && ownMonth}
+      <Button variant="link" size="sm" class="h-auto self-start px-0 py-2" disabled={saving || locked} onclick={() => resetMonth(true)}
+        aria-label={`Reset this month to usual: ${c.name} back to ${fmt0(usual)} in ${atName}`}>Reset this month to usual</Button>
+    {/if}
+    <div class="flex items-center justify-end gap-2">
+      <Button variant="outline" size="sm" onclick={cancel}>Cancel</Button>
+      <Button type="submit" size="sm" disabled={saving || locked || nothing}>{saving ? "Saving…" : "Save"}</Button>
+    </div>
+  </form>
+{/snippet}

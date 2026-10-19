@@ -3,10 +3,14 @@ import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
 import { startMonitoring } from "./monitoring";
 import { toast } from "svelte-sonner";
-import type { AppState } from "./types";
+import type { AppState, Overview } from "./types";
 import { errMsg } from "./act";
 import { afterUnlock, isLocked } from "./lock.svelte";
 import { dataVersionOf, noteDataVersion } from "./deviceCache";
+
+/** What Overview keeps across redraws (a sync, an edited amount): the forecast length you last chose that arrived, and the
+ *  forecast last on screen, drawn at once until the new one arrives. Plain, not reactive: the page reads it as it opens. */
+export const overviewMemory = { horizon: null as number | null, last: null as { fc: Overview; days: number } | null };
 
 export const app = $state({
   state: null as AppState | null,
