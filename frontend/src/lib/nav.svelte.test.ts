@@ -110,12 +110,12 @@ describe("currentPage", () => {
     expect(currentPage()).toBe("budget");
   });
 
-  it("shows Investments for #investments and for Net worth's Investments tab, but not Net worth's other tabs", () => {
+  it("shows Investments for #investments, and Net worth for each of its tabs", () => {
     route.page = "investments"; route.sub = "";
     expect(currentPage()).toBe("investments");
-    route.page = "networth"; route.sub = "investments";
-    expect(currentPage()).toBe("investments");
-    route.sub = "equity";
+    route.page = "networth"; route.sub = "equity";
+    expect(currentPage()).toBe("networth");
+    route.sub = "retirement";
     expect(currentPage()).toBe("networth");
     route.sub = "";
     expect(currentPage()).toBe("networth");

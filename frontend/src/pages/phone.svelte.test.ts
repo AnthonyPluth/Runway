@@ -102,7 +102,7 @@ describe("Net worth", () => {
   };
   beforeEach(() => { vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/networth" ? summary : {})) as never); });
 
-  it("has the assets and liabilities to edit, and all four tabs, on a phone", async () => {
+  it("has the assets and liabilities to edit, and all three tabs, on a phone", async () => {
     viewport.phone = true;
     render(NetWorth);
     expect(await screen.findByText("$5,000")).toBeInTheDocument();
@@ -110,20 +110,20 @@ describe("Net worth", () => {
     expect(await screen.findByRole("button", { name: "Checking, $5,500.00" })).toBeInTheDocument();
     expect(screen.getByText(/Not counted/)).toBeInTheDocument();
     const tabs = screen.getByRole("navigation", { name: "Net worth" });
-    expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Summary", "Investments", "Equity", "Retirement"]);
+    expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Summary", "Equity", "Retirement"]);
   });
 
-  it.each(["investments", "equity"])("shows %s on a phone, with no note about a computer", async (sub) => {
+  it.each([["equity", "/api/equity"], ["retirement", "/api/investments?"]])("shows %s on a phone, with no note about a computer", async (sub, path) => {
     viewport.phone = true;
     render(NetWorth, { sub });
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([p]) => String(p).startsWith(sub === "equity" ? "/api/equity" : "/api/plaid/status"))).toBe(true));
+    await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([p]) => String(p).startsWith(path))).toBe(true));
   });
 
   it("lists its accounts and tabs on a computer", async () => {
     render(NetWorth);
     expect(await screen.findByRole("button", { name: "Checking, $5,500.00" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Net worth" })).getAllByRole("link")).toHaveLength(4);
+    expect(within(screen.getByRole("navigation", { name: "Net worth" })).getAllByRole("link")).toHaveLength(3);
     expect(screen.getByText(/Not counted/)).toBeInTheDocument();
   });
 });

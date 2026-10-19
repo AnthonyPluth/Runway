@@ -2,8 +2,8 @@
   import HoldingDetail from "$lib/components/investments/HoldingDetail.svelte";
   import InvestmentsView from "$lib/components/investments/InvestmentsView.svelte";
 
-  // Investments as a page of its own (#investments); Net worth's Investments tab (#networth/investments) shows the same view.
-  // #investments/holding/<security id> is one holding's page.
+  // Investments (#investments); #investments/holding/<security id> is one holding's page. (The old #networth/investments
+  // opens here: lib/app.svelte.ts.)
   let { sub = "" }: { sub?: string } = $props();
   const holdingId = $derived.by(() => {
     if (!sub.startsWith("holding/")) return null;

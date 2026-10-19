@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -60,14 +60,24 @@ describe("the Net worth tabs", () => {
     const tabs = screen.getByRole("navigation", { name: "Net worth" });
     expect(screen.getByRole("heading", { name: "Net worth" })).toBeInTheDocument();
     expect(Array.from(tabs.querySelectorAll("a")).map((a) => [a.textContent!.trim(), a.getAttribute("href")])).toEqual([
-      ["Summary", "#networth"], ["Investments", "#networth/investments"], ["Equity", "#networth/equity"], ["Retirement", "#networth/retirement"]]);
+      ["Summary", "#networth"], ["Equity", "#networth/equity"], ["Retirement", "#networth/retirement"]]);
     expect(screen.getByRole("link", { name: "Summary" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("opens Investments on #networth/investments", async () => {
+  it("has no Investments tab: that is the Investments page, which the breakdown's Investments heading opens", async () => {
+    summary.groups = [{ key: "investments", label: "Investments", side: "asset", total: 5500,
+      items: [{ type: "account", id: "brk", name: "Brokerage", org: "Sample Brokerage Co", value: 5500, as_of: "2026-09-30" }] }];
+    render(NetWorth);
+    await screen.findByText("What makes it up");
+    const tabs = screen.getByRole("navigation", { name: "Net worth" });
+    expect(within(tabs).queryByRole("link", { name: "Investments" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Investments, open the Investments page" })).toHaveAttribute("href", "#investments");
+  });
+
+  it("shows the Summary for an unknown tab, as the old Investments tab's address now opens the Investments page", async () => {
     render(NetWorth, { sub: "investments" });
-    expect(screen.getByRole("link", { name: "Investments" })).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("link", { name: "Connect an investment account" })).toBeInTheDocument();
+    expect(await screen.findByText("What makes it up")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Summary" })).toHaveAttribute("aria-current", "page");
   });
 
   it("opens Equity on #networth/equity, without its own back link", () => {
@@ -82,7 +92,7 @@ describe("the Net worth tabs", () => {
     expect(screen.getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current");
     expect(await screen.findByText("Retirement planner")).toBeInTheDocument();
     expect(screen.getByText("Nothing to plan from yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#networth/investments");
+    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#investments");
     expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
     expect(api).toHaveBeenCalledWith("/api/investments?period=1Y");
   });
@@ -92,13 +102,5 @@ describe("the Net worth tabs", () => {
     render(NetWorth, { sub: "retirement" });
     expect(await screen.findByText(/Something went wrong: nope/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
-  });
-
-  it("no longer shows the planner on Investments", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) =>
-      path === "/api/plaid/status" ? { inv_accounts: 0, items: [] } : {}) as never);
-    render(NetWorth, { sub: "investments" });
-    await screen.findByTestId("getting-started");
-    expect(screen.queryByText("Retirement planner")).toBeNull();
   });
 });

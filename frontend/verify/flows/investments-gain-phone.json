@@ -1,9 +1,9 @@
 {
   "name": "investments-gain-phone",
-  "page": "networth",
+  "page": "investments",
   "viewports": ["phone"],
   "steps": [
-    { "goto": "#networth/investments" },
+    { "goto": "#investments" },
     { "wait_for": "#inv-holdings li" },
     { "scroll_to": "#inv-holdings" },
     { "screenshot": "holdings-today" },
