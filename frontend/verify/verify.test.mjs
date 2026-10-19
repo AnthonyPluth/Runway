@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findChromium, flowProblems, DEFAULT_VIEWPORTS, PAGES, screenshotFile, unknownPages, VIEWPORTS } from "./verify.mjs";
+import { findChromium, flowProblems, frozenTime, HIDE_TOASTS, DEFAULT_VIEWPORTS, PAGES, screenshotFile, unknownPages, VIEWPORTS } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -84,4 +84,13 @@ describe("viewports", () => {
     expect(DEFAULT_VIEWPORTS).toEqual(["phone", "desktop"]);
     expect(flowProblems({ name: "x", steps: [{ reload: true }], viewports: ["tablet"] })).toEqual(["unknown viewport tablet"]);
   });
+});
+
+describe("the frozen clock", () => {
+  it("starts the browser at noon local time on the day verify.py froze the server at", () => {
+    const t = frozenTime("2026-06-17");
+    expect([t.getFullYear(), t.getMonth() + 1, t.getDate(), t.getHours(), t.getMinutes()]).toEqual([2026, 6, 17, 12, 0]);
+  });
+
+  it("leaves toasts out of the images, as they depend on timing", () => expect(HIDE_TOASTS).toContain("[data-sonner-toaster]"));
 });

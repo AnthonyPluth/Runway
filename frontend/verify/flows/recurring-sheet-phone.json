@@ -54,6 +54,9 @@
       "wait_for": "[data-recurring-sheet] >> button:text-is('Resume')"
     },
     {
+      "wait_for": "button[aria-haspopup=dialog]:has-text('Gym'):has-text('Paused')"
+    },
+    {
       "scroll_to": "[data-recurring-sheet] >> button:text-is('Resume')"
     },
     {
