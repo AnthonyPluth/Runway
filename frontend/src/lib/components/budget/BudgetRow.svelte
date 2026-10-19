@@ -341,11 +341,11 @@
     <p id={`${uid}-outcome`} class="text-xs text-foreground empty:hidden" data-outcome>{outcome}</p>
     {#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
     {#if locked}<p class="text-xs text-muted-foreground" data-locked>Saving is off until the page’s figures are up to date.</p>{/if}
-    <div class="flex flex-wrap items-center justify-end gap-2">
-      {#if canMonth && ownMonth}
-        <Button variant="link" size="sm" class="mr-auto h-auto px-0 py-2" disabled={saving || locked} onclick={() => resetMonth(true)}
-          aria-label={`Reset this month to usual: ${c.name} back to ${fmt0(usual)} in ${atName}`}>Reset this month to usual</Button>
-      {/if}
+    {#if canMonth && ownMonth}
+      <Button variant="link" size="sm" class="h-auto self-start px-0 py-2" disabled={saving || locked} onclick={() => resetMonth(true)}
+        aria-label={`Reset this month to usual: ${c.name} back to ${fmt0(usual)} in ${atName}`}>Reset this month to usual</Button>
+    {/if}
+    <div class="flex items-center justify-end gap-2">
       <Button variant="outline" size="sm" onclick={cancel}>Cancel</Button>
       <Button type="submit" size="sm" disabled={saving || locked || nothing}>{saving ? "Saving…" : "Save"}</Button>
     </div>
