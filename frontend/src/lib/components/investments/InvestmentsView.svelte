@@ -163,14 +163,6 @@
   </Card.Root>
 {:else}
   {#if error}<RefreshFailed {error} onretry={() => load(shownPeriod)} />{/if}
-  <div class="mb-4 flex justify-end">
-    <span class={cn("inline-flex items-center gap-1.5 rounded-full border border-[var(--edge)] bg-card px-3 py-1 text-xs", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
-      title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined} data-testid="holdings-updated">
-      {#if !live}Holdings updated {synced}
-      {:else if live.market === "open"}<LiveDot /> Live prices
-      {:else}Market closed · latest prices as of {liveTime}{/if}
-    </span>
-  </div>
 
   {#each status.items.filter((i) => i.error) as i (i.item_id)}
     {@const problem = plaidProblem(i.error!)}
@@ -180,13 +172,11 @@
     </Alert.Root>
   {/each}
 
-  <section class="mb-6" data-testid="headline">
-    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-      <p class="text-sm text-muted-foreground">Total value · {plural(accountCount, "account")}</p>
-      {#if dates}<ValuationDates title="total value" total={fmt(d.total)} model={dates} listName="the accounts" onshow={showAccounts} />{/if}
-    </div>
-    <p class="text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
-    <div class="mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
+  <section class="mb-6 grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 md:grid-cols-[1fr_auto_auto]" data-testid="headline">
+    <p class="text-sm text-muted-foreground md:col-start-1 md:row-start-1 md:self-center">Total value · {plural(accountCount, "account")}</p>
+    {#if dates}<div class="justify-self-end md:col-start-3 md:row-start-1 md:self-center"><ValuationDates title="total value" total={fmt(d.total)} model={dates} listName="the accounts" onshow={showAccounts} /></div>{/if}
+    <p class="col-span-full text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
+    <div class="col-span-full mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
       {#if perf.gain != null || perf.return != null}
         <span class={cn("inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-medium", gainCls(change))} data-testid="period-chip">
           {#if change !== 0}<span aria-hidden="true">{change > 0 ? "▲" : "▼"}</span>{/if}
@@ -197,6 +187,12 @@
         <span class={cn("inline-flex items-center rounded-full bg-muted px-2.5 py-1", pts ? gainCls(pts) : "text-muted-foreground")} data-testid="vs-bench-chip">{vsBench}</span>
       {/if}
     </div>
+    <span class={cn("col-span-full mt-2 inline-flex items-center gap-1.5 justify-self-start md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:self-center rounded-full border border-[var(--edge)] bg-card px-3 py-1 text-xs", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
+      title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined} data-testid="holdings-updated">
+      {#if !live}Holdings updated {synced}
+      {:else if live.market === "open"}<LiveDot /> Live prices
+      {:else}Market closed · latest prices as of {liveTime}{/if}
+    </span>
   </section>
 
   <StatStrip class="mb-6 @2xl:grid-cols-4" items={stats} />
