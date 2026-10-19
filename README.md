@@ -45,7 +45,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **An assistant-ready API.** An [MCP endpoint](https://anthonypluth.github.io/Runway/using/mcp/) lets Claude or another assistant, once you approve it, answer questions about your money.
 - **Yours to keep.** Autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres.
 
-The full tour is in the [documentation](https://anthonypluth.github.io/Runway/using/features/). Runway's pages are Overview, Transactions, Budget, Investments, Recurring, Reports, Net worth (Summary, Investments, Equity and Retirement), Churning and Settings.
+The full tour is in the [documentation](https://anthonypluth.github.io/Runway/using/features/). Runway's pages are Overview, Transactions, Budget, Investments, Recurring, Reports, Net worth (Summary, Equity and Retirement), Churning and Settings.
 
 ## Quick start
 

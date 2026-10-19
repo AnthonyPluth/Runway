@@ -1,16 +1,14 @@
 """What a request is told when its handler fails, the same for the web app (/api/...) and the assistants (/mcp), which
 both go through routes.dispatch: a value it can't use is a 400 saying which; the database busy with a sync is a 503;
-anything else is a bug, a 500 with only a reference, logged and reported to Sentry without what the error said."""
+anything else is a bug, a 500 with only a reference, logged without what the error said."""
 import contextlib
 import io
 import json
-import os
 import urllib.error
 import urllib.request
 from unittest import mock
 
 import psycopg.errors
-import sentry_sdk
 from sqlalchemy.exc import OperationalError
 
 from runway.domain import categories
@@ -19,7 +17,6 @@ from runway import monitoring
 from runway.server import mcp_http, routes
 from runway.server.common import ApiError
 from tests.test_mcp import READ, RunwayServer
-from tests.test_monitoring import DSN, Capture
 
 PRIVATE = "Acme Coffee 12.34"
 FAILURES = (KeyError(PRIVATE), TypeError(f"unsupported operand type(s) for +: 'NoneType' and '{PRIVATE}'"),
@@ -72,7 +69,7 @@ class ErrorTests(RunwayServer):
                 self.assertEqual(status, 500)
                 ref = reply["error"].split("reference ")[1].split(";")[0]
                 self.assertEqual(reply["error"], f"Something went wrong on Runway's side (reference {ref}; the details are in its log).")
-                log.assert_any_call(f"[error {ref}] GET /api/categories", "error", ref=ref)
+                log.assert_any_call(f"[error {ref}] GET /api/categories")
                 self.assertReported(ref, type(e).__name__)
 
     def test_a_bug_in_a_handler_is_a_500_and_reported_on_mcp(self):
@@ -99,31 +96,6 @@ class ErrorTests(RunwayServer):
             self.assertEqual(self.api("/api/categories"), (409, {"error": "Not today"}))
             with self.assertRaisesRegex(mcp_server.ToolError, "^Not today$"):
                 mcp_http.local_fetch("categories", {}, None, READ)
-
-    def test_what_sentry_is_sent(self):
-        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN}), mock.patch("builtins.print"):
-            self.assertTrue(monitoring.init())
-        transport = Capture()
-        sentry_sdk.get_client().transport = transport
-        self.addCleanup(self.sentry_off)
-        found = routes.match("GET", "/api/categories")
-        with mock.patch.object(categories, "all_categories", side_effect=FAILURES[2]), self.assertRaises(ApiError) as cm:
-            routes.dispatch(found, {}, {})
-        sentry_sdk.flush()
-        self.assertEqual(cm.exception.status, 500)
-        (event,) = transport.events
-        exc = event["exception"]["values"][-1]
-        self.assertEqual((exc["type"], exc["value"]), ("ValueError", "[Filtered]"))
-        self.assertIn(event["tags"]["ref"], str(cm.exception))
-        self.assertTrue(any(f.get("function") == "api_categories" for f in exc["stacktrace"]["frames"]))
-        self.assertNotIn("Acme", json.dumps(event))
-        self.assertNotIn("12.34", json.dumps(event))
-
-    @staticmethod
-    def sentry_off():
-        sentry_sdk.get_client().close()
-        sentry_sdk.init(dsn=None)
-        monitoring._enabled = False
 
 
 class DatabaseErrorTests(RunwayServer):

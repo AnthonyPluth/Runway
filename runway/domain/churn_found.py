@@ -390,8 +390,7 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
     prompt = build_prompt(issuer, product, currencies, categories, web)
     began = time.time()
     try:
-        with monitoring.ai_agent("Card suggestions", "churning"):
-            reply, cited = _ask(caller or categorize.chat, api_key, model, prompt, web)
+        reply, cited = _ask(caller or categorize.chat, api_key, model, prompt, web)
     except Exception as e:   # network, timeout or API error (its text quotes OpenRouter's answer: kept scrubbed)
         said = monitoring.public_text(str(e)) or type(e).__name__
         if web:

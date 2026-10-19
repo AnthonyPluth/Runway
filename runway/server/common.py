@@ -28,12 +28,12 @@ class ApiError(Exception):
 
 
 def server_error(e: BaseException, method: str, route: str) -> ApiError:
-    """A handler (or the server) failed in a way it didn't expect: log and report it, without what the error says (it
+    """A handler (or the server) failed in a way it didn't expect: log it, without what the error says (it
     may quote what the request sent, or name a row), and answer only a reference to it. `route` is the route's pattern
     (/api/rules/{id}), never the address itself."""
     ref = request_ref()
-    monitoring.log(f"[error {ref}] {method} {route}", "error", ref=ref)
-    monitoring.report(e, values=False, ref=ref)
+    monitoring.log(f"[error {ref}] {method} {route}")
+    monitoring.report(e, values=False)
     return ApiError(f"Something went wrong on Runway's side (reference {ref}; the details are in its log).", 500)
 
 

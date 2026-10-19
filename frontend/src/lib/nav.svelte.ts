@@ -30,9 +30,8 @@ export const MONEY_NAV: NavItem[] = [
   { page: "churning", label: "Churning", icon: CreditCard },
 ];
 
-/** The nav item to light up: Review is a tab of Transactions, and Net worth's Investments tab is the Investments page. */
-export const currentPage = () =>
-  route.page === "review" ? "transactions" : route.page === "networth" && route.sub === "investments" ? "investments" : route.page;
+/** The nav item to light up: Review is a tab of Transactions. */
+export const currentPage = () => (route.page === "review" ? "transactions" : route.page);
 
 export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? s.user : null);
 

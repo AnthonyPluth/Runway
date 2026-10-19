@@ -15,12 +15,6 @@ export interface Brand {
 interface SyncLog { ok: boolean; message?: string; at?: string }
 
 /** GET /api/state (runway/server.py api_state). */
-export interface SentryConfig {
-  dsn: string; environment: string; release: string;
-  /** Who's signed in, as a code that doesn't say who, so reports count the people they affect. */
-  user_id?: string | null;
-}
-
 export interface AppState {
   connected: boolean;
   brands?: Record<string, Brand>;
@@ -60,8 +54,6 @@ export interface AppState {
   logodev_configured?: boolean;
   database?: "sqlite" | "postgres";
   version?: string;
-  /** Where the web app sends its error reports, when Runway is set up for them. */
-  sentry?: SentryConfig | null;
   owners?: string[];
   user?: User | null;
   /** The getting-started checklist: which steps are done, and whether it's been put away. */

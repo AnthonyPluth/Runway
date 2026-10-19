@@ -180,7 +180,7 @@
   <div class="rounded-lg border border-dashed px-6 py-10 text-center"
     title="Runway plans from your investment accounts. Connect one, or enter holdings by hand, and the planner starts from real numbers.">
     <h3 class="font-medium">Nothing to plan from yet</h3>
-    <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
+    <Button class="mt-4" href="#investments">Go to Investments</Button>
   </div>
 {:else}
 {#if gate}
