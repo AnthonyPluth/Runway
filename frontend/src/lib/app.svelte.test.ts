@@ -38,11 +38,13 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "setup", sub: "rules" });
   });
 
-  it("opens #investments as a page of its own, and Net worth's Investments tab at #networth/investments", async () => {
+  it("opens #investments as a page of its own, and the old Net worth Investments tab (#networth/investments) there too", async () => {
     await go("#investments");
     expect(route).toMatchObject({ page: "investments", sub: "" });
     await go("#networth/investments");
-    expect(route).toMatchObject({ page: "networth", sub: "investments" });
+    expect(route).toMatchObject({ page: "investments", sub: "" });
+    await go("#networth/equity");
+    expect(route).toMatchObject({ page: "networth", sub: "equity" });
   });
 
   it("keeps everything after the page as the sub-page, so a holding's page is #investments/holding/<id>", async () => {

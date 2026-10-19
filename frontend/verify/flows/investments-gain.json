@@ -1,9 +1,9 @@
 {
   "name": "investments-gain",
-  "page": "networth",
+  "page": "investments",
   "viewports": ["desktop"],
   "steps": [
-    { "goto": "#networth/investments" },
+    { "goto": "#investments" },
     { "wait_for": "#inv-holdings tbody tr" },
     { "scroll_to": "#inv-holdings" },
     { "screenshot": "holdings" },

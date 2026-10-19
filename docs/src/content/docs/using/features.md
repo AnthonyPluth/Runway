@@ -7,7 +7,7 @@ sidebar:
 
 The [home page](/Runway/) has the short list. This is what each part does and where its settings live.
 
-Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Investments**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
+Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Investments**, **Recurring**, **Reports**, then **Net worth** (Summary, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
 **On a tablet** (768 to 1023 pixels wide), the sidebar shrinks to a narrow rail of icons so pages keep their width: hover or tab to an icon to see its name, and the lit icon marks the page you're on. **Menu**, at the bottom of the rail, opens a panel with every page by its full name, who's signed in, the sync status and **Sync now**, and **Sign out**. From 1024 pixels up it's the full sidebar.
 
@@ -105,7 +105,7 @@ On the Recurring page, right under Budget (the old Budget → Bills & income lin
 
 ## Investments
 
-In the sidebar (**Investments**, after Budget; **Invest** in the phone's tab bar), at `#investments`, and on Net worth → Investments.
+In the sidebar (**Investments**, after Budget; **Invest** in the phone's tab bar), at `#investments`. Net worth's breakdown lists your investment accounts under an **Investments** heading that opens this page (the old Net worth → Investments tab's address opens it too).
 
 - **The top of the page** is the headline: your total value and the number of accounts, with a chip for the gain over the chosen period (dollars and percent; just the percent when Runway has no cost basis to work a dollar figure from) and a chip for how far ahead of or behind the S&P 500 you are, in percentage points. Under it, four stat tiles: **Today** (the change since the last close), **Total gain** (against cost basis), **Return** for the chosen period with the S&P 500 beside it, and **Dividends** over the last 12 months with the fees.
 - **One chart card** shows the portfolio over the chosen period. Its **Value / Return vs S&P 500** switch flips between your value with your net deposits (a step line) and your time-weighted return against the S&P 500; a line under the chart gives both returns. The **period selector** (1M, 3M, YTD, 1Y, 2Y and **All**) sets the headline, the tiles and the chart together. All goes back to your earliest activity (or your first SimpleFIN snapshot), however long ago, where the others stop at their own start date.

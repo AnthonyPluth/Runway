@@ -44,7 +44,7 @@ describe("Sidebar", () => {
       ["Overview", "Transactions", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning"]);
   });
 
-  it.each([["investments", "", "Investments"], ["networth", "investments", "Investments"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["recurring", "", "Recurring"]])(
+  it.each([["investments", "", "Investments"], ["investments", "holding/sec1", "Investments"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["recurring", "", "Recurring"]])(
     "keeps %s/%s lit as %s", (page, sub, label) => {
       app.state = state();
       route.page = page; route.sub = sub;
@@ -234,7 +234,7 @@ describe("MobileNav", () => {
     expect(within(bar).getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it.each([["investments", ""], ["networth", "investments"]])("lights the Invest tab on %s/%s", (page, sub) => {
+  it.each([["investments", ""], ["investments", "holding/sec1"]])("lights the Invest tab on %s/%s", (page, sub) => {
     app.state = state();
     route.page = page; route.sub = sub;
     render(MobileNav);
