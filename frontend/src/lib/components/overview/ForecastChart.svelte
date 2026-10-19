@@ -65,7 +65,9 @@
   });
   // Hovering (or dragging sideways on a phone) shows that day's balance and what happens on it.
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
-  // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  // The day the readout is on. A refreshed, shorter forecast that no longer has that day clears it for good, so a
+  // longer one coming back doesn't bring the old readout back with it.
+  $effect(() => { if (pointed != null && pointed >= n) pointed = null; });
   const hover = $derived(pointed != null && pointed < n ? pointed : null);
   // On a phone the readout stays put, in the top left of the chart, instead of riding along under the finger: it's
   // readable there, and two days are compared by dragging between them. A mouse's readout follows the pointer.

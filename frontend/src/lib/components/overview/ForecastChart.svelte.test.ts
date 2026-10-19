@@ -213,6 +213,15 @@ describe("ForecastChart from the keyboard", () => {
     expect(readout(container)).toHaveTextContent("Sat, Oct 17");
   });
 
+  it("doesn't bring back a dropped day's readout when the longer forecast returns", async () => {
+    const { container, rerender } = render(ForecastChart, { props: { fc: fc() } });
+    await press("End");
+    await rerender({ fc: fc({ dates: DATES.slice(0, 2), total: [4000, 4000], events: [], low: { date: DATES[0], balance: 4000 } }) });
+    await rerender({ fc: fc() });
+    expect(readout(container)).toBeNull();
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+  });
+
   it("has a valid slider for a single day, and none for an empty forecast", async () => {
     const one = render(ForecastChart, { props: { fc: fc({ dates: [DATES[0]], total: [4000], events: [], low: { date: DATES[0], balance: 4000 } }) } });
     expect(slider()).toHaveAttribute("aria-valuemax", "0");
@@ -240,6 +249,19 @@ describe("ForecastChart, compact", () => {
     expect(container.querySelector("svg")).toHaveAttribute("viewBox", expect.stringMatching(/ 120$/));
     expect(container.querySelectorAll("[data-low]")).toHaveLength(1);
     expect(container.querySelector("[data-end]")).toHaveTextContent("$2,500");
+  });
+
+  it("marks the forecast's own low, not the series minimum, when they differ", () => {
+    const mark = (low: Overview["low"]) => {
+      const r = render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low }), compact: true } });
+      const c = r.container.querySelector("[data-low]")!;
+      const at = { cx: Number(c.getAttribute("cx")), cy: Number(c.getAttribute("cy")) };
+      r.unmount();
+      return at;
+    };
+    const ownLow = mark({ date: DATES[2], balance: 1300 }), seriesMin = mark({ date: DATES[1], balance: 900 });
+    expect(ownLow.cx).toBeGreaterThan(seriesMin.cx);
+    expect(ownLow.cy).toBeLessThan(seriesMin.cy);
   });
 
   it("keeps the value axis on the compact chart", () => {
