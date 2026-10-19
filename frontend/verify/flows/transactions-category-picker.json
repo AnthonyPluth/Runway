@@ -6,6 +6,7 @@
     { "wait_for": "button[aria-label^='Category for Green Grocer Market']" },
     { "click": "button[aria-label^='Category for Green Grocer Market']" },
     { "wait_for": "[role=listbox]" },
+    { "wait_for": "[role=listbox] >> text=Spending" },
     { "screenshot": "open" },
     { "press": { "selector": "input[aria-label='Search categories']", "key": "g" } },
     { "press": { "selector": "input[aria-label='Search categories']", "key": "r" } },

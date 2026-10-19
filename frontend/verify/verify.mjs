@@ -32,6 +32,38 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   return undefined;
 }
 
+/** The moment the browser's clock starts at for a run frozen at `day` (YYYY-MM-DD): noon local time, as runway/verify.py's
+ *  FROZEN_TIME is for the server (both read in the machine's time zone). The clock then runs on from it. */
+export const frozenTime = (day) => new Date(`${day}T12:00:00`);
+
+/** Run in the page before a screenshot: waits for the fonts, and writes the demo servers' port (a free one each run) as a
+ *  fixed number wherever the page shows it (the assistant's MCP address), so the image doesn't change with the port. */
+export async function settle() {
+  await globalThis.document.fonts.ready;
+  // Wait until the page has stopped changing (a list that grows as it loads, a panel that opens over a few frames): its
+  // height and text the same for 8 samples in a row, at most 4 seconds.
+  const look = () => `${globalThis.document.documentElement.scrollHeight}|${globalThis.document.body.innerText.length}`;
+  for (let i = 0, same = 0, last = look(); same < 8 && i < 80; i++) {
+    await new Promise((r) => globalThis.requestAnimationFrame(() => setTimeout(r, 50)));
+    const now = look();
+    same = now === last ? same + 1 : 0;
+    last = now;
+  }
+  // A last beat for what a frame-by-frame look can't see: focus moving into a popover, an icon settling.
+  await new Promise((r) => setTimeout(r, 300));
+  // Back to the top: a full-page capture draws sticky and fixed parts (the sidebar, a date header) where the page was scrolled
+  // to, which depends on how far a click scrolled it.
+  globalThis.scrollTo(0, 0);
+  await new Promise((r) => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(r)));
+  const fixed = (t) => t.replace(/\b(localhost|127\.0\.0\.1):\d{2,5}/g, "$1:8080");
+  const walker = globalThis.document.createTreeWalker(globalThis.document.body, 4);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue && fixed(n.nodeValue) !== n.nodeValue) n.nodeValue = fixed(n.nodeValue);
+  for (const el of globalThis.document.querySelectorAll("input, textarea")) if (fixed(el.value) !== el.value) el.value = fixed(el.value);
+}
+
+/** Toasts come and go on timers and stack with whatever else the run did, so what's on screen depends on timing: left out of the images. */
+export const HIDE_TOASTS = "[data-sonner-toaster] { visibility: hidden !important; }";
+
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
 
@@ -172,7 +204,7 @@ async function cacheCheck(page, base) {
     await page.reload({ waitUntil: "load" });
     void page.locator("button:text-is('Unlock'):not([disabled])").click({ timeout: 8000 }).catch(() => { /* unlocked on its own */ });
   };
-  await page.clock.install();   // (time runs as usual; jumped ahead below)
+  if (!page.frozen) await page.clock.install();   // (time runs as usual; jumped ahead below; a frozen run installed it at the context)
   await page.goto(`${base}/#setup/data`, { waitUntil: "networkidle" });
   await page.locator("button:text-is('Turn on app lock')").first().click();
   await page.locator("text=On for this device").first().waitFor();
@@ -229,6 +261,10 @@ async function main() {
   // The signed-in demo server (runway/verify.py), for flows with "signed_in": true, and its session's token.
   const signedInUrl = opt("--signed-in-url", process.env.RUNWAY_VERIFY_SIGNED_IN_URL);
   const session = process.env.RUNWAY_VERIFY_SESSION;
+  // The day runway/verify.py froze the server and the demo seed at (libfaketime): the browser's clock is set to it too, so
+  // the dates a page shows, and so its image, don't depend on the day it was taken. Run alone, with no --day, the clock is real.
+  const day = opt("--day", process.env.RUNWAY_VERIFY_DAY);
+  if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) { console.error(`verify: --day is YYYY-MM-DD, not ${day}`); process.exit(2); }
   if (!base) { console.error("verify: no server address (--url or RUNWAY_VERIFY_URL)"); process.exit(2); }
   const unknown = unknownPages(args);
   if (unknown.length) { console.error(`verify: no such page: ${unknown.join(", ")} (pages: ${PAGES.join(", ")})`); process.exit(2); }
@@ -251,7 +287,12 @@ async function main() {
 
   async function visit(label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
+    // The device cache check moves the clock itself (setSystemTime), so it gets a running one; every other visit's clock is
+    // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
+    const moves = label === "device cache";
+    if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
     const page = await ctx.newPage();
+    page.frozen = !!day && moves;
     if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
@@ -262,13 +303,19 @@ async function main() {
     const files = [];
     const shot = async (name) => {
       const file = screenshotFile(name, viewport);
-      await page.screenshot({ path: join(out, file), fullPage: true });
+      await page.waitForLoadState("networkidle").catch(() => { /* a page that keeps a request open: the stability wait below still runs */ });
+      await page.mouse.move(0, 0);   // no row under the pointer: a hovered row shows its checkbox and buttons
+      await page.evaluate(settle);
+      // animations "disabled": a running CSS animation (the Not synced dot's pulse, a sheet sliding in) would be caught at a
+      // different moment each run; this settles finite ones at their end and stops infinite ones at their start.
+      await page.screenshot({ path: join(out, file), fullPage: true, animations: "disabled", style: HIDE_TOASTS });
       files.push(file);
     };
     try {
       await work(page, shot);
     } catch (e) {
       problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
+      console.error(`${where}: ${e.message}`);   // the whole message, with Playwright's call log, for finding why
       // Straight to page.screenshot, not shot(): a failed step keeps its evidence in artifacts/verify/ (sync_screenshots never commits -FAILED- files).
       await page.screenshot({ path: join(out, screenshotFile(`${label.replace(/\W+/g, "-")}-FAILED`, viewport)), fullPage: true }).catch(() => { /* best effort: the step's own error is already recorded above */ });
     }

@@ -23,6 +23,39 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "artifacts", "verify")
 
 
+# The frozen clock. Demo data is built relative to today (transactions, due dates, the budget month, chart axes), so an
+# image would change every day it's taken. The server and the demo seed run under libfaketime as if it were this moment
+# (the clock then runs on from it), and verify.mjs sets the browser's clock to the same day with Playwright's page.clock
+# (the run passes it FROZEN_DAY as --day). Linux only: macOS has no LD_PRELOAD.
+FROZEN_DAY = "2026-06-17"
+FROZEN_TIME = f"{FROZEN_DAY} 12:00:00"
+LIBFAKETIME_INSTALL = "sudo apt-get install -y libfaketime"
+_LIBFAKETIME_DIRS = ("/usr/lib/x86_64-linux-gnu/faketime", "/usr/lib/aarch64-linux-gnu/faketime", "/usr/lib/faketime",
+                     "/usr/local/lib/faketime", "/usr/lib64/faketime")
+
+
+def find_libfaketime(exists=os.path.isfile, platform: str = sys.platform) -> str | None:
+    """The path of libfaketime.so.1, or None when it isn't installed (or this isn't Linux, where LD_PRELOAD works)."""
+    if not platform.startswith("linux"):
+        return None
+    for d in _LIBFAKETIME_DIRS:
+        if exists(p := os.path.join(d, "libfaketime.so.1")):
+            return p
+    return None
+
+
+def libfaketime_missing_message() -> str:
+    return ("verify: libfaketime isn't installed, and make verify needs it to freeze the clock so its images only change when "
+            f"the UI or its data does. On Debian/Ubuntu: {LIBFAKETIME_INSTALL}. verify runs on Linux (the dev container and CI); "
+            "macOS doesn't support LD_PRELOAD.")
+
+
+def frozen_env(env: dict[str, str], lib: str) -> dict[str, str]:
+    """env with the process's wall clock stopped at FROZEN_TIME (a time of day the server prints, like "as of 12:00:18 PM",
+    would otherwise change every run). Monotonic clocks keep running, so timeouts and waits still work; file times stay real."""
+    return {**env, "LD_PRELOAD": lib, "FAKETIME": FROZEN_TIME, "NO_FAKE_STAT": "1", "DONT_FAKE_MONOTONIC": "1"}
+
+
 def clean_env(data: str, base: dict[str, str] | None = None) -> dict[str, str]:
     """The environment for the demo server: its own folder and SQLite database, nothing from the caller's setup that
     could point it at real data (Postgres, sign-in, bank providers, error reports)."""
@@ -95,19 +128,24 @@ def run(pages: list[str]) -> int:
     if not node:
         print("verify: Node isn't installed (the web app needs it too).", file=sys.stderr)
         return 2
+    lib = find_libfaketime()
+    if not lib:
+        print(libfaketime_missing_message(), file=sys.stderr)
+        return 2
     data = tempfile.mkdtemp(prefix="runway-verify-")
     env = clean_env(data)
+    frozen = frozen_env(env, lib)   # for the seed and the servers; node (the browser's driver) keeps the real clock
     token = secrets.token_urlsafe(32)
     servers: list[subprocess.Popen] = []
     try:
         seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt", "--subcategories",
-                                 "--signed-in"], env={**env, SESSION_ENV: token}, cwd=ROOT, capture_output=True, text=True)
+                                 "--signed-in"], env={**frozen, SESSION_ENV: token}, cwd=ROOT, capture_output=True, text=True)
         if seeded.returncode:
             print(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", file=sys.stderr)
             return 2
         port, signed_in_port = free_port(), free_port()
         url, signed_in_url = f"http://127.0.0.1:{port}", f"http://localhost:{signed_in_port}"
-        for name, p, server_env in (("server", port, env), ("signed-in server", signed_in_port, signed_in_env(env, signed_in_url))):
+        for name, p, server_env in (("server", port, frozen), ("signed-in server", signed_in_port, signed_in_env(frozen, signed_in_url))):
             log_path = os.path.join(data, f"{name.replace(' ', '-')}.log")
             with open(log_path, "w") as log:
                 servers.append(subprocess.Popen(server_command(p), env=server_env, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT))
@@ -119,7 +157,7 @@ def run(pages: list[str]) -> int:
                 return 2
         print(f"verify: demo data served at {url} (and signed in, for the flows that need it, at {signed_in_url})")
         return subprocess.run([node, os.path.join(frontend, "verify", "verify.mjs"), "--url", url, "--out", OUT,
-                               "--signed-in-url", signed_in_url, *pages],
+                               "--signed-in-url", signed_in_url, "--day", FROZEN_DAY, *pages],
                               cwd=frontend, env={**env, SESSION_ENV: token}).returncode
     finally:
         for server in servers:

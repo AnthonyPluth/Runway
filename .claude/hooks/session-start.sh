@@ -27,6 +27,12 @@ poetry env use --quiet "$py" >/dev/null
 # Runway's dependencies and the tools CI runs (ruff, mypy, coverage, ...: pyproject.toml's dev group).
 poetry install --no-root --no-interaction
 
+# libfaketime: `make verify` runs the demo server and seed on a frozen clock (runway/verify.py), so its images don't change with the day.
+if ! ls /usr/lib/*/faketime/libfaketime.so.1 /usr/lib/faketime/libfaketime.so.1 >/dev/null 2>&1; then
+  (apt-get install -y --no-install-recommends libfaketime >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends libfaketime >/dev/null 2>&1) \
+    || echo "libfaketime isn't installed: make verify needs it (sudo apt-get install -y libfaketime)" >&2
+fi
+
 # The web app's packages (npm install, not ci: the container's cache keeps them between sessions).
 (cd frontend && npm install --no-audit --no-fund)
 
