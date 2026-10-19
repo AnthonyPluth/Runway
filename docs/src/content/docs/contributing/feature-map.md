@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-186 routes; 27 have no test yet.
+188 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -101,6 +101,8 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/recurring/{id}/match` | `recurring.py:api_recurring_add_text` | `lib/components/recurring/LinkPicker.svelte`, `lib/components/transactions/remember.svelte.ts` | `test_recurring.py` | [using/features](/Runway/using/features/) |
 | `GET /api/recurring/{id}/candidates` | `recurring.py:api_recurring_candidates` | `lib/components/recurring/LinkPicker.svelte` | `test_recurring.py` | [using/features](/Runway/using/features/) |
 | `POST /api/recurring/{id}/amount` | `recurring.py:api_recurring_amount` | `lib/components/overview/EventsList.svelte` | `test_recurring.py` | [using/features](/Runway/using/features/) |
+| `POST /api/recurring/{id}/skip-missed` | `recurring.py:api_recurring_skip_missed` | `lib/components/recurring/MissedGroup.svelte` | `test_mcp.py`, `test_recurring.py` | [using/features](/Runway/using/features/) |
+| `POST /api/recurring/{id}/end` | `recurring.py:api_recurring_end` | `lib/components/recurring/MissedGroup.svelte` | `test_recurring.py` | [using/features](/Runway/using/features/) |
 | `POST /api/recurring/{id}` | `recurring.py:api_recurring_update` | `lib/components/recurring/RecurringItem.svelte` | `test_api_validation.py`, `test_categories_recurring_pinned.py`, `test_recurring.py` | [using/features](/Runway/using/features/) |
 | `DELETE /api/recurring/{id}` | `recurring.py:api_recurring_delete` | `lib/components/recurring/RecurringItem.svelte`, `lib/components/recurring/RecurringView.svelte` | `test_api_validation.py`, `test_categories_recurring_pinned.py` | [using/features](/Runway/using/features/) |
 | `POST /api/connect` | `connections.py:api_connect` | `lib/components/settings/SimpleFinSetup.svelte` | `test_mcp.py` | [using/features](/Runway/using/features/) |

@@ -365,6 +365,13 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     linked transaction within that window either side of the date (one that came in short, or in parts, isn't missed:
     something arrived). Occurrences before the item's start date, before
     the account's synced history begins, or that you've dismissed or skipped are left out."""
+    return missed_and_runs(conn, today, lookback)[0]
+
+
+def missed_and_runs(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> tuple[list[dict], dict[int, list[dict]]]:
+    """missed(), and for each item the missed occurrences in a row up to its latest one whose window has closed, oldest
+    first: {item id: that run} (empty when the latest was paid, skipped or dismissed). An occurrence that was paid,
+    skipped or dismissed ends a run; the lookback bounds it."""
     from . import forecast   # forecast imports this module
 
     today = today or date.today()
@@ -385,24 +392,56 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     posted: dict[int, list[str]] = {}
     for rid, p in conn.execute(select(t.recurring_id, t.posted).where(t.recurring_id.in_(list(starts)), t.posted >= since)):
         posted.setdefault(rid, []).append(p)
+    runs: dict[int, list[dict]] = {}
     for item in items:
         if item["id"] not in starts:
             continue
         window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
         start = starts[item["id"]]
         hist = [p for p in posted.get(item["id"], []) if p >= (start - timedelta(days=40)).isoformat()]
+        run: list[dict] = []
         for occ in forecast.occurrences(item, start, today - timedelta(days=window + 1)):
             key = f"rec:{item['id']}:{occ.isoformat()}"
-            if key in dismissed:
-                continue
             lo, hi = (occ - timedelta(days=window)).isoformat(), (occ + timedelta(days=window)).isoformat()
-            if any(lo <= p <= hi for p in hist):
+            if key in dismissed or any(lo <= p <= hi for p in hist):
+                run = []
                 continue
-            out.append({"key": key, "recurring_id": item["id"], "name": item["name"], "date": occ.isoformat(),
-                        "amount": round(item["amount"], 2), "account_id": item["account_id"], "account_name": item["account_name"],
-                        "match": item["match"], "window": window})
+            m = {"key": key, "recurring_id": item["id"], "name": item["name"], "date": occ.isoformat(),
+                 "amount": round(item["amount"], 2), "account_id": item["account_id"], "account_name": item["account_name"],
+                 "match": item["match"], "window": window}
+            out.append(m)
+            run.append(m)
+        runs[item["id"]] = run
     out.sort(key=lambda m: m["date"], reverse=True)
-    return out
+    return out, runs
+
+
+# "Mark as ended" is offered once an item has missed this many in a row.
+ENDED_AFTER = 3
+
+
+def end_before(item: dict, day: date) -> str | None:
+    """The end date that stops an item just before its occurrence on `day` (the day its money moves): the day before,
+    or earlier when that occurrence was moved later off a weekend or holiday (an end date counts the scheduled date,
+    forecast.occurrences). None when that would end it before it starts (it never came at all)."""
+    from . import forecast   # forecast imports this module
+
+    end = day - timedelta(days=1)
+    for _ in range(10):   # a weekend and a holiday move a date a few days at most
+        if day not in forecast.occurrences({**item, "end_date": end.isoformat()}, end - timedelta(days=1), day):
+            break
+        end -= timedelta(days=1)
+    else:
+        return None
+    return end.isoformat() if end.isoformat() >= item["anchor_date"][:10] else None
+
+
+def ended_since(item: dict, run: list[dict]) -> str | None:
+    """The end date "Mark as ended" sets for an item that missed `run` (missed_and_runs): the day before the first of
+    them, once there are ENDED_AFTER or more; None otherwise."""
+    if len(run) < ENDED_AFTER:
+        return None
+    return end_before(item, date.fromisoformat(run[0]["date"]))
 
 
 def dismiss(conn, key: str) -> None:

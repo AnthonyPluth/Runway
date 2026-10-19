@@ -1395,6 +1395,35 @@
     },
     {
       "method": "POST",
+      "path": "/api/recurring/{id}/skip-missed",
+      "handler": "runway/server/api/recurring.py:api_recurring_skip_missed",
+      "web": [
+        "frontend/src/lib/components/recurring/MissedGroup.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/{id}/end",
+      "handler": "runway/server/api/recurring.py:api_recurring_end",
+      "web": [
+        "frontend/src/lib/components/recurring/MissedGroup.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/recurring/{id}",
       "handler": "runway/server/api/recurring.py:api_recurring_update",
       "web": [

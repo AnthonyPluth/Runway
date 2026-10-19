@@ -99,10 +99,13 @@ def api_recurring(conn, _q, _b):
         it["suggested_amount"] = recurring.stale_amount(it, hist, today)   # its last payments all came to something else
         it.update(_due(it, hist, today, skipped, firsts.get(it["account_id"])))
     logos = recurring_logos(conn, items)
-    missed = recurring.missed(conn, today)
+    missed, runs = recurring.missed_and_runs(conn, today)
     for it in items:
         it["logo"] = logos.get(it["id"])
         it["missed"] = [m for m in missed if m["recurring_id"] == it["id"]]
+        # Missed ENDED_AFTER or more in a row: the ones in that run, which "Mark as ended" ends it before (none otherwise).
+        run = runs.get(it["id"], [])
+        it["missed_run"] = [m["key"] for m in run] if recurring.ended_since(it, run) else []
     return items
 
 
@@ -307,6 +310,84 @@ def api_recurring_amount(conn, _q, body, rid):
     if key.startswith(f"rec:{rid}:"):
         conn.execute(delete(Override).where(Override.key == key))
     return {"ok": True, "previous": previous}
+
+
+def _missed_now(conn, rid: int):
+    """The item (404 if there's none) and its missed occurrences and their run, as Recurring lists them today."""
+    item = conn.execute(select(Recurring).where(Recurring.id == rid)).fetchone()
+    if not item:
+        raise ApiError(NOT_FOUND, 404)
+    missed, runs = recurring.missed_and_runs(conn, date.today())
+    return dict(item), [m for m in missed if m["recurring_id"] == rid], runs.get(rid, [])
+
+
+def api_recurring_skip_missed(conn, _q, body, rid):
+    """"Skip all": every missed occurrence of an item skipped at once (each a one-off $0, as "Skip this one" does), or
+    putting back what that changed ({restore}: Undo). Returns the keys it skipped and, for Undo, `previous`: what each
+    of those dates had before ({key, amount}, amount null for no edit), which {restore} puts back exactly."""
+    rid = row_id(rid, NOT_FOUND)
+    if "restore" in body:
+        _restore_overrides(conn, rid, body["restore"])
+        return {"ok": True}
+    _item, missed, _run = _missed_now(conn, rid)
+    if not missed:
+        raise ApiError("Nothing missed to skip")
+    keys = sorted(m["key"] for m in missed)
+    had = dict(conn.execute(select(Override.key, Override.amount).where(Override.key.in_(keys))).fetchall())
+    for k in keys:
+        db.upsert(conn, Override, {"key": k, "amount": 0}, key=["key"])
+    return {"ok": True, "keys": keys, "previous": [{"key": k, "amount": had.get(k)} for k in keys]}
+
+
+def _restore_overrides(conn, rid: int, previous) -> None:
+    """Put back the dates' edits "Skip all" replaced: each {key, amount} of this item's, amount null for none."""
+    if not isinstance(previous, list) or not previous:
+        raise ApiError("Nothing to put back")
+    back: dict[str, float | None] = {}
+    for p in previous:
+        key = p.get("key") if isinstance(p, dict) else None
+        if not isinstance(key, str) or not key.startswith(f"rec:{rid}:") or set(p) != {"key", "amount"}:
+            raise ApiError("Nothing to put back")
+        if not _is_day(key.split(":", 2)[2]):
+            raise ApiError("Nothing to put back")
+        try:
+            back[key] = None if p["amount"] is None else db.number(p["amount"])
+        except (TypeError, ValueError):
+            raise ApiError("Nothing to put back") from None
+    for key, amount in back.items():
+        if amount is None:
+            conn.execute(delete(Override).where(Override.key == key))
+        else:
+            db.upsert(conn, Override, {"key": key, "amount": amount}, key=["key"])
+
+
+def api_recurring_end(conn, _q, body, rid):
+    """"Mark as ended": an item that missed recurring.ENDED_AFTER or more in a row ends the day before the first of them
+    (recurring.ended_since), so the forecast and Recurring stop expecting it; or putting back the end date it had
+    ({restore: {end_date}}: Undo). Returns the end date set and `previous`, what it had."""
+    rid = row_id(rid, NOT_FOUND)
+    if "restore" in body:
+        previous = body["restore"]
+        end = previous.get("end_date", False) if isinstance(previous, dict) and set(previous) == {"end_date"} else False
+        if not (end is None or (isinstance(end, str) and _is_day(end))):
+            raise ApiError("Nothing to put back")
+        if not conn.execute(update(Recurring).where(Recurring.id == rid).values(end_date=end)).rowcount:
+            raise ApiError(NOT_FOUND, 404)
+        return {"ok": True}
+    item, _missed, run = _missed_now(conn, rid)
+    end = recurring.ended_since(item, run)
+    if not end:
+        raise ApiError(f"It hasn’t missed {recurring.ENDED_AFTER} payments in a row")
+    conn.execute(update(Recurring).where(Recurring.id == rid).values(end_date=end))
+    return {"ok": True, "end_date": end, "previous": {"end_date": item["end_date"]}}
+
+
+def _is_day(s: str) -> bool:
+    try:
+        date.fromisoformat(s)
+    except ValueError:
+        return False
+    return True
 
 
 def api_recurring_add_text(conn, _q, body, rid):
