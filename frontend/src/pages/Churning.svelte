@@ -163,6 +163,13 @@
     {:else}<EmptyLine label="Rewards" message="no points tracked yet" action="Add a balance" onaction={() => (addingBalance = true)} />{/if}
   {:else if tab === "cards"}
     <Card.Root class="mb-6">
+      <!-- Until the first card is added (dismissing found cards doesn't count), say what the page is for. -->
+      {#if !d.cards.length}
+        <div class="space-y-1 px-6 text-sm text-muted-foreground" data-testid="churning-intro">
+          <p>Churning keeps track of the cards you open for their bonuses: annual fees and when to cancel, credits to use before they lapse, how many cards you’ve opened lately (5/24), and bank bonuses you’re working on.</p>
+          <p>Add a card, or add one Runway found on your accounts below.</p>
+        </div>
+      {/if}
       <Card.Header>
         <Card.Title>Cards</Card.Title>
         <Card.Action><Button size="sm" onclick={() => addCard()}>Add a card</Button></Card.Action>
