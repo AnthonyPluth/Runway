@@ -17,7 +17,7 @@
 </script>
 
 {#if shown.length}
-  <Card.Root id="inv-accounts" data-testid="accounts-card">
+  <Card.Root data-testid="accounts-card">
     <Card.Header><Card.Title>Accounts</Card.Title></Card.Header>
     <Card.Content>
       <ul>
