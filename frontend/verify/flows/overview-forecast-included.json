@@ -1,0 +1,15 @@
+{
+  "name": "overview-forecast-included",
+  "page": "overview",
+  "steps": [
+    { "click": "summary:has-text('Forecast details')" },
+    { "wait_for": "summary:text-is('What’s included')" },
+    { "scroll_to": "summary:text-is('What’s included')" },
+    { "screenshot": "details" },
+    { "click": "summary:text-is('What’s included')" },
+    { "wait_for": "[data-testid=forecast-included] [role=group]" },
+    { "expect_text": { "selector": "[data-testid=forecast-included]", "text": "Everyday budgets" } },
+    { "scroll_to": "[data-testid=forecast-included]" },
+    { "screenshot": "open" }
+  ]
+}
