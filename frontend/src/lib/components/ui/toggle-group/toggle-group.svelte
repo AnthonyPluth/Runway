@@ -8,8 +8,9 @@
   } = $props();
 </script>
 
-<ToggleGroup.Root type="single" aria-label={label} {value}
-  onValueChange={(v) => { if (v) { value = v; onchange?.(v); } }}
+<!-- Bound through a getter and setter, so the chosen option is always `value`: a parent that doesn't accept a choice leaves it where it was. -->
+<ToggleGroup.Root type="single" aria-label={label}
+  bind:value={() => value, (v) => { if (v) { value = v; onchange?.(v); } }}
   class={cn("bg-muted text-muted-foreground inline-flex h-9 w-fit max-w-full phone:h-auto items-center justify-center-safe overflow-x-auto rounded-lg p-[3px]", className)}>
   {#each options as o (o.value)}
     <ToggleGroup.Item value={o.value} disabled={o.disabled}
