@@ -84,12 +84,12 @@ describe("a recurring item's fields", () => {
 describe("a budget's row", () => {
   const c: BudgetCategory = { name: "Groceries", parent: null, path: ["Groceries"], depth: 0, top: "Groceries", has_children: false, budget: 500, pay_with: null,
     usual_account: null, spent: 200, own_spent: 200, left: 300, rollover_from: null } as BudgetCategory;
-  const show = () => render(BudgetRow, { c, month: "2026-03", pace: 0.5, budgets: true, payAccounts: [], onsave: vi.fn(), onchanged: vi.fn() });
+  const show = () => render(BudgetRow, { c, month: "2026-03", pace: 0.5, budgets: true, payAccounts: [], onchanged: vi.fn() });
 
   it("edits in place on a phone: the amount and rolling over, from the row's ⋯ menu", async () => {
     viewport.phone = true;
     show();
-    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
+    expect(screen.getByRole("button", { name: /^Edit Groceries budget/ })).toHaveTextContent("$500");
     await userEvent.click(screen.getByRole("button", { name: "Actions for Groceries" }));
     expect(screen.getByRole("button", { name: /Roll over/ })).toBeInTheDocument();
     expect(screen.getByText("$300 left")).toBeInTheDocument();

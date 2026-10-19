@@ -68,7 +68,8 @@
   {/if}
 
   <div class="mt-3"><ForecastChart {fc} compact /></div>
-  <Segmented label="Forecast length" value={String(days)} onchange={setDays} class="mt-2 flex w-full"
+  <!-- Bound through a getter and setter: the selection is whatever `days` says (the length on screen), so a request that fails leaves it where it was. -->
+  <Segmented label="Forecast length" bind:value={() => String(days), setDays} class="mt-2 flex w-full"
     options={[...new Set([30, 60, 90, 180, days])].sort((a, b) => a - b).map((d) => ({ value: String(d), label: short(d) }))} />
 
   {#if low && fc.accounts.length}

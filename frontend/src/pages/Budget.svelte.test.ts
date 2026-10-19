@@ -34,6 +34,19 @@ const serve = (m: BudgetMonth | ((path: string) => BudgetMonth)) => vi.mocked(ap
   return {} as never;
 });
 
+// A row's budget: the field-like button that opens its editor.
+const field = (name: string) => screen.getByRole("button", { name: new RegExp(`^Edit ${name} budget`) });
+// Opens a row's editor, puts in `amount` (its usual amount, the editor's choice without a month of its own) and saves.
+// jsdom can't lay out the popover, so it's shown as a browser would once placed (Floating UI leaves it hidden here).
+async function editBudget(name: string, amount: string) {
+  await userEvent.click(field(name));
+  const box = screen.getByLabelText("Amount");
+  await userEvent.clear(box);
+  if (amount) await userEvent.type(box, amount);
+  document.querySelectorAll<HTMLElement>("[data-bits-floating-content-wrapper]").forEach((el) => (el.style.visibility = "visible"));
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-03-15T12:00:00") });
   vi.mocked(api).mockReset();
@@ -60,7 +73,7 @@ describe("Budget page", () => {
     serve(month({ categories: [cat("Groceries", { budget: 800, usual_budget: 500, month_budget: 800, spent: 200, left: 600 })] }));
     render(Budget);
     expect(await screen.findByText("in Mar")).toBeInTheDocument();
-    expect(screen.getByText("$800")).toBeInTheDocument();
+    expect(screen.getByText("Budgeted").closest("div")).toHaveTextContent("Budgeted $800");
   });
 
   it("puts each row's account on its emoji: its own, else its parent's, else the one used most", async () => {
@@ -181,11 +194,11 @@ describe("Budget page", () => {
     serve(month());
     render(Budget);
     await screen.findByText("Budgeted");
-    const box = screen.getByLabelText("Budget for Gas");
-    await userEvent.type(box, "120");
-    await userEvent.tab();
+    vi.mocked(api).mockClear();
+    await editBudget("Gas", "120");
     expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Gas", amount: "120" } });
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Budget saved"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Gas: usual amount $120 a month"));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/budget?month=2026-03"));
   });
 
   it("says when saving a subcategory's budget raised its parent's, in the same toast", async () => {
@@ -196,9 +209,8 @@ describe("Budget page", () => {
     });
     render(Budget);
     await screen.findByText("Budgeted");
-    await userEvent.type(screen.getByLabelText("Budget for Produce"), "350");
-    await userEvent.tab();
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Budget saved · Groceries raised to $550"));
+    await editBudget("Produce", "350");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Produce: usual amount $350 a month · Groceries usual amount raised to $550"));
     expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
@@ -226,7 +238,7 @@ describe("Budget page", () => {
       serve(withIncome(null));
       render(Budget);
       await screen.findByRole("heading", { name: "Income" });
-      expect(screen.getByLabelText("Budget for Income")).toHaveAttribute("placeholder", "Expected");
+      expect(field("Income")).toHaveTextContent("Expected");
       expect(screen.queryByText(/expected$/)).not.toBeInTheDocument();
     });
 
@@ -242,9 +254,9 @@ describe("Budget page", () => {
     serve(month());
     render(Budget);
     await screen.findByText("Budgeted");
-    await userEvent.clear(screen.getByLabelText("Budget for Dining"));
-    await userEvent.tab();
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Budget removed"));
+    await editBudget("Dining", "");
+    expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Dining", amount: "" } });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Dining budget removed"));
   });
 
   it("asks to pick a category before setting a budget for 'another category'", async () => {
@@ -295,7 +307,7 @@ describe("Budget page", () => {
       gates["2026-03"].resolve(month());
       await screen.findByText("March 2026");
     }
-    const mutationControls = () => [screen.getByLabelText("Budget for Gas"), screen.getByLabelText("Budget for Dining"),
+    const mutationControls = () => [field("Gas"), field("Dining"),
       screen.getByLabelText("Budget for the chosen category"), screen.getByLabelText("Category to budget"),
       screen.getByRole("button", { name: "Suggest budgets" })];
 
@@ -308,7 +320,7 @@ describe("Budget page", () => {
       expect(screen.getByText("Showing March 2026")).toBeInTheDocument();
       expect(screen.getByText("$600")).toBeInTheDocument();
       for (const el of mutationControls()) expect(el).toBeDisabled();
-      expect(screen.getByLabelText("Budget for Groceries")).toBeDisabled();
+      expect(field("Groceries")).toBeDisabled();
       gates["2026-04"].resolve(month({ month: "2026-04" }));
       await screen.findByText("April 2026");
       expect(screen.queryByText("Loading April 2026…")).not.toBeInTheDocument();
@@ -403,8 +415,7 @@ describe("Budget page", () => {
       });
       render(Budget);
       await screen.findByText("Budgeted");
-      await userEvent.type(screen.getByLabelText("Budget for Gas"), "120");
-      await userEvent.tab();
+      await editBudget("Gas", "120");
       expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t refresh March 2026. Showing the last figures loaded.");
       for (const el of mutationControls()) expect(el).toBeDisabled();
       fail = false;

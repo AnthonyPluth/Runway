@@ -58,6 +58,10 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+      # make verify freezes the clock of the demo server and its seed with libfaketime (runway/verify.py), so the images
+      # only change when the UI or its data does.
+      - name: Install libfaketime
+        run: sudo apt-get update -q && sudo apt-get install -yq libfaketime
       - name: Build the web app
         working-directory: frontend
         run: npm run build

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { txFilters } from "$lib/filters.svelte";
+import { viewport } from "$lib/phone.svelte";
 import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import BudgetRow from "./BudgetRow.svelte";
@@ -21,34 +22,37 @@ const cat = (extra: Partial<BudgetCategory> = {}): BudgetCategory => ({
 });
 const pay = [{ id: "c1", name: "Visa", kind: "credit" }, { id: "b1", name: "Checking", kind: "checking" }];
 const setup = (c = cat(), extra: Record<string, unknown> = {}) => {
-  const cbs = { onsave: vi.fn(), onchanged: vi.fn() };
+  const cbs = { onchanged: vi.fn() };
   render(BudgetRow, { c, month: "2026-03", pace: 0.5, payAccounts: pay, ...cbs, ...extra });
   return cbs;
 };
 const bar = () => screen.getByRole("img", { name: /of budget used/ });
+const field = (name = "Groceries") => screen.getByRole("button", { name: new RegExp(`^Edit ${name} budget`) });
 
-beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); vi.mocked(toast).mockClear(); });
+beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).mockReset().mockResolvedValue({} as never); vi.mocked(toast.error).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast).mockClear(); });
 
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
     expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["Groceries", "$200"]);
-    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
+    expect(field()).toHaveTextContent("$500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
   });
 
+  it("shows the amount as a field-like button with a pencil, named with its amount and scope", () => {
+    setup(cat(), { budgets: true });
+    expect(field()).toHaveAccessibleName("Edit Groceries budget: $500, usual monthly amount");
+    expect(field()).toHaveClass("border", "border-input", "cursor-pointer");
+    expect(field().querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();   // nothing to type into until it's opened
+  });
+
   it("tightens the amount group on a phone only, leaving the other widths alone", () => {
     setup(cat({ budget: 12000 }), { budgets: true });
-    const input = screen.getByLabelText("Budget for Groceries");
-    expect(input).toHaveClass("w-20", "sm:w-24", "phone:w-[4.25rem]");
-    // An empty box keeps its width: its placeholder ("Expected") doesn't fit in the narrower one.
-    cleanup();
-    setup(cat({ budget: null }), { budgets: true });
-    expect(screen.getByLabelText("Budget for Groceries")).not.toHaveClass("phone:w-[4.25rem]");
-    cleanup();
-    setup(cat({ budget: 12000 }), { budgets: true });
-    const group = screen.getByLabelText("Budget for Groceries").closest("span.ml-auto")!;
+    expect(field()).toHaveClass("h-9", "sm:h-7", "min-w-[5.25rem]", "sm:min-w-24");
+    expect(field()).toHaveTextContent("$12,000");
+    const group = field().closest("span.ml-auto")!;
     expect(group).toHaveClass("gap-1.5", "phone:gap-1");
     expect(group.parentElement).toHaveClass("gap-x-2.5", "phone:gap-x-1.5");
     expect(group.parentElement!.className).not.toMatch(/nowrap/);
@@ -61,7 +65,7 @@ describe("BudgetRow", () => {
     it("has its figures but no bar or pace mark (only its parent has those)", () => {
       setup(produce(), { sub: true, budgets: true });
       expect(screen.getByText("$40")).toBeInTheDocument();
-      expect(screen.getByLabelText("Budget for Produce")).toHaveValue("100");
+      expect(field("Produce")).toHaveTextContent("$100");
       expect(screen.queryByRole("img", { name: /of budget used/ })).not.toBeInTheDocument();
       expect(screen.queryByTitle("Where you'd be at an even pace today")).not.toBeInTheDocument();
       expect(screen.queryByText(/left/)).not.toBeInTheDocument();
@@ -81,7 +85,7 @@ describe("BudgetRow", () => {
     const badge = (container: HTMLElement) => container.querySelector("[data-account-badge]");
 
     it("sits on the emoji as its bank's logo (the shared badge, sized to the emoji), named in its title", () => {
-      const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onsave: vi.fn(), onchanged: vi.fn() });
+      const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Visa");
       expect(badge(container)).toHaveClass("pointer-events-auto");
       expect(badge(container)).toHaveClass("phone:hidden");
@@ -91,7 +95,7 @@ describe("BudgetRow", () => {
 
     it("is the bank's letter without a logo, smaller on a subcategory, and on a row without a budget too", () => {
       const { container } = render(BudgetRow, { c: cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, budget: null, left: null }),
-        sub: true, month: "2026-03", pace: 0.5, payAccounts: pay, account: "b1", onsave: vi.fn(), onchanged: vi.fn() });
+        sub: true, month: "2026-03", pace: 0.5, payAccounts: pay, account: "b1", onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Checking");
       expect(badge(container)).toHaveTextContent("C");
       expect(badge(container)!.firstElementChild).toHaveClass("size-3");
@@ -106,7 +110,7 @@ describe("BudgetRow", () => {
   it("shows a subcategory's emoji too, a little smaller", () => {
     categories.list = [category("Groceries", { icon: "🛒" }), category("Produce", { icon: "🥦", parent: "Groceries" })];
     const { container } = render(BudgetRow, { c: cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1 }), sub: true,
-      month: "2026-03", pace: 0.5, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+      month: "2026-03", pace: 0.5, payAccounts: pay, onchanged: vi.fn() });
     const icon = [...container.querySelectorAll("span[aria-hidden]")].find((el) => el.textContent === "🥦");
     expect(icon).toHaveStyle({ width: "20px" });
   });
@@ -125,10 +129,10 @@ describe("BudgetRow", () => {
   });
 
   it("shows where an even pace would be, but not for a finished or future month", () => {
-    const { unmount } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+    const { unmount } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, onchanged: vi.fn() });
     expect(screen.getByTitle("Where you'd be at an even pace today")).toBeInTheDocument();
     unmount();
-    render(BudgetRow, { c: cat(), month: "2026-03", pace: 1, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+    render(BudgetRow, { c: cat(), month: "2026-03", pace: 1, payAccounts: pay, onchanged: vi.fn() });
     expect(screen.queryByTitle("Where you'd be at an even pace today")).not.toBeInTheDocument();
   });
 
@@ -139,26 +143,18 @@ describe("BudgetRow", () => {
   });
 
   it("says nothing about what's left when nothing is spent yet, and keeps cents a rounding would hide", () => {
-    const { unmount } = render(BudgetRow, { c: cat({ spent: 0, left: 500 }), month: "2026-03", pace: 1, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+    const { unmount } = render(BudgetRow, { c: cat({ spent: 0, left: 500 }), month: "2026-03", pace: 1, payAccounts: pay, onchanged: vi.fn() });
     expect(screen.queryByText(/left/)).not.toBeInTheDocument();
     unmount();
     setup(cat({ spent: 500.3, left: -0.3 }));
     expect(screen.getByText("▲ $0.30 over")).toBeInTheDocument();
   });
 
-  it("has no bar for a category without a budget, just a box to set one", () => {
+  it("has no bar for a category without a budget, just a field to set one", () => {
     setup(cat({ budget: null, left: null }));
     expect(screen.queryByRole("img", { name: /of budget used/ })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Budget for Groceries")).toHaveAttribute("placeholder", "Budget");
-  });
-
-  it("saves the budget when the box changes", async () => {
-    const { onsave } = setup();
-    const box = screen.getByLabelText("Budget for Groceries");
-    await userEvent.clear(box);
-    await userEvent.type(box, "650");
-    await userEvent.tab();
-    expect(onsave).toHaveBeenCalledWith("Groceries", "650");
+    expect(field()).toHaveTextContent("Budget");
+    expect(field()).toHaveAccessibleName("Edit Groceries budget: not set");
   });
 
   it.each(["Groceries", "$200"])("opens the transactions that add up to the spending from %s", async (name) => {
@@ -258,7 +254,7 @@ describe("BudgetRow", () => {
 
     it("asks for what's expected rather than a budget", () => {
       setup(pay({ budget: null, left: null }), { income: true, budgets: true });
-      expect(screen.getByLabelText("Budget for Paycheck")).toHaveAttribute("placeholder", "Expected");
+      expect(field("Paycheck")).toHaveTextContent("Expected");
     });
   });
 
@@ -325,41 +321,336 @@ describe("BudgetRow", () => {
     });
   });
 
-  describe("a month of its own", () => {
-    const toggle = (name: RegExp) => screen.getByRole("button", { name });
+  describe("the budget editor", () => {
+    const own = (v: number) => cat({ budget: v, usual_budget: 500, month_budget: v, left: v - 200 });
+    // jsdom can't lay the popover out, so Floating UI leaves it `visibility: hidden` and Testing Library would find no
+    // names in it: shown here as a browser shows it once placed.
+    const reveal = () => document.querySelectorAll<HTMLElement>("[data-bits-floating-content-wrapper]").forEach((el) => (el.style.visibility = "visible"));
+    const amount = () => screen.getByLabelText("Amount") as HTMLInputElement;
+    const radio = (name: string) => { reveal(); return screen.getByRole("radio", { name }); };
+    const button = (name: string | RegExp) => { reveal(); return screen.getByRole("button", { name }); };
+    const alert = () => { reveal(); return screen.getByRole("alert"); };
+    const editor = () => document.querySelector("[data-budget-editor]");
+    // What was sent to POST /api/budget (other requests, such as the app reloading its state, aren't budget changes).
+    const posts = () => vi.mocked(api).mock.calls.filter(([path, o]) => path === "/api/budget" && (o as { method?: string } | undefined)?.method === "POST")
+      .map((x) => (x[1] as { body: unknown }).body);
+    const open = async (name = "Groceries") => { await userEvent.click(field(name)); reveal(); return amount(); };
+    const retype = async (v: string) => { await userEvent.clear(amount()); if (v) await userEvent.type(amount(), v); };
+    const undoAction = () => {
+      const call = vi.mocked(toast).mock.calls.at(-1)!;
+      return (call[1] as unknown as { action: { onClick: () => Promise<void> } }).action;
+    };
+    // A request the test settles by hand.
+    const deferred = () => {
+      let settle!: { resolve: (v: unknown) => void; reject: (e: Error) => void };
+      vi.mocked(api).mockImplementationOnce(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }) as never);
+      return () => settle;
+    };
+    afterEach(() => { viewport.phone = false; });
 
-    it("switches the box to this month's amount alone, saved for this month only", async () => {
-      const { onsave, onchanged } = setup(cat({ usual_budget: 500 }), { budgets: true });
-      expect(screen.queryByText(/other months/)).not.toBeInTheDocument();
-      const btn = toggle(/A different budget for Groceries in Mar 2026 only/);
-      expect(btn).toHaveAttribute("aria-pressed", "false");
-      expect(btn).toHaveClass("hoverable:opacity-0");
-      await userEvent.click(btn);
-      expect(btn).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByText("Changing Mar 2026 only · $500 other months")).toBeInTheDocument();
-      const box = screen.getByLabelText("Budget for Groceries in Mar 2026");
-      expect(box).toHaveFocus();
-      await userEvent.clear(box);
-      await userEvent.type(box, "800");
-      await userEvent.tab();
-      expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", month: "2026-03", amount: "800" } });
-      expect(toast.success).toHaveBeenCalledWith("Groceries: $800 in Mar 2026 only");
-      expect(onsave).not.toHaveBeenCalled();
-      expect(onchanged).toHaveBeenCalled();
+    it("opens titled for its category, with the amount focused, sending nothing", async () => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      expect(screen.getByRole("dialog", { name: "Edit Groceries budget" })).toBeInTheDocument();
+      expect(amount()).toHaveFocus();
+      expect(amount().value).toBe("500");
+      expect(posts()).toEqual([]);
     });
 
-    it("says when the month has its own amount, and goes back to the usual one", async () => {
-      const { onsave, onchanged } = setup(cat({ budget: 800, usual_budget: 500, month_budget: 800, left: 600 }), { budgets: true });
-      expect(screen.getByText("Mar 2026 only · $500 other months")).toBeInTheDocument();
-      expect(screen.getByLabelText("Budget for Groceries in Mar 2026")).toHaveValue("800");
-      const btn = toggle(/Use the usual \$500 for Groceries in Mar 2026/);
-      expect(btn).toHaveAttribute("aria-pressed", "true");
-      expect(btn).not.toHaveClass("hoverable:opacity-0");
-      await userEvent.click(btn);
-      expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", month: "2026-03", amount: "" } });
+    it("starts on the usual amount when the month has none of its own, and says what that means", async () => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      expect(radio("Usual monthly amount")).toHaveAttribute("aria-checked", "true");
+      expect(radio("This month only")).toHaveAttribute("aria-checked", "false");
+      expect(screen.getByText("Used in months without their own amount.")).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Applies to" })).toBeInTheDocument();
+    });
+
+    it("starts on this month when it has its own amount, and names the month", async () => {
+      setup(own(800), { budgets: true });
+      expect(field()).toHaveAccessibleName("Edit Groceries budget: $800, Mar 2026 only");
+      await open();
+      expect(radio("This month only")).toHaveAttribute("aria-checked", "true");
+      expect(amount().value).toBe("800");
+      expect(screen.getByText("Applies to March 2026 only. Other months keep $500.")).toBeInTheDocument();
+    });
+
+    it("shows each scope's amount when switching, until one is typed, which it then keeps", async () => {
+      setup(own(800), { budgets: true });
+      await open();
+      await userEvent.click(radio("Usual monthly amount"));
+      expect(amount().value).toBe("500");
+      expect(screen.getByText("Used in months without their own amount. March 2026 keeps its own $800.")).toBeInTheDocument();
+      await userEvent.click(radio("This month only"));
+      expect(amount().value).toBe("800");
+      await retype("650");
+      await userEvent.click(radio("Usual monthly amount"));
+      expect(amount().value).toBe("650");
+      expect(posts()).toEqual([]);
+    });
+
+    it("saves the usual amount with the existing payload, and says which amount it was", async () => {
+      const { onchanged } = setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      await retype("650");
+      await userEvent.click(button("Save"));
+      expect(posts()).toEqual([{ category: "Groceries", amount: "650" }]);
+      expect(toast.success).toHaveBeenCalledWith("Groceries: usual amount $650 a month");
+      expect(onchanged).toHaveBeenCalledTimes(1);
+      expect(editor()).toBeNull();
+    });
+
+    it.each(["25", "123.45"])("saves %s from Enter: the 10 step is only the arrow keys' increment, not a rule", async (v) => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      expect(document.querySelector("[data-budget-editor]")).toHaveAttribute("novalidate");
+      await retype(v);
+      await userEvent.keyboard("{Enter}");
+      expect(posts()).toEqual([{ category: "Groceries", amount: v }]);
+      await open();
+      await userEvent.click(radio("This month only"));
+      await retype(v);
+      await userEvent.keyboard("{Enter}");
+      expect(posts()[1]).toEqual({ category: "Groceries", month: "2026-03", amount: v });
+    });
+
+    it("saves this month's amount for the month it was opened on, from Enter too", async () => {
+      const { onchanged } = setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      await userEvent.click(radio("This month only"));
+      expect(screen.getByText("Applies to March 2026 only. Other months keep $500.")).toBeInTheDocument();
+      await retype("800");
+      await userEvent.keyboard("{Enter}");
+      expect(posts()).toEqual([{ category: "Groceries", month: "2026-03", amount: "800" }]);
+      expect(toast.success).toHaveBeenCalledWith("Groceries: $800 in Mar 2026 only");
+      expect(onchanged).toHaveBeenCalledTimes(1);
+    });
+
+    it("says a parent was raised, and for which months", async () => {
+      vi.mocked(api).mockResolvedValueOnce({ ok: true, raised: [{ category: "Food", amount: 900 }] });
+      setup(own(800), { budgets: true });
+      await open();
+      await userEvent.click(radio("Usual monthly amount"));
+      await retype("650");
+      await userEvent.click(button("Save"));
+      expect(toast.success).toHaveBeenLastCalledWith("Groceries: usual amount $650 a month · Food usual amount raised to $900 · Mar 2026 keeps its own $800");
+      vi.mocked(api).mockResolvedValueOnce({ ok: true, raised: [{ category: "Food", amount: 950 }] });
+      await open();
+      await retype("850");
+      await userEvent.click(button("Save"));
+      expect(posts()[1]).toEqual({ category: "Groceries", month: "2026-03", amount: "850" });
+      expect(toast.success).toHaveBeenLastCalledWith("Groceries: $850 in Mar 2026 only · Food raised to $950 in Mar 2026 only");
+    });
+
+    it.each([["Cancel", () => userEvent.click(button("Cancel"))], ["Escape", () => userEvent.keyboard("{Escape}")]])(
+      "%s sends nothing", async (_, close) => {
+        const { onchanged } = setup(own(800), { budgets: true });
+        await open();
+        await userEvent.click(radio("Usual monthly amount"));
+        await retype("1");
+        await close();
+        expect(editor()).toBeNull();
+        expect(posts()).toEqual([]);
+        expect(onchanged).not.toHaveBeenCalled();
+        // Opened again, it starts from what's saved, not what was typed.
+        await open();
+        expect(amount().value).toBe("800");
+        expect(radio("This month only")).toHaveAttribute("aria-checked", "true");
+      });
+
+    it("keeps 0 as this month's own amount, not the same as an empty box", async () => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      await userEvent.click(radio("This month only"));
+      await retype("0");
+      expect(screen.getByText("$0 budgets nothing in March 2026; other months keep $500.")).toBeInTheDocument();
+      await userEvent.click(button("Save"));
+      expect(posts()).toEqual([{ category: "Groceries", month: "2026-03", amount: "0" }]);
+      expect(toast.success).toHaveBeenCalledWith("Groceries: $0 in Mar 2026 only");
+      expect(toast).not.toHaveBeenCalled();   // not a reset: no Undo toast
+    });
+
+    it("takes the month back to the usual amount from an empty box, and Undo puts back exactly 0", async () => {
+      const { onchanged } = setup(own(0), { budgets: true });
+      await open();
+      expect(amount().value).toBe("0");
+      await retype("");
+      expect(screen.getByText("No amount takes March 2026 back to the usual $500.")).toBeInTheDocument();
+      await userEvent.click(button("Save"));
       expect(toast).toHaveBeenCalledWith("Groceries is back to $500 in Mar 2026", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
-      expect(onsave).not.toHaveBeenCalled();
-      expect(onchanged).toHaveBeenCalled();
+      expect(editor()).toBeNull();
+      await undoAction().onClick();
+      expect(posts()).toEqual([
+        { category: "Groceries", month: "2026-03", amount: "" },
+        { category: "Groceries", month: "2026-03", amount: "0" },
+      ]);
+      expect(onchanged).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([["", ""], ["0", "0"]])("says an amount of %j as the usual one removes the budget, and sends it as before", async (typed, sent) => {
+      setup(own(800), { budgets: true });
+      await open();
+      await userEvent.click(radio("Usual monthly amount"));
+      await retype(typed);
+      expect(screen.getByText("No amount removes the Groceries budget from every month, months with their own amount included.")).toBeInTheDocument();
+      await userEvent.click(button("Save"));
+      expect(posts()).toEqual([{ category: "Groceries", amount: sent }]);
+      expect(toast.success).toHaveBeenCalledWith("Groceries budget removed");
+    });
+
+    it("won't save an empty box where there's nothing to clear", async () => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      await userEvent.click(radio("This month only"));
+      await retype("");
+      expect(screen.getByText("Enter an amount for March 2026.")).toBeInTheDocument();
+      expect(button("Save")).toBeDisabled();
+      await userEvent.keyboard("{Enter}");
+      expect(posts()).toEqual([]);
+    });
+
+    it("sets a first budget as the usual amount, without offering a month of its own", async () => {
+      setup(cat({ budget: null, left: null }), { budgets: true });
+      await open();
+      expect(amount().value).toBe("");
+      expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+      expect(screen.getByText(/usual monthly amount/)).toBeInTheDocument();
+      expect(button("Save")).toBeDisabled();
+      await retype("300");
+      await userEvent.click(button("Save"));
+      expect(posts()).toEqual([{ category: "Groceries", amount: "300" }]);
+    });
+
+    it("offers no month of its own outside the Budgets card", async () => {
+      setup(cat());
+      await open();
+      expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    });
+
+    it("keeps the editor open with the error when saving fails, and saves on a retry", async () => {
+      vi.mocked(api).mockRejectedValueOnce(new Error("Couldn’t reach the server"));
+      const { onchanged } = setup(cat({ usual_budget: 500 }), { budgets: true });
+      await open();
+      await retype("650");
+      await userEvent.click(button("Save"));
+      expect(alert()).toHaveTextContent("Couldn’t reach the server");
+      expect(editor()).not.toBeNull();
+      expect(amount().value).toBe("650");
+      expect(radio("Usual monthly amount")).toHaveAttribute("aria-checked", "true");
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(onchanged).not.toHaveBeenCalled();
+      await userEvent.click(button("Save"));
+      expect(posts()).toEqual([{ category: "Groceries", amount: "650" }, { category: "Groceries", amount: "650" }]);
+      expect(editor()).toBeNull();
+      expect(onchanged).toHaveBeenCalledTimes(1);
+    });
+
+    it("resets the month to usual from the editor, and Undo puts back exactly what it was", async () => {
+      setup(own(1234567.89), { budgets: true });
+      await open();
+      await userEvent.click(button(/^Reset this month to usual/));
+      expect(editor()).toBeNull();
+      await undoAction().onClick();
+      expect(posts()).toEqual([
+        { category: "Groceries", month: "2026-03", amount: "" },
+        { category: "Groceries", month: "2026-03", amount: "1234567.89" },
+      ]);
+    });
+
+    it("keeps the editor open with the error when a reset from it fails", async () => {
+      vi.mocked(api).mockRejectedValueOnce(new Error("Couldn’t reach the server"));
+      vi.mocked(toast).mockClear();
+      setup(own(800), { budgets: true });
+      await open();
+      await userEvent.click(button(/^Reset this month to usual/));
+      expect(alert()).toHaveTextContent("Couldn’t reach the server");
+      expect(editor()).not.toBeNull();
+      expect(toast).not.toHaveBeenCalled();
+    });
+
+    it("can't be opened, or saved, while the page's figures may be out of date", async () => {
+      const props = { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onchanged: vi.fn() };
+      const { rerender } = render(BudgetRow, { ...props, locked: true });
+      expect(field()).toBeDisabled();
+      await rerender({ ...props, locked: false });
+      await open();
+      await retype("650");
+      await rerender({ ...props, locked: true });
+      expect(button("Save")).toBeDisabled();
+      expect(screen.getByText("Saving is off until the page’s figures are up to date.")).toBeInTheDocument();
+      await userEvent.keyboard("{Enter}");
+      expect(posts()).toEqual([]);
+    });
+
+    describe("when another month comes on screen", () => {
+      const props = { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onchanged: vi.fn() };
+
+      it("closes the editor without sending anything", async () => {
+        const { rerender } = render(BudgetRow, props);
+        await open();
+        await userEvent.click(radio("This month only"));
+        await retype("800");
+        await rerender({ ...props, month: "2026-04" });
+        expect(editor()).toBeNull();
+        expect(posts()).toEqual([]);
+      });
+
+      it("finishes a save already sent for the month it was opened on, and says that month", async () => {
+        const settle = deferred();
+        const { rerender } = render(BudgetRow, props);
+        await open();
+        await userEvent.click(radio("This month only"));
+        await retype("800");
+        await userEvent.click(button("Save"));
+        expect(button("Saving…")).toBeDisabled();
+        await rerender({ ...props, month: "2026-04" });
+        settle().resolve({ ok: true, raised: [] });
+        await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Groceries: $800 in Mar 2026 only"));
+        expect(posts()).toEqual([{ category: "Groceries", month: "2026-03", amount: "800" }]);
+        expect(editor()).toBeNull();
+      });
+
+      it("says a save that failed meanwhile in a toast, closing the editor", async () => {
+        const settle = deferred();
+        const { rerender } = render(BudgetRow, props);
+        await open();
+        await retype("650");
+        await userEvent.click(button("Save"));
+        await rerender({ ...props, month: "2026-04" });
+        settle().reject(new Error("Couldn’t reach the server"));
+        await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn’t reach the server"));
+        expect(editor()).toBeNull();
+        expect(posts()).toEqual([{ category: "Groceries", amount: "650" }]);
+      });
+    });
+
+    it("is a sheet from the bottom on a phone, with the amount focused", async () => {
+      viewport.phone = true;
+      setup(own(800), { budgets: true });
+      await open();
+      const sheet = screen.getByRole("dialog", { name: "Edit Groceries budget" });
+      expect(sheet).toHaveAttribute("data-budget-sheet");
+      expect(amount()).toHaveFocus();
+      expect(amount()).toHaveClass("text-base", "h-11");
+      expect(radio("This month only")).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(button("Cancel"));
+      expect(editor()).toBeNull();
+      expect(posts()).toEqual([]);
+    });
+  });
+
+  describe("a month of its own", () => {
+    it("says so under the row, with the usual amount the other months keep", () => {
+      setup(cat({ budget: 800, usual_budget: 500, month_budget: 800, left: 600 }), { budgets: true });
+      expect(screen.getByText("Mar 2026 only · $500 other months")).toBeInTheDocument();
+      expect(field()).toHaveTextContent("$800");
+      expect(field().querySelector(".text-primary")).not.toBeNull();
+    });
+
+    it("isn't noted without one", () => {
+      setup(cat({ usual_budget: 500 }), { budgets: true });
+      expect(screen.queryByText(/other months/)).not.toBeInTheDocument();
     });
 
     describe("Reset to usual", () => {
@@ -373,12 +664,12 @@ describe("BudgetRow", () => {
       const posts = () => vi.mocked(api).mock.calls.map((x) => (x[1] as { body: unknown }).body);
 
       it("is a visible button beside the note, only while the month has its own amount", () => {
-        const { unmount } = render(BudgetRow, { c: own(800), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() });
+        const { unmount } = render(BudgetRow, { c: own(800), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onchanged: vi.fn() });
         expect(reset()).toBeVisible();
         expect(reset().className).not.toMatch(/hoverable|opacity-0|group-hover/);
         expect(reset().closest("[data-month-note]")).toHaveTextContent("Mar 2026 only · $500 other months");
         unmount();
-        render(BudgetRow, { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() });
+        render(BudgetRow, { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onchanged: vi.fn() });
         expect(screen.queryByRole("button", { name: /^Reset to usual/ })).not.toBeInTheDocument();
       });
 
@@ -404,7 +695,7 @@ describe("BudgetRow", () => {
       });
 
       it("Undo restores the month it was taken from, after another is on screen", async () => {
-        const props = { c: own(0.1), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() };
+        const props = { c: own(0.1), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onchanged: vi.fn() };
         const { rerender } = render(BudgetRow, props);
         await userEvent.click(reset());
         await rerender({ ...props, c: cat({ usual_budget: 500 }), month: "2026-04" });
@@ -419,7 +710,7 @@ describe("BudgetRow", () => {
         await userEvent.click(reset());
         expect(toast.error).toHaveBeenCalledWith("Couldn’t reach the server");
         expect(toast).not.toHaveBeenCalled();   // no "back to the usual" message, no Undo for something that didn't happen
-        expect(screen.getByLabelText("Budget for Groceries in Mar 2026")).toHaveValue("800");
+        expect(field()).toHaveTextContent("$800");
         expect(screen.getByText(/Mar 2026 only/)).toBeInTheDocument();
         expect(reset()).toBeEnabled();   // can be tried again
         expect(onchanged).toHaveBeenCalledTimes(1);   // reloads, so the row shows what's saved
@@ -432,42 +723,6 @@ describe("BudgetRow", () => {
         await undoAction().onClick();
         expect(toast.error).toHaveBeenCalledWith("Set a budget for this category first");
       });
-    });
-
-    it("reloads after a failed save, so the box shows what's saved", async () => {
-      vi.mocked(api).mockRejectedValueOnce(new Error("Set a budget for this category first"));
-      const { onchanged } = setup(cat({ budget: 800, usual_budget: 500, month_budget: 800 }), { budgets: true });
-      await userEvent.click(toggle(/Use the usual/));
-      expect(toast.error).toHaveBeenCalledWith("Set a budget for this category first");
-      expect(onchanged).toHaveBeenCalled();
-    });
-
-    it("is for the month it was switched on in, not the next one shown", async () => {
-      const props = { c: cat({ usual_budget: 500 }), month: "2026-03", pace: 0.5, payAccounts: pay, budgets: true, onsave: vi.fn(), onchanged: vi.fn() };
-      const { rerender } = render(BudgetRow, props);
-      await userEvent.click(toggle(/A different budget for Groceries in Mar 2026 only/));
-      expect(screen.getByLabelText("Budget for Groceries in Mar 2026")).toBeInTheDocument();
-      await rerender({ ...props, month: "2026-04" });
-      expect(screen.getByLabelText("Budget for Groceries")).toBeInTheDocument();
-      expect(toggle(/A different budget for Groceries in Apr 2026 only/)).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("leaves the usual amount to the box otherwise", async () => {
-      const { onsave } = setup(cat({ usual_budget: 500 }), { budgets: true });
-      const box = screen.getByLabelText("Budget for Groceries");
-      await userEvent.clear(box);
-      await userEvent.type(box, "550");
-      await userEvent.tab();
-      expect(onsave).toHaveBeenCalledWith("Groceries", "550");
-      expect(api).not.toHaveBeenCalled();
-    });
-
-    it("isn't offered without a budget, nor outside the Budgets card", () => {
-      setup(cat({ budget: null, left: null }), { budgets: true });
-      expect(screen.queryByRole("button", { name: /A different budget/ })).not.toBeInTheDocument();
-      document.body.innerHTML = "";
-      setup(cat());
-      expect(screen.queryByRole("button", { name: /A different budget/ })).not.toBeInTheDocument();
     });
   });
 });
