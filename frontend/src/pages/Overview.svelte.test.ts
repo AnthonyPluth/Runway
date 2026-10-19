@@ -345,6 +345,7 @@ describe("Overview on a phone", () => {
     viewport.phone = true;
     serve(() => fc());
     render(Overview);
+    await userEvent.click(await screen.findByRole("button", { name: "Review your forecast" }));
     expect(await screen.findByRole("heading", { name: "Review your forecast" })).toBeInTheDocument();
     expect(screen.getByText("No income scheduled")).toBeInTheDocument();
     expect(screen.getByText("Rent, Oct 1 · $100.00")).toBeInTheDocument();
