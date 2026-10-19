@@ -224,3 +224,7 @@ def seed_investments(conn, today: date) -> None:
         conn.execute(insert(Price), [{"ticker": ticker, "date": d.isoformat(), "close": c, "adjclose": c} for d, c in closes])
         conn.execute(insert(PriceMeta).values(ticker=ticker, fetched_at=f"{today.isoformat()}T00:00:00", ok=1, splits="[]"))
     conn.execute(update(InvAccount).where(InvAccount.id == "demo-brokerage").values(balance=round(total, 2)))
+    # What a Plaid investments sync also writes: the account Net worth counts (see providers/plaid.py's match_investment).
+    conn.execute(insert(Account).values(id="pl:demo-brokerage", name="Sample Brokerage", org="Sample Brokerage Co", kind="investment",
+                                        balance=round(total, 2), balance_date=today.isoformat(), provider="plaid",
+                                        provider_since=today.isoformat()))
