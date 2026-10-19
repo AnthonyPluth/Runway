@@ -131,7 +131,7 @@
   <div class="group/family px-4 py-1">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
       <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} {income} {pace} payAccounts={bm.pay_accounts} account={income ? null : accountOf(c, bm)}
-        {locked} onsave={saveBudget} onchanged={refresh} />
+        {locked} onchanged={refresh} />
     {/each}
   </div>
 {/snippet}
