@@ -13,7 +13,7 @@ dependencies = [
     "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
     "holidays (>=0.106,<1.0)",             # bank holidays, for when payments actually land
     "amazon-orders (>=4.8.1,<5.0)",       # reading Amazon order pages your browser fetched (see extension/)
-    "sentry-sdk (>=2.30,<3.0)",         # error reports to Sentry (only when SENTRY_DSN is set; see runway/monitoring.py)
+    "sentry-sdk (>=2.72.0,<3.0)",         # error reports to Sentry (only when SENTRY_DSN is set; see runway/monitoring.py)
     "websocket-client (>=1.8,<2.0)",     # live stock prices from Finnhub (only when a key is set; see runway/providers/finnhub.py)
 ]
 
@@ -23,7 +23,7 @@ package-mode = false   # an application, not a library: `poetry install` just in
 # The tools CI runs (docker.yml, security.yml) and `make check` runs, pinned so every run uses the same versions;
 # Dependabot updates them here. `poetry install` adds them; the Docker image installs only the main dependencies.
 [tool.poetry.group.dev.dependencies]
-ruff = "0.16.10"
+ruff = "0.17.0"
 mypy = "2.4.0"
 types-python-dateutil = "2.9.0.20260807"
 coverage = "7.16.2"
