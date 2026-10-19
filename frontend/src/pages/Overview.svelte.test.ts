@@ -165,7 +165,9 @@ describe("Overview", () => {
     serve(() => fc({ budget: { monthly: 0, used: [],
       skipped: [{ category: "Groceries", reason: "its card isn't paid from a forecast account" }] } }));
     render(Overview);
-    expect(await screen.findByTitle(/Left out: Groceries, whose card isn't paid from a forecast account\./)).toBeInTheDocument();
+    // Readable content, not a hover tooltip.
+    expect(await screen.findByText("Card isn't paid from a forecast account")).toBeInTheDocument();
+    expect(screen.getByText(/Groceries\./)).toBeInTheDocument();
   });
 
   it("rounds a low the balance stays above down, and says a negative low to the cent", async () => {

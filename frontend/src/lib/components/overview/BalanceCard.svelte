@@ -7,6 +7,7 @@
   import { cn } from "$lib/utils";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import ForecastChart from "./ForecastChart.svelte";
+  import ForecastIncluded from "./ForecastIncluded.svelte";
   import ForecastSettings from "./ForecastSettings.svelte";
 
   // The Overview's first card: which cash the forecast shows (the account switcher is its label), whether it holds up
@@ -20,21 +21,6 @@
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
   const lowWhen = (f: Overview) => (f.low.date === f.today ? "today" : relDay(f.low.date, f.today));
-
-  // "Left out: Mortgage and Utilities, which recurring items already cover; Medical, whose account isn't in the forecast."
-  function budgetSkipped(skipped: { category: string; reason: string }[]): string {
-    if (!skipped.length) return "";
-    const list = (xs: string[]) => (xs.length < 3 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
-    const by: Record<string, string[]> = {};
-    for (const k of skipped) (by[k.reason] ||= []).push(k.category);
-    return " Left out: " + Object.entries(by).map(([reason, cats]) => {
-      const why = reason.startsWith("a recurring") ? (cats.length > 1 ? "which recurring items already cover" : "which a recurring item already covers")
-        : reason.startsWith("its account") ? (cats.length > 1 ? "whose accounts aren't in the forecast" : "whose account isn't in the forecast")
-        : reason.startsWith("its card isn't") ? (cats.length > 1 ? "whose cards aren't paid from a forecast account" : "whose card isn't paid from a forecast account")
-        : reason.startsWith("its card's statement") ? (cats.length > 1 ? "whose cards' statements are out of date" : "whose card's statement is out of date") : reason;
-      return `${list(cats)}, ${why}`;
-    }).join("; ") + ".";
-  }
 
   // "Balance as of today, 7:02 AM, including −$375.00 pending": the balance is the bank's plus what's pending.
   function balanceNote(asOf: string | undefined, pending: number): string {
@@ -107,9 +93,10 @@
     <summary class="flex cursor-pointer list-none items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
       <Settings2 class="size-4" aria-hidden="true" />Forecast details
     </summary>
-    <p class="mt-2 text-xs text-muted-foreground" title={fc.budget ? budgetSkipped(fc.budget.skipped).trim() || undefined : undefined}>
+    <p class="mt-2 text-xs text-muted-foreground">
       {#if fc.budget?.used.length}Recurring bills and income, plus {fmt0(fc.budget.monthly)} a month of budgeted spending.
       {:else}Recurring bills and income only: <a class="font-medium text-foreground underline underline-offset-4" href="#budget">set budgets</a> to include everyday spending.{/if}
     </p>
+    <ForecastIncluded budget={fc.budget} />
   </details>
 </section>
