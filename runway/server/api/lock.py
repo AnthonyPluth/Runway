@@ -87,7 +87,7 @@ def api_lock_off(conn, _q, _b) -> LockStatus:
 
 def api_lock_key_share(conn, _q, _b) -> LockKeyShare:
     """The device's cache key share (applock.key_share): sent as no-store JSON like every API reply, and never logged
-    (the request log and Sentry carry the route and status only). Refused with 403 without an unlock just before it (or
+    (the request log carries the path and status only). Refused with 403 without an unlock just before it (or
     a second time for one), 423 when locked meanwhile, 429 when asked too often, 400 when the lock isn't on."""
     key = _key()
     try:

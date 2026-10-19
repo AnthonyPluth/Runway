@@ -14,24 +14,16 @@ import time
 import unittest
 from unittest import mock
 
-import sentry_sdk
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import insert, select, update
 
-from runway import applock, monitoring
+from runway import applock
 from runway.server import mcp_access, mcp_http, mcp_server
 from runway.storage import backup, db, secretbox
 from runway.storage.models import AppLock, AuthSession, User
 from tests.shared import ServerCase, fetch, own_database
-from tests.test_monitoring import start as start_sentry
 from tests.webauthn_support import OIDC_ENV, ORIGIN, RP_ID, Authenticator, b64
-
-
-def stop_sentry():
-    sentry_sdk.get_client().close()
-    sentry_sdk.init(dsn=None)
-    monitoring._enabled = False
 
 
 class Checks(unittest.TestCase):
@@ -434,9 +426,7 @@ class KeyShare(SignedIn):
         with mock.patch.object(applock, "SHARE_LIMIT_WINDOW", 0):
             self.assertEqual(self.share()[0], 200)                        # the window over: the check still holds
 
-    def test_never_logged_or_reported(self):
-        transport = start_sentry()
-        self.addCleanup(stop_sentry)
+    def test_never_logged(self):
         out, err = io.StringIO(), io.StringIO()
         a = Authenticator()
         made = []
@@ -457,16 +447,14 @@ class KeyShare(SignedIn):
             self.unlock(a)
             with mock.patch.object(applock.secretbox, "encrypt", side_effect=encrypt_fails):
                 status, failed = self.share()
-            sentry_sdk.flush()
         self.assertEqual(status, 500)
         self.assertIn("reference", failed["error"])
-        self.assertTrue(transport.events)                                 # the failure was reported...
-        sent = json.dumps([transport.events, transport.items])
-        self.assertIn("/api/lock/key-share", out.getvalue())              # ...and the request logged...
+        self.assertIn("RuntimeError", err.getvalue())                     # the failure was logged...
+        self.assertIn("/api/lock/key-share", out.getvalue())              # ...and the request...
         for secret in (got["share"], made[0]):
-            for where, text in (("stdout", out.getvalue()), ("stderr", err.getvalue()), ("Sentry", sent)):
+            for where, text in (("stdout", out.getvalue()), ("stderr", err.getvalue())):
                 self.assertNotIn(secret, text, where)                     # ...without the share
-        self.assertNotIn(secretbox.PREFIX, out.getvalue() + err.getvalue() + sent)
+        self.assertNotIn(secretbox.PREFIX, out.getvalue() + err.getvalue())
 
     # Every way the device's row ends takes the share along (AGENTS.md, access that outlives the person).
 
