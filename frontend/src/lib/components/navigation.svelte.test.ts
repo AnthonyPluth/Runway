@@ -262,9 +262,11 @@ describe("MobileNav", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(within(bar).getByRole("link", { name: "Transactions" })).toHaveClass("text-[#b9bec7]");
-    expect(within(bar).getByRole("button", { name: /More/ })).toHaveClass("text-[#b9bec7]");
+    expect(within(bar).getByRole("link", { name: "Transactions" })).toHaveClass("text-[var(--nav-inactive)]");
+    expect(within(bar).getByRole("button", { name: /More/ })).toHaveClass("text-[var(--nav-inactive)]");
     expect(within(bar).getByRole("link", { name: "Overview" })).toHaveClass("bg-foreground/12", "text-foreground");
+    // The colour is set once, in app.css: #b9bec7 in the dark theme (the only one the app shows), which measures 4.5:1 or better over the glass.
+    expect(readFileSync(resolve(__dirname, "../../app.css"), "utf8")).toMatch(/\.dark \{[^}]*--nav-inactive: #b9bec7;/s);
   });
 
   it("is the height app.css calls --tabbar-h, which the page padding and the toasts are measured from", () => {
