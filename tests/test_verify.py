@@ -104,6 +104,51 @@ class RunTests(unittest.TestCase):
             self.assertEqual(verify.run([]), 2)
         self.assertIn("npm ci", out.call_args.args[0])
 
+    def test_without_libfaketime_verify_exits_non_zero_with_the_install_line(self):
+        with mock.patch("os.path.isdir", return_value=True), mock.patch("os.path.isfile", return_value=True), \
+                mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value=None), \
+                mock.patch("tempfile.mkdtemp") as made, mock.patch("builtins.print") as out:
+            self.assertEqual(verify.run([]), 2)
+        message = out.call_args.args[0]
+        self.assertIn("libfaketime", message)
+        self.assertIn("sudo apt-get install -y libfaketime", message)
+        self.assertIn("Linux", message)
+        made.assert_not_called()   # nothing was started
+
+
+class FrozenClockTests(unittest.TestCase):
+    def test_libfaketime_is_found_on_linux_only(self):
+        found = verify.find_libfaketime(exists=lambda p: p == "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1", platform="linux")
+        self.assertEqual(found, "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1")
+        self.assertIsNone(verify.find_libfaketime(exists=lambda p: True, platform="darwin"))
+        self.assertIsNone(verify.find_libfaketime(exists=lambda p: False, platform="linux"))
+
+    def test_the_server_and_seed_clock_is_stopped_at_the_frozen_day(self):
+        env = verify.frozen_env({"PATH": "/bin"}, "/lib/libfaketime.so.1")
+        self.assertEqual(env["LD_PRELOAD"], "/lib/libfaketime.so.1")
+        self.assertEqual(env["FAKETIME"], f"{verify.FROZEN_DAY} 12:00:00")
+        self.assertEqual(env["PATH"], "/bin")
+
+    def test_the_demo_data_is_built_on_the_frozen_day_whatever_day_it_runs(self):
+        lib = verify.find_libfaketime()
+        if not lib:
+            self.skipTest("libfaketime isn't installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run([sys.executable, "-c", "import datetime; print(datetime.date.today())"],
+                                  env=verify.frozen_env(verify.clean_env(tmp), lib), capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.stdout.strip(), verify.FROZEN_DAY)
+
+    def test_the_browser_is_told_the_same_day(self):
+        with open(os.path.join(verify.ROOT, "frontend", "verify", "verify.mjs")) as f:
+            self.assertIn("--day", f.read())
+        with mock.patch("os.path.isdir", return_value=True), mock.patch("os.path.isfile", return_value=True), \
+                mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout="", stderr="")) as ran:
+            verify.run([])
+        self.assertEqual(ran.call_args.kwargs["env"]["FAKETIME"], f"{verify.FROZEN_DAY} 12:00:00")   # the seed ran frozen
+
 
 if __name__ == "__main__":
     unittest.main()
