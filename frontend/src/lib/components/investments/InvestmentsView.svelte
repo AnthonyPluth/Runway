@@ -7,8 +7,6 @@
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
-  import ValuationDates from "$lib/components/ValuationDates.svelte";
-  import { investmentDates } from "$lib/valuationDates";
   import WorthALook from "$lib/components/investments/WorthALook.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
@@ -121,14 +119,6 @@
     return new Date(yy, mm - 1, 1).toLocaleDateString("en-US", { month: "short" }) + (mm === 1 ? ` ${String(yy).slice(2)}` : "");
   }) ?? []);
 
-  // The "Valuation dates" sheet explains the total from the accounts list; "Show" takes you to that list.
-  const dates = $derived(d && status ? investmentDates(d, status, live) : null);
-  // With every account hidden the list isn't on the page: go to where they are managed instead.
-  const showAccounts = () => {
-    const list = document.getElementById("inv-accounts");
-    if (list) list.scrollIntoView({ behavior: "smooth", block: "start" });
-    else location.hash = "#setup/accounts";
-  };
   function setPeriod(p: string) { void load(p); }
   // "2 holdings need a cost basis": sort those to the top and go to them.
   async function showMissing(e: MouseEvent) {
@@ -172,9 +162,8 @@
     </Alert.Root>
   {/each}
 
-  <section class="mb-6 grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 md:grid-cols-[1fr_auto_auto]" data-testid="headline">
-    <p class="text-sm text-muted-foreground md:col-start-1 md:row-start-1 md:self-center">Total value · {plural(accountCount, "account")}</p>
-    {#if dates}<div class="justify-self-end md:col-start-3 md:row-start-1 md:self-center"><ValuationDates title="total value" total={fmt(d.total)} model={dates} listName="the accounts" onshow={showAccounts} /></div>{/if}
+  <section class="mb-6 grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1" data-testid="headline">
+    <p class="text-sm text-muted-foreground md:col-start-1 md:row-start-1">Total value · {plural(accountCount, "account")}</p>
     <p class="col-span-full text-4xl leading-tight font-bold tracking-[-0.03em] tabular-nums break-words md:text-5xl" data-testid="headline-total">{totalParts.main}<span class="text-muted-foreground">{totalParts.cents}</span></p>
     <div class="col-span-full mt-2 flex flex-wrap gap-2 text-sm tabular-nums">
       {#if perf.gain != null || perf.return != null}
@@ -187,7 +176,7 @@
         <span class={cn("inline-flex items-center rounded-full bg-muted px-2.5 py-1", pts ? gainCls(pts) : "text-muted-foreground")} data-testid="vs-bench-chip">{vsBench}</span>
       {/if}
     </div>
-    <span class={cn("col-span-full mt-2 inline-flex items-center gap-1.5 justify-self-start md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:self-center rounded-full border border-[var(--edge)] bg-card px-3 py-1 text-xs", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
+    <span class={cn("col-span-full mt-2 inline-flex items-center gap-1.5 justify-self-start rounded-full border border-[var(--edge)] bg-card px-3 py-1 text-xs md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:justify-self-end", live?.market === "open" ? "text-foreground/80" : !live && syncStale ? "text-warning" : "text-muted-foreground")} role="status"
       title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined} data-testid="holdings-updated">
       {#if !live}Holdings updated {synced}
       {:else if live.market === "open"}<LiveDot /> Live prices
