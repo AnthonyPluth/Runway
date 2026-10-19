@@ -19,8 +19,10 @@
   // when the transaction leaves `items`.
   // On a phone it starts as one line, "N to review" with Review next and See all; Review next opens the card as it is
   // (`open`, bound by the page so it survives reloads).
-  let { items, total, rows, onsubmit, onmore, open = $bindable(false) }: {
+  let { items, total, rows, onsubmit, onmore, open = $bindable(false), barShown = $bindable(false) }: {
     open?: boolean;
+    /** True while the sticky bar is on screen: the page leaves `--review-bar-h` of room at its end for it. */
+    barShown?: boolean;
     items: Tx[]; total: number; rows: Tx[]; onsubmit: (t: Tx, category: string) => Promise<boolean>;
     /** Adds the next batch of the queue to `items` (there are more than are loaded). */
     onmore?: () => Promise<void>;
@@ -34,6 +36,8 @@
   // Skip and Accept in reach, with the card's own handlers. It goes when the card is back on screen.
   let top = $state<HTMLElement>();
   let inView = $state(true);
+  const bar = $derived(!!t && viewport.phone && !inView);
+  $effect(() => { barShown = bar; return () => { barShown = false; }; });
   $effect(() => {
     if (!top || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver((e) => { const last = e.at(-1); if (last) inView = last.isIntersecting; });
@@ -107,9 +111,9 @@
   </section>
 {/if}
 </div>
-{#if t && viewport.phone && !inView}
+{#if bar}
   <div data-review-bar role="group" aria-label="To review"
-    class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 flex items-center gap-3 border-t bg-popover px-4 py-2 supports-[backdrop-filter]:bg-popover/60 supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 desktop:hidden">
+    class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 box-border flex h-[var(--review-bar-h)] items-center gap-3 border-t bg-popover px-4supports-[backdrop-filter]:bg-popover/60 supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 desktop:hidden">
     <p class="mr-auto text-[13px] font-semibold tracking-wide text-muted-foreground uppercase tabular-nums">{(at % items.length) + 1} of {Math.max(total, items.length)}</p>
     <Button variant="outline" class="h-11 min-w-24" disabled={busy || items.length < 2} onclick={skip}>Skip</Button>
     <Button class="h-11 min-w-24" disabled={busy || !chosen} onclick={accept}>Accept</Button>

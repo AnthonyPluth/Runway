@@ -190,8 +190,10 @@ describe("Transactions on a phone: the review bar", () => {
     const b = within(bar()!);
     expect(b.getByText("1 of 1")).toBeInTheDocument();
     expect(b.getByRole("button", { name: "Skip" })).toBeDisabled();
+    expect(document.querySelectorAll("[data-review-bar-clearance]")).toHaveLength(1);
     scrollCard(true);
     await waitFor(() => expect(bar()).toBeNull());
+    expect(document.querySelector("[data-review-bar-clearance]")).toBeNull();
     scrollCard(false);
     await waitFor(() => expect(bar()).not.toBeNull());
     await userEvent.click(within(bar()!).getByRole("button", { name: "Accept" }));

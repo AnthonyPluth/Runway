@@ -95,6 +95,7 @@
   // On a phone: the filters behind one button, the review card behind a summary line. Both stay as the person left them.
   let filtersOpen = $state(false);
   let reviewOpen = $state(false);
+  let barShown = $state(false);   // the sticky review bar is up (ReviewCard): leave it room at the end of the page
   // How many of the secondary filters are on (the search and the primary chips aren't counted: they stay in view).
   const filterCount = $derived((review && txs.f.account ? 1 : 0) + (txs.f.category ? 1 : 0) + (txs.f.from || txs.f.to ? 1 : 0) + (txs.f.kind ? 1 : 0) + (txs.f.min || txs.f.max ? 1 : 0));
 
@@ -359,7 +360,7 @@
 
   {#if review}<ReviewBar {rv} />{/if}
   {#if !review && queue.length}
-    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} bind:open={reviewOpen} onsubmit={decideCard} onmore={moreQueue} />
+    <ReviewCard items={queue} total={queueTotal} rows={txs.list?.items ?? []} bind:open={reviewOpen} bind:barShown onsubmit={decideCard} onmore={moreQueue} />
   {/if}
 
   {#if !review && txs.list}
@@ -432,6 +433,9 @@
   {/if}
 {/if}
 {/if}
+
+<!-- While the review bar sticks above the tab bar (phone), room for it at the end, so the last row can scroll clear of it. -->
+{#if barShown}<div class="h-[var(--review-bar-h)]" data-review-bar-clearance aria-hidden="true"></div>{/if}
 
 <svelte:window onkeydown={rv.onkey} />
 
