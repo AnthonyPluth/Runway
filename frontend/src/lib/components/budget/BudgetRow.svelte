@@ -81,7 +81,9 @@
 
   const uid = $props.id();
   const title = $derived(`Edit ${c.name} budget`);
-  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : "not set"}`
+  // Income with nothing expected set reads "$3,150 · Expected —", the dash in the same pill a budget row uses for an unset budget.
+  const noExpected = $derived(income && !sub && c.budget == null);
+  const fieldName = $derived(noExpected ? "Set expected income" : `${title}: ${c.budget != null ? money(c.budget) : "not set"}`
     + (c.budget == null ? "" : canMonth && ownMonth ? `, ${monthName} only` : ", usual monthly amount"));
   const fieldCls = "inline-flex h-9 min-w-[5.25rem] cursor-pointer items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50 sm:h-7 sm:min-w-24 dark:bg-input/30";
 
@@ -216,7 +218,8 @@
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 phone:gap-1 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} class={cn("hover:underline", sub && warnOver && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
         title={subNote || undefined}>{money(c.spent)}{#if subNote}<span class="sr-only">{` (${subNote})`}</span>{/if}</a>
-      {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
+      {#if noExpected}<span class="text-muted-foreground" aria-hidden="true">·</span><em class="text-muted-foreground">Expected</em>
+      {:else if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <!-- The amount looks like a field, with a pencil, so it reads as something to change; it opens the editor. Its name
            says the amount and which months it is. -->
       {#if viewport.phone}
@@ -310,7 +313,7 @@
 
 {#snippet field()}
   <span class={cn("min-w-0 truncate", c.budget == null ? "text-primary" : ownMonth && canMonth && "text-primary")}>
-    {c.budget != null ? money(c.budget) : sub ? "—" : income ? "Expected" : "Budget"}</span>
+    {c.budget != null ? money(c.budget) : sub || noExpected ? "—" : "Budget"}</span>
   <Pencil class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 {/snippet}
 

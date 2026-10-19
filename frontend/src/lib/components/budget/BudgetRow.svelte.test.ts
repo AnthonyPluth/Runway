@@ -252,9 +252,21 @@ describe("BudgetRow", () => {
       expect(screen.getByRole("link", { name: "$90" })).not.toHaveClass("text-destructive");
     });
 
-    it("asks for what's expected rather than a budget", () => {
-      setup(pay({ budget: null, left: null }), { income: true, budgets: true });
-      expect(field("Paycheck")).toHaveTextContent("Expected");
+    it("reads \"$3,150 · Expected —\" with nothing expected, the dash in the editable pill", () => {
+      setup(pay({ budget: null, left: null, spent: 3150 }), { income: true, budgets: true });
+      const pill = screen.getByRole("button", { name: "Set expected income" });
+      expect(pill).toHaveTextContent("—");
+      expect(pill).not.toHaveTextContent("Expected");
+      expect(screen.getByText("Expected").tagName).toBe("EM");
+      expect(screen.getByText("$3,150").closest("span")).toHaveTextContent(/^\$3,150\s*·\s*Expected\s*—$/);
+      expect(screen.queryByText("of")).not.toBeInTheDocument();
+    });
+
+    it("reads \"$3,150 of $3,400\" like a budget row once expected income is set", () => {
+      setup(pay({ budget: 3400, left: 250, spent: 3150 }), { income: true, budgets: true });
+      expect(screen.getByText("of")).toBeInTheDocument();
+      expect(field("Paycheck")).toHaveTextContent("$3,400");
+      expect(screen.queryByText("Expected")).not.toBeInTheDocument();
     });
   });
 

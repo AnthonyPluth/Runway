@@ -238,7 +238,7 @@ describe("Budget page", () => {
       serve(withIncome(null));
       render(Budget);
       await screen.findByRole("heading", { name: "Income" });
-      expect(field("Income")).toHaveTextContent("Expected");
+      expect(screen.getByRole("button", { name: "Set expected income" })).toHaveTextContent("—");
       expect(screen.queryByText(/expected$/)).not.toBeInTheDocument();
     });
 
