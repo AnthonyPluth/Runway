@@ -152,6 +152,82 @@ describe("Recurring page", () => {
       expect(screen.getByText("missed a payment")).toBeInTheDocument();
     });
 
+    describe("several missed by one item", () => {
+      const gym = (date: string) => ({ key: `rec:3:${date}`, name: "Gym", amount: -25, date, recurring_id: 3 });
+      const three = [gym("2026-03-16"), gym("2026-03-02"), gym("2026-03-09")];
+      const run = ["rec:3:2026-03-02", "rec:3:2026-03-09", "rec:3:2026-03-16"];
+
+      it("groups them into one row with how many since when, Skip all and Show each listing them", async () => {
+        serve([item({ id: 3, name: "Gym", amount: -25, account_name: "Checking", missed: three })]);
+        render(Recurring);
+        const list = (await screen.findByRole("heading", { name: "Needs attention" })).closest("section")!;
+        expect(within(list).getAllByText("Gym")).toHaveLength(1);
+        expect(within(list).getByText("3 missed")).toHaveClass("text-warning");
+        expect(within(list).getByText(/since Mar.2 · Checking/)).toBeInTheDocument();
+        expect(within(list).getByRole("button", { name: "Skip all 3" })).toBeInTheDocument();
+        expect(within(list).queryByRole("button", { name: "Skip this one" })).not.toBeInTheDocument();
+        expect(within(list).queryByRole("button", { name: "Mark as ended" })).not.toBeInTheDocument();
+        await userEvent.click(within(list).getByRole("button", { name: "Show each" }));
+        const each = within(list).getByRole("list", { name: "Each missed payment of Gym" });
+        expect(within(each).getAllByRole("listitem")).toHaveLength(3);
+        expect(within(each).getAllByRole("button", { name: "Skip this one" })).toHaveLength(3);
+        expect([...each.querySelectorAll("[data-missed]")].map((e) => e.getAttribute("data-missed"))).toEqual(["rec:3:2026-03-16", "rec:3:2026-03-09", "rec:3:2026-03-02"]);
+      });
+
+      it("puts the item that missed the most first, then the one missed longest ago", async () => {
+        serve([item({ id: 2, name: "Water", missed: [missed] }), item({ id: 4, name: "Phone", missed: [{ ...missed, key: "rec:4:2026-03-01", name: "Phone", date: "2026-03-01", recurring_id: 4 }] }),
+          item({ id: 3, name: "Gym", amount: -25, missed: three })]);
+        render(Recurring);
+        const list = (await screen.findByRole("heading", { name: "Needs attention" })).closest("section")!;
+        const names = within(list).getAllByText(/^(Gym|Water|Phone)$/).map((e) => e.textContent);
+        expect(names).toEqual(["Gym", "Phone", "Water"]);
+      });
+
+      it("skips them all in one request, and one Undo puts back what they had", async () => {
+        const previous = run.map((key) => ({ key, amount: null }));
+        serve([item({ id: 3, name: "Gym", amount: -25, missed: three })], [], { "/api/recurring/3/skip-missed": { ok: true, keys: run, previous } });
+        render(Recurring);
+        await userEvent.click(await screen.findByRole("button", { name: "Skip all 3" }));
+        expect(api).toHaveBeenCalledWith("/api/recurring/3/skip-missed", { method: "POST", body: {} });
+        await waitFor(() => expect(screen.queryByRole("heading", { name: "Needs attention" })).not.toBeInTheDocument());
+        expect(screen.queryByText("missed 3")).not.toBeInTheDocument();
+        const [message, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+        expect(message).toBe("Skipped 3 missed payments of Gym");
+        await opts.action.onClick();
+        expect(api).toHaveBeenCalledWith("/api/recurring/3/skip-missed", { method: "POST", body: { restore: previous } });
+        expect(await screen.findByText("3 missed")).toBeInTheDocument();
+      });
+
+      it("offers Mark as ended after three in a row, ends it and loads the page again; Undo puts its end date back", async () => {
+        let ended = false;
+        vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string; body?: unknown }) => {
+          if (path === "/api/accounts") return accounts as never;
+          if (path === "/api/recurring" && !opts?.method) return [item({ id: 3, name: "Gym", amount: -25, ...(ended ? { end_date: "2026-03-01" } : { missed: three, missed_run: run }) })] as never;
+          if (path === "/api/recurring/3/end") {
+            ended = !(opts?.body as { restore?: unknown }).restore;
+            return (ended ? { ok: true, end_date: "2026-03-01", previous: { end_date: null } } : { ok: true }) as never;
+          }
+          return [] as never;
+        });
+        render(Recurring);
+        await userEvent.click(await screen.findByRole("button", { name: "Mark as ended" }));
+        expect(api).toHaveBeenCalledWith("/api/recurring/3/end", { method: "POST", body: {} });
+        await waitFor(() => expect(screen.queryByRole("heading", { name: "Needs attention" })).not.toBeInTheDocument());
+        const [message, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+        expect(message).toBe("Marked Gym as ended");
+        await opts.action.onClick();
+        expect(api).toHaveBeenCalledWith("/api/recurring/3/end", { method: "POST", body: { restore: { end_date: null } } });
+        expect(await screen.findByText("3 missed")).toBeInTheDocument();
+      });
+
+      it("links the latest of them from Link…", async () => {
+        serve([item({ id: 3, name: "Gym", amount: -25, missed: three })], [], { "/api/recurring/3/candidates?date=2026-03-16": [] });
+        render(Recurring);
+        await userEvent.click(await screen.findByRole("button", { name: /^Link a transaction to Gym on Mar.16$/ }));
+        expect(api).toHaveBeenCalledWith("/api/recurring/3/candidates?date=2026-03-16");
+      });
+    });
+
     it("links a payment from the list it offers", async () => {
       serve([item({ id: 2, name: "Water", missed: [missed] })], [], {
         "/api/recurring/2/candidates?date=2026-03-02": [{ id: "t9", posted: "2026-03-04", amount: -41.2, name: "City Water" }],
