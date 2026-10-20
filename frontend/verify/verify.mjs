@@ -73,6 +73,9 @@ export const STILL = ".animate-pulse, .animate-spin, .live-dot { animation: none
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
+/** Each page is also saved as its first screen, `<page>-top-<width>.png`: the window as it opens, before any scrolling, for the
+ *  README and the docs site's hero images (a full page is too tall for those). tools/fleet_checks.py reads this name. */
+export const TOP = "top";
 
 /** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
@@ -332,7 +335,7 @@ async function main() {
     page.on("response", (r) => { if (r.status() >= 500) problems.push(`${where}: ${r.status()} from ${r.request().method()} ${new URL(r.url()).pathname}`); });
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     const files = [];
-    const shot = async (name) => {
+    const shot = async (name, { top = false } = {}) => {
       const file = screenshotFile(name, viewport);
       await page.waitForLoadState("networkidle").catch(() => { /* a page that keeps a request open: the stability wait below still runs */ });
       await page.mouse.move(0, 0);   // no row under the pointer: a hovered row shows its checkbox and buttons
@@ -341,7 +344,7 @@ async function main() {
       // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
       // The To review bar is the same: a full-page capture makes the whole card visible again, and the bar goes with it.
       const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible").count();
-      await page.screenshot({ path: join(out, file), fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}` });
+      await page.screenshot({ path: join(out, file), fullPage: !modal && !top, style: `${HIDE_TOASTS} ${STILL}` });
       files.push(file);
     };
     try {
@@ -362,6 +365,7 @@ async function main() {
       await visit(name, viewport, async (page, shot) => {
         await page.goto(`${base}/#${name}`, { waitUntil: "networkidle" });
         await shot(name);
+        await shot(`${name}-${TOP}`, { top: true });
       });
     }
   }

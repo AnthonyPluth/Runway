@@ -172,12 +172,14 @@ class Images(unittest.TestCase):
     def test_the_names_come_from_the_pages_and_the_flows(self):
         self.assertEqual(self.made, {
             "budget-phone.png", "budget-desktop.png", "setup-phone.png", "setup-desktop.png",
+            "budget-top-phone.png", "budget-top-desktop.png", "setup-top-phone.png", "setup-top-desktop.png",
             "flow-emoji-phone.png", "flow-emoji-desktop.png", "flow-emoji-open-phone.png", "flow-emoji-open-desktop.png",
             "flow-lock-phone.png", "flow-lock-landscape.png", "flow-lock-locked-phone.png", "flow-lock-locked-landscape.png"})
 
     def test_the_real_pages_and_flows_are_read(self):
         made = fc.verify_images()
         self.assertIn("budget-phone.png", made)
+        self.assertIn("overview-top-desktop.png", made)
         self.assertIn("flow-more-sheet-focus-landscape.png", made)
         self.assertFalse([n for n in made if "tablet" in n.rsplit("-", 1)[-1]])
 
@@ -197,9 +199,11 @@ class Images(unittest.TestCase):
         self.assertEqual(len(self.problems("docs/src/assets/screenshots/budget-phone.png")), 1)
         self.assertEqual(len(self.problems("budget-phone.png")), 1)
 
-    def test_icons_assets_and_the_docs_site_pictures_pass(self):
-        self.assertEqual(self.problems("extension/icons/icon-16.png", "runway/static/icon-192.png", "docs/src/assets/logo.png",
-                                       "docs/src/assets/screenshots/overview.png", "docs/src/assets/screenshots/phone.png"), [])
+    def test_icons_assets_and_the_docs_site_logo_pass(self):
+        self.assertEqual(self.problems("extension/icons/icon-16.png", "runway/static/icon-192.png", "docs/src/assets/logo.png"), [])
+
+    def test_a_hand_taken_docs_screenshot_fails(self):
+        self.assertEqual(len(self.problems("docs/src/assets/screenshots/overview.png")), 1)
 
     def test_a_hand_made_comparison_image_fails_wherever_it_is(self):
         problems = self.problems("docs/src/assets/tabbar-before-after.png", "docs/src/assets/screenshots/before-after.png",
