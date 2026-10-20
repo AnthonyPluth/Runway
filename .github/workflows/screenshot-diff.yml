@@ -45,7 +45,6 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      OUT: ${{ runner.temp }}/screenshot-diff
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
@@ -71,6 +70,8 @@ jobs:
           install-args: --only dev   # Pillow, which the tool needs, is in the dev group (pyproject.toml)
       - name: Compare the screenshots
         if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
+        env:
+          OUT: ${{ runner.temp }}/screenshot-diff   # the runner context isn't available in a job's env, only in steps
         run: poetry run python tools/screenshot_diff.py --base "$BASE_SHA" --head "$HEAD_SHA" --out "$OUT" --run-url "$RUN_URL"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         if: steps.look.outputs.changed == 'true'
@@ -81,6 +82,8 @@ jobs:
           if-no-files-found: ignore
       - name: Add the summary to the job
         if: steps.look.outputs.changed == 'true'
+        env:
+          OUT: ${{ runner.temp }}/screenshot-diff
         run: cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
       # One comment, found again by its marker: each push updates it, and a push that leaves no screenshot change turns it
       # into "no screenshot changes" rather than leaving it stale. A pull request that never had a comment and has no change
@@ -91,6 +94,7 @@ jobs:
         continue-on-error: true
         env:
           COMMENT: ${{ steps.look.outputs.comment }}
+          OUT: ${{ runner.temp }}/screenshot-diff
         run: |
           if [ "$HEAD_REPO" != "$REPO" ]; then
             echo "::notice::A pull request from a fork has a read-only token: the comment is skipped (see the job summary and the artifact)."
