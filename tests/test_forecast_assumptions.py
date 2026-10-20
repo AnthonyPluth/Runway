@@ -9,7 +9,7 @@ from runway.domain import forecast, recurring
 from runway.storage import settings_keys as sk
 from runway.storage.models import Account, Budget, Category, Override, Recurring, Transaction
 from tests import forecast_support as fs
-from tests.shared import TODAY, LedgerCase
+from tests.shared import TODAY, LedgerCase, add_tx
 
 
 class ForecastAssumptionTests(LedgerCase):
@@ -140,6 +140,15 @@ class ForecastAssumptionTests(LedgerCase):
             self.tx("chk", f"2026-09-0{i + 2}", -1100.0 - 100 * i, name, "Shopping")
         self.assertIn("4 payments over $1,000 in the last 90 days aren’t in the forecast (Delta, Charlie, Bravo…); "
                       "add them as recurring items.", forecast.build(self.conn, TODAY, 30)["warnings"])
+
+    def test_large_one_offs_of_the_same_amount_are_named_in_a_fixed_order_whatever_order_the_database_reads_them(self):
+        """Of the same amount, earliest first, and on the same day by id. The later id is written first here, so reading
+        the rows where they sit would name it first."""
+        add_tx(self.conn, "chk", "2026-09-05", -1200.0, id="chk|z", description="ZETA MOVERS", category="Home")
+        add_tx(self.conn, "chk", "2026-09-05", -1200.0, id="chk|a", description="ALPHA ROOFING", category="Home")
+        self.tx("chk", "2026-09-03", -1200.0, "OMEGA PAVING", "Home")
+        self.assertIn("3 payments over $1,000 in the last 90 days aren’t in the forecast (Omega Paving, Alpha Roofing, "
+                      "Zeta Movers); add them as recurring items.", forecast.build(self.conn, TODAY, 30)["warnings"])
 
     def test_recurring_charges_on_the_card_are_in_its_statements(self):
         self.conn.execute(insert(Recurring).values(name="Gym", account_id="cc", amount=-30, frequency="monthly",
@@ -297,6 +306,14 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual((used, fc["budget"]["monthly"]), ([("Medical", "chk", 400.0)], 400.0))
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
         self.assertEqual(cards, {})
+
+    def test_budgets_are_used_in_category_order_whatever_order_the_database_reads_them(self):
+        """The budgets are read by category: an unordered read follows where the rows happen to sit, on Postgres
+        wherever there was room and on SQLite the order they were written, here last in the alphabet first."""
+        self.conn.execute(insert(Budget).values(category="Travel", amount=300))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual([u["category"] for u in fc["budget"]["used"]], ["Groceries", "Travel"])
 
     def test_a_subcategorys_card_paid_from_outside_the_forecast_is_skipped_on_its_own(self):
         self.acct("sav", "savings", 20000.0)

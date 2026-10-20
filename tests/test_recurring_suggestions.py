@@ -37,6 +37,15 @@ class SuggestionDismissTests(LedgerCase):
         self.assertEqual((s["mortgage co"]["amount_low"], s["mortgage co"]["amount_high"]), (2500.0, 2600.0))
         self.assertEqual((s["acme payroll"]["amount_low"], s["acme payroll"]["amount_high"]), (3100.0, 3100.0))
 
+    def test_suggestions_of_the_same_amount_come_in_the_order_their_payees_first_showed_up(self):
+        """Written later payee first, so reading the rows where they sit doesn't give that order by chance."""
+        for d in ["2026-07-06", "2026-08-05", "2026-09-04"]:
+            self.tx("chk", d, -40.0, "GYM CLUB", "Fitness")
+        for d in ["2026-07-03", "2026-08-03", "2026-09-03"]:
+            self.tx("chk", d, -40.0, "CITY PARKING", "Parking")
+        self.assertEqual([s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)],
+                         ["acme payroll", "mortgage co", "city parking", "gym club"])
+
     def test_dismissing_hides_that_suggestion_only(self):
         self.assertEqual({s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)}, {"mortgage co", "acme payroll"})
         self.assertEqual(api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "chk|mortgage co|monthly"}), {"ok": True})

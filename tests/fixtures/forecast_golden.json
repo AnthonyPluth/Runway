@@ -124,6 +124,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -142,13 +149,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
@@ -857,6 +857,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -875,13 +882,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
@@ -2135,6 +2135,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -2146,13 +2153,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
@@ -3286,6 +3286,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -3297,13 +3304,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
@@ -4351,6 +4351,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -4362,13 +4369,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
@@ -6611,6 +6611,13 @@
    ],
    "used": [
     {
+     "account": "chk",
+     "account_id": "chk",
+     "amount": 100.0,
+     "category": "Fees & Interest",
+     "chosen": true
+    },
+    {
      "account": "cc",
      "account_id": "cc",
      "amount": 600.0,
@@ -6622,13 +6629,6 @@
      "account_id": "cc3",
      "amount": 80.0,
      "category": "Coffee & Snacks",
-     "chosen": true
-    },
-    {
-     "account": "chk",
-     "account_id": "chk",
-     "amount": 100.0,
-     "category": "Fees & Interest",
      "chosen": true
     },
     {
