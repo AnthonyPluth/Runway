@@ -865,24 +865,39 @@ def render_report(plans: list[Plan], notes: list[str], run_url: str | None = Non
 
 def build_report(report: dict, repo: Path = ROOT, budget: int = REPORT_BUDGET, run_url: str | None = None,
                  full_budget: int = FULL_BUDGET) -> tuple[str, list[str]]:
-    """report.html for a `diff()` result, and the notes on what it had to cut to stay under `budget` bytes. It never fails
-    for size: it uses less context around the changes, then smaller images, and as a last resort leaves out the images of
-    the files that don't fit (and says so)."""
+    """report.html for a `diff()` result, and the notes on what it had to cut to stay under `budget` bytes (the UTF-8 bytes
+    of the returned text, notes included, which is what gets written). It never fails for size: it uses less context
+    around the changes, then smaller images, and as a last resort leaves out the images of the largest files (and says so)."""
     order = {"modified": 0, "added": 1, "deleted": 2}
     files = sorted(report["files"], key=lambda f: (order[f["status"]], -f["changed_pixels"], f["path"]))
     merge_base, head = report["merge_base"], report["head"]
-    reserve = 60_000 + 9_000 * len(files)           # the script, the style and the markup around the images
-    room = max(budget - reserve, 0)
+    room = max(budget - (60_000 + 9_000 * len(files)), 0)    # the images' share: the rest is the script, style and markup
+
+    def notes_for(context: int, scale: float, plans: list[Plan]) -> list[str]:
+        notes: list[str] = []
+        if (context, scale) != (REPORT_CONTEXT, 1.0):
+            notes.append(f"To keep this file under {budget / 2**20:.3g} MB, the context around each change was cut from "
+                         f"{REPORT_CONTEXT} to {context} rows" + (f" and the images were scaled down to {round(scale * 100)}%"
+                                                                  if scale < 1 else "") + ".")
+        left_out = sum(p.omitted for p in plans)
+        if left_out:
+            notes.append(f"{left_out} of {len(plans)} files are listed without their images: even at {round(scale * 100)}% "
+                         "the report would have gone past its size budget.")
+        return notes
+
+    def page_of(plans: list[Plan], context: int, scale: float) -> tuple[str, list[str]]:
+        notes = notes_for(context, scale, plans)
+        return render_report(plans, notes, run_url), notes
 
     plans: list[Plan] = []
-    chosen: tuple[int, float] | None = None
+    chosen = None
     for context, scale in LEVELS:
         meter = Meter(room)
         try:
             plans = [build_plan(f, merge_base, head, repo, context, scale, meter) for f in files]
         except OverBudget:
             continue
-        if len(render_report(plans, [], run_url)) <= budget:
+        if len(page_of(plans, context, scale)[0].encode()) <= budget:
             chosen = (context, scale)
             break
     if chosen is None:          # not even the smallest level fits: keep the files that do, the biggest changes first
@@ -895,34 +910,29 @@ def build_report(report: dict, repo: Path = ROOT, budget: int = REPORT_BUDGET, r
             except OverBudget:
                 meter.used = before
                 plans.append(Plan(f, omitted=True))
+        # the notes and markup are in the file too: drop the biggest images until the exact text fits
+        while len(page_of(plans, context, scale)[0].encode()) > budget and any(p.pieces for p in plans):
+            biggest = max(plans, key=lambda p: p.nbytes)
+            biggest.pieces, biggest.omitted = {}, True
     else:
         context, scale = chosen
-    notes: list[str] = []
-    if (context, scale) != LEVELS[0]:
-        notes.append(f"To keep this file under {budget / 2**20:.3g} MB, the context around each change was cut from "
-                     f"{REPORT_CONTEXT} to {context} rows" + (f" and the images were scaled down to {round(scale * 100)}%"
-                                                              if scale < 1 else "") + ".")
-    left_out = sum(p.omitted for p in plans)
-    if left_out:
-        notes.append(f"{left_out} of {len(plans)} files are listed without their images: even at {round(scale * 100)}% the "
-                     "report would have gone past its size budget.")
     # Whole images, smallest first, while the file stays small: each replaces its file's bands, so one click shows every row.
     bands_only = {id(p): p.pieces for p in plans}
     used = sum(p.nbytes for p in plans)
     for p in sorted((p for p in plans if p.pieces and not p.whole), key=lambda p: p.canvas[0] * p.canvas[1]):
-        limit = min(full_budget, budget - reserve)
         try:
-            whole = build_plan(p.f, merge_base, head, repo, context, scale, Meter(limit - used + p.nbytes), whole=True)
+            whole = build_plan(p.f, merge_base, head, repo, context, scale,
+                               Meter(min(full_budget, room) - used + p.nbytes), whole=True)
         except OverBudget:
             break
         used += whole.nbytes - p.nbytes
         p.pieces, p.whole = whole.pieces, True
-    page = render_report(plans, notes, run_url)
-    if len(page) > budget:      # the estimate for the markup was too low: fall back to the bands, which fitted
+    page, notes = page_of(plans, context, scale)
+    if len(page.encode()) > budget:      # the estimate for the markup was too low: fall back to the bands, which fitted
         for p in plans:
             if id(p) in bands_only and p.whole and p.bands != [(0, p.canvas[1])]:
                 p.pieces, p.whole = bands_only[id(p)], False
-        page = render_report(plans, notes, run_url)
+        page, notes = page_of(plans, context, scale)
     return page, notes
 
 

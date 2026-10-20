@@ -452,6 +452,29 @@ class Report(GitRepository):
         self.assertRegex(notes[0], r"cut from 150 to 0 rows and the images were scaled down to \d+%\.$")
         self.assertIn(notes[0], page)                                   # the report itself says what was cut
 
+    def test_the_budget_counts_the_notes_and_the_utf8_bytes_that_are_written(self):
+        base = self.on_main("noise", **{f"noise{n}-phone.png": noise((120, 900), n) for n in range(3)})
+        self.git("checkout", "-q", "-b", "change")
+        for n in range(3):
+            img = noise((120, 900), n)
+            img.putpixel((3, 450), (1, 2, 3, 255))
+            self.save(f"screenshots/noise{n}-phone.png", img)
+        head = self.commit("changes")
+        data = sd.diff(base, head, repo=self.repo)
+        with unittest.mock.patch.object(sd, "LEVELS", [(60, 1.0)]):
+            edge, notes = sd.build_report(data, self.repo, full_budget=0)
+        self.assertEqual(len(notes), 1)                             # level 60 needs its notice
+        self.assertGreater(len(edge.encode()), len(edge))           # the page has characters of more than one byte
+        # one byte under the size of that exact page: its characters alone would pass, its bytes do not
+        budget = len(edge.encode()) - 1
+        self.assertLessEqual(len(edge) - len(notes[0]), budget)
+        page, notes = sd.build_report(data, self.repo, budget=budget, full_budget=0)
+        self.assertLessEqual(len(page.encode()), budget)
+        self.assertTrue(notes)
+        page, notes = sd.build_report(data, self.repo, budget=budget // 3, full_budget=0)   # less room still: it keeps degrading
+        self.assertLessEqual(len(page.encode()), budget // 3)
+        self.assertTrue(any("cut from 150" in n for n in notes))
+
     def test_a_budget_nothing_fits_in_leaves_images_out_instead_of_failing(self):
         self.git("checkout", "-q", "-b", "change")
         self.save("screenshots/edited-phone.png", noise((300, 300)))
