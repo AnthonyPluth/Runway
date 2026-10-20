@@ -1,0 +1,28 @@
+name: Artifact probe
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions: {}
+defaults:
+  run:
+    shell: bash
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Make a small page
+        run: |
+          mkdir -p "$RUNNER_TEMP/p"
+          printf "%s" "<!doctype html><title>probe</title><h1>unzipped artifact probe</h1><script>document.body.append(\"JS ran\")</script>" > "$RUNNER_TEMP/p/report.html"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        id: up
+        with:
+          path: ${{ runner.temp }}/p/report.html
+          archive: false
+          retention-days: 1
+      - name: Show the link
+        env:
+          URL: ${{ steps.up.outputs.artifact-url }}
+          ID: ${{ steps.up.outputs.artifact-id }}
+        run: echo "url=$URL id=$ID"
