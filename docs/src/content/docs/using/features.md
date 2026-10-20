@@ -7,7 +7,7 @@ sidebar:
 
 The [home page](/Runway/) has the short list. This is what each part does and where its settings live.
 
-Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Investments**, **Recurring**, **Reports**, then **Net worth** (Summary, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
+Runway's pages, in the sidebar (or the tab bar on a phone): **Day to day** (**Overview**, **Transactions** (All and To review), **Budget**, **Recurring** and **Reports**), then **Wealth** (**Investments**, **Net worth** (Summary, Equity and Retirement) and **Churning**), and **Settings** at the bottom. The phone's tab bar keeps Overview, Transactions, Budget and Invest, with the rest under More.
 
 **On a tablet** (768 to 1023 pixels wide), the sidebar shrinks to a narrow rail of icons so pages keep their width: hover or tab to an icon to see its name, and the lit icon marks the page you're on. **Menu**, at the bottom of the rail, opens a panel with every page by its full name, who's signed in, the sync status and **Sync now**, and **Sign out**. From 1024 pixels up it's the full sidebar.
 
