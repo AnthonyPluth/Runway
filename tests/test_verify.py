@@ -1,3 +1,5 @@
+import contextlib
+import json
 import os
 import subprocess
 import sys
@@ -142,12 +144,267 @@ class FrozenClockTests(unittest.TestCase):
     def test_the_browser_is_told_the_same_day(self):
         with open(os.path.join(verify.ROOT, "frontend", "verify", "verify.mjs")) as f:
             self.assertIn("--day", f.read())
-        with mock.patch("os.path.isdir", return_value=True), mock.patch("os.path.isfile", return_value=True), \
-                mock.patch("shutil.which", return_value="/usr/bin/node"), \
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("os.path.isdir", return_value=True), \
+                mock.patch("os.path.isfile", return_value=True), mock.patch("shutil.which", return_value="/usr/bin/node"), \
                 mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.object(verify, "LOGS", tmp), mock.patch.object(verify, "machine_lock", lambda **_: contextlib.nullcontext()), \
+                mock.patch.object(verify, "wait_for_quiet", return_value=0.0), mock.patch("builtins.print"), \
                 mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout="", stderr="")) as ran:
             verify.run([])
         self.assertEqual(ran.call_args.kwargs["env"]["FAKETIME"], f"{verify.FROZEN_DAY} 12:00:00")   # the seed ran frozen
+
+    def test_the_seed_and_servers_get_the_timed_waits_libfaketime_breaks_back(self):
+        env = verify.frozen_env({"PATH": "/bin", "PYTHONPATH": "/x"}, "/lib/libfaketime.so.1")
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep), [verify.SITE_DIR, "/x"])
+        self.assertEqual(env[verify.FROZEN_CLOCK_ENV], "1")
+        self.assertTrue(os.path.isfile(os.path.join(verify.SITE_DIR, "sitecustomize.py")))
+
+    def test_under_the_frozen_clock_a_timed_wait_waits_and_sleep_works(self):
+        """libfaketime's stopped clock made Event.wait(0.5) return at once (the server's hang-up thread spun a CPU, each
+        server, all run) and time.sleep fail with EINVAL; verify_site/sitecustomize.py puts both back."""
+        lib = verify.find_libfaketime()
+        if not lib:
+            self.skipTest("libfaketime isn't installed")
+        code = ("import threading, time\n"
+                "t = time.monotonic(); n = 0\n"
+                "while time.monotonic() - t < 0.6: threading.Event().wait(0.2); n += 1\n"
+                "s = time.monotonic(); time.sleep(0.2)\n"
+                "print(n, round(time.monotonic() - s, 1))")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = verify.frozen_env(verify.clean_env(tmp), lib)
+            done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            waits, slept = done.stdout.split()
+            self.assertLessEqual(int(waits), 4)   # about 3 waits of 0.2 s in 0.6 s, not thousands
+            self.assertEqual(slept, "0.2")
+            frozen = subprocess.run([sys.executable, "-c", "import datetime; print(datetime.date.today())"], env=env,
+                                    capture_output=True, text=True, timeout=60)
+            self.assertEqual(frozen.stdout.strip(), verify.FROZEN_DAY)   # and the clock is still stopped
+
+
+class MachineLockTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, "verify.lock")
+
+    def test_a_second_run_waits_saying_who_has_it_and_gives_up_after_the_most_it_waits(self):
+        said, clock = [], [0.0]
+
+        def sleep(s):
+            clock[0] += s
+        with verify.machine_lock(self.path, say=said.append):
+            with self.assertRaisesRegex(verify.MachineBusy, "gave up waiting"), \
+                    verify.machine_lock(self.path, max_wait=120, say=said.append, now=lambda: clock[0], sleep=sleep, poll=10):
+                self.fail("got a lock another run holds")
+        self.assertGreaterEqual(clock[0], 120)
+        self.assertIn("another verify is running on this machine", said[0])
+        self.assertIn(f"pid {os.getpid()}", said[0])   # who holds it
+        self.assertEqual(len(said), 2)   # once at the start, once a minute: not every poll
+
+    def test_it_is_free_again_once_the_holder_is_done(self):
+        with verify.machine_lock(self.path):
+            pass
+        with verify.machine_lock(self.path, max_wait=0):
+            pass
+
+    def test_a_holder_that_is_killed_leaves_it_free(self):
+        """flock goes with the process: a run killed part way (a timeout, ^C, kill -9) never leaves the lock held."""
+        holder = subprocess.Popen([sys.executable, "-c", "import fcntl, os, sys, time\n"
+                                   f"fd = os.open({self.path!r}, os.O_RDWR | os.O_CREAT)\n"
+                                   "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)"],
+                                  stdout=subprocess.PIPE, text=True)
+        try:
+            assert holder.stdout is not None
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            with self.assertRaises(verify.MachineBusy), verify.machine_lock(self.path, max_wait=0, say=lambda _: None):
+                pass
+            holder.kill()
+            holder.wait(10)
+            with verify.machine_lock(self.path, max_wait=5, poll=0.05):
+                pass
+        finally:
+            holder.kill()
+            holder.wait(10)
+
+    def test_a_run_that_waited_too_long_exits_3_and_says_why(self):
+        def busy(**_):
+            raise verify.MachineBusy("verify: another verify (pid 1) has held the machine for 60 minutes; gave up waiting")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("os.path.isdir", return_value=True), \
+                mock.patch("os.path.isfile", return_value=True), mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.object(verify, "LOGS", tmp), mock.patch.object(verify, "machine_lock", side_effect=busy), \
+                mock.patch("builtins.print") as out:
+            self.assertEqual(verify.run([]), 3)
+        self.assertTrue(any("gave up waiting" in str(c.args[0]) for c in out.call_args_list))
+
+
+class LoadTests(unittest.TestCase):
+    def test_load_per_cpu(self):
+        self.assertEqual(verify.load_per_cpu(lambda: (12.0, 0.0, 0.0), lambda: 4), 3.0)
+        self.assertEqual(verify.load_per_cpu(lambda: (1.0, 0.0, 0.0), lambda: 0), 1.0)
+
+    def test_a_busy_machine_is_waited_for_until_it_settles(self):
+        loads, said, clock = iter([9.0, 6.0, 1.2]), [], [0.0]
+
+        def sleep(s):
+            clock[0] += s
+        ratio = verify.wait_for_quiet(600, load=lambda: next(loads), say=said.append, now=lambda: clock[0], sleep=sleep)
+        self.assertEqual(ratio, 1.2)
+        self.assertEqual(clock[0], 10)   # two polls of 5 s
+        self.assertIn("the machine is busy (load 9.0 per CPU", said[0])
+
+    def test_the_wait_is_bounded_and_the_run_goes_ahead_with_longer_waits(self):
+        said, clock = [], [0.0]
+
+        def sleep(s):
+            clock[0] += s
+        ratio = verify.wait_for_quiet(60, load=lambda: 12.0, say=said.append, now=lambda: clock[0], sleep=sleep)
+        self.assertEqual((ratio, clock[0]), (12.0, 60))
+        self.assertIn("going ahead with longer waits", said[-1])
+        self.assertEqual(verify.wait_for_quiet(60, load=lambda: 0.5, say=self.fail), 0.5)   # a quiet machine: no wait, nothing said
+
+    def test_waits_stretch_with_the_load_and_the_attempt_within_bounds(self):
+        self.assertEqual(verify.time_scale(0.2), 1.0)   # an idle machine: the waits as written
+        self.assertEqual(verify.time_scale(3.0), 3.0)
+        self.assertEqual(verify.time_scale(50.0), verify.MAX_SCALE)
+        self.assertEqual(verify.time_scale(3.0, attempt=2), 6.0)   # a retry is more patient
+
+
+class RetryTests(unittest.TestCase):
+    """retrying: a page or flow that fails is run again (alone, on fresh data) before the run fails."""
+
+    def rounds(self, script):
+        """A run_round that answers from `script`: for each attempt, {id: ok}; records what each round was asked for."""
+        asked = []
+
+        def run_round(attempt, only):
+            asked.append(only)
+            got = script[attempt - 1]
+            if got is None:
+                return None
+            return {"out": f"/round-{attempt}", "items": [{"id": i, "ok": ok, "files": [f"{i}.png"] if ok else [],
+                                                            "problems": [] if ok else [f"{i} timed out"]} for i, ok in got.items()]}
+        return run_round, asked
+
+    def test_a_flaky_item_passes_on_a_retry_and_is_reported_as_flaky(self):
+        run_round, asked = self.rounds([{"page:budget": True, "flow:x": False}, {"flow:x": True}])
+        results, flaky, planned = verify.retrying(run_round, lambda _: None)
+        self.assertEqual(asked, [None, ["flow:x"]])   # the retry runs only what failed
+        self.assertEqual(planned, ["page:budget", "flow:x"])
+        self.assertTrue(all(item["ok"] for _, item in results.values()))
+        self.assertEqual(results["flow:x"][0], "/round-2")   # its images come from the round that passed
+        self.assertEqual(flaky, {"flow:x": ["flow:x timed out"]})
+
+    def test_an_item_that_keeps_failing_fails_after_every_attempt(self):
+        run_round, asked = self.rounds([{"page:budget": True, "flow:x": False}] + [{"flow:x": False}] * (verify.ATTEMPTS - 1))
+        said = []
+        results, flaky, _ = verify.retrying(run_round, said.append)
+        self.assertEqual(len(asked), verify.ATTEMPTS)
+        self.assertFalse(results["flow:x"][1]["ok"])
+        self.assertTrue(results["page:budget"][1]["ok"])
+        self.assertEqual(flaky, {})
+        self.assertEqual(len(said), verify.ATTEMPTS - 1)
+        self.assertIn("running it again on a fresh copy of the demo data", said[0])
+
+    def test_a_round_that_died_before_its_report_is_run_again_whole(self):
+        crashed = verify._crashed(None, "the browser run ended with code 139 before it wrote its report")
+        rounds = iter([crashed, {"out": "/r2", "items": [{"id": "page:budget", "ok": True, "files": [], "problems": []}]}])
+        asked = []
+
+        def run_round(attempt, only):
+            asked.append(only)
+            return next(rounds)
+        results, _, planned = verify.retrying(run_round, lambda _: None)
+        self.assertEqual(asked, [None, None])
+        self.assertEqual((planned, list(results)), (["page:budget"], ["page:budget"]))
+
+    def test_a_run_that_cannot_start_is_not_retried(self):
+        run_round, asked = self.rounds([None])
+        self.assertIsNone(verify.retrying(run_round, lambda _: None))
+        self.assertEqual(len(asked), 1)
+
+
+class PublishTests(unittest.TestCase):
+    """All or nothing: artifacts/verify/ holds a passing run's images, or, after a failure, none at its top."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.out = os.path.join(tmp.name, "artifacts", "verify")
+        self.round = os.path.join(tmp.name, "round")
+        os.makedirs(self.round)
+        for f in ("budget-phone.png", "setup-phone.png", "flow-x-FAILED-phone.png"):
+            with open(os.path.join(self.round, f), "wb") as fh:
+                fh.write(f.encode())
+        os.makedirs(self.out)
+        with open(os.path.join(self.out, "old-phone.png"), "w") as fh:
+            fh.write("from the last run")
+
+    def results(self, setup_ok):
+        return {"page:budget": (self.round, {"id": "page:budget", "ok": True, "files": ["budget-phone.png"]}),
+                "page:setup": (self.round, {"id": "page:setup", "ok": setup_ok, "files": ["setup-phone.png"],
+                                            "failed_files": [] if setup_ok else ["flow-x-FAILED-phone.png"]})}
+
+    def report(self):
+        with open(os.path.join(self.out, "report.json")) as f:
+            return json.load(f)
+
+    def test_a_passing_run_s_images_replace_the_last_run_s(self):
+        verify.publish(self.out, self.results(True), {"ok": True}, "run1")
+        self.assertEqual(sorted(os.listdir(self.out)), ["budget-phone.png", "report.json", "setup-phone.png"])
+        self.assertEqual(self.report()["files"], ["budget-phone.png", "setup-phone.png"])
+        self.assertEqual([f for f in os.listdir(os.path.dirname(self.out)) if f != "verify"], [])   # no staging left
+
+    def test_after_a_failure_no_image_is_left_where_a_result_would_be(self):
+        verify.publish(self.out, self.results(False), {"ok": False, "failed": {"page:setup": ["timed out"]}}, "run1")
+        self.assertEqual(sorted(os.listdir(self.out)), ["flow-x-FAILED-phone.png", "report.json", "unverified"])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "unverified"))), ["budget-phone.png", "setup-phone.png"])
+        self.assertEqual((self.report()["ok"], self.report()["files"]), (False, []))
+
+
+class RunLogTests(unittest.TestCase):
+    def test_each_run_logs_to_a_file_of_its_own_and_old_ones_are_cleared(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("builtins.print"):
+            logs = [verify.RunLog(tmp, keep=3) for _ in range(5)]
+            for i, log in enumerate(logs):
+                log.say(f"line {i}")
+                log.close()
+            self.assertEqual(len({log.path for log in logs}), 5)   # never one name two runs share
+            self.assertEqual(sorted(os.listdir(tmp)), sorted(os.path.basename(log.path) for log in logs[-3:]))
+            with open(logs[-1].path) as f:
+                self.assertEqual(f.read(), "line 4\n")
+
+    def test_the_summary_names_each_failure_and_what_passed_only_on_a_retry(self):
+        lines = verify.summary({"flow:budget-edit": ["budget-edit @ phone: never settled"]}, {"page:setup": ["timed out"]}, 9)
+        self.assertIn("flaky: page:setup", lines[0])
+        self.assertIn("FAIL: flow:budget-edit: budget-edit @ phone: never settled", lines[1])
+        self.assertIn("FAILED: 1 of 9 pages and flows (budget-edit)", lines[-1])
+        self.assertIn("screenshots/ is untouched", lines[-1])
+        self.assertEqual(verify.summary({}, {}, 9), ["verify: OK, 9 pages and flows"])
+
+    def test_differing_names_the_images_that_changed(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            for folder, data in ((a, b"x"), (b, b"x")):
+                with open(os.path.join(folder, "same.png"), "wb") as f:
+                    f.write(data)
+            with open(os.path.join(a, "moved.png"), "wb") as f:
+                f.write(b"1")
+            with open(os.path.join(b, "moved.png"), "wb") as f:
+                f.write(b"2")
+            self.assertEqual(verify.differing(a, b, ["same.png", "moved.png"]), ["moved.png"])
+
+
+class MakeTargetTests(unittest.TestCase):
+    def make(self, *args):
+        return subprocess.run(["make", "-n", *args], cwd=verify.ROOT, capture_output=True, text=True, timeout=60).stdout
+
+    def test_pages_limits_make_screenshots_too_not_only_make_verify(self):
+        for target in ("verify", "screenshots", "verify-twice"):
+            line = next(ln for ln in self.make(target, "PAGES=networth budget-edit").splitlines() if "run.py verify" in ln)
+            self.assertTrue(line.rstrip().endswith("networth budget-edit"), line)
+        self.assertIn("sync_screenshots.py", self.make("screenshots"))
 
 
 if __name__ == "__main__":

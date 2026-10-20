@@ -1,12 +1,17 @@
 // Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone and desktop
 // widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
-// demo database and the server; run alone it needs a server that already has the demo data.
+// demo database and the servers, retries what failed and decides what's kept; run alone it needs a server that already
+// has the demo data.
 //
-//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page…]
+//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [--time-scale 2] [--only page:budget,flow:x] [page or flow…]
 //
-// Exits 1 on a console error, an uncaught page error, a 5xx response or a failed scripted step.
+// Each page, flow and the device cache check is an item; report.json says, item by item, whether it passed and what it
+// wrote (rewritten after each one, so a crash leaves the items it didn't reach marked as not run). An item fails on a
+// console error, an uncaught page error, a 5xx response, a failed scripted step or a screenshot that never settled.
+// Exits 1 when one failed, 2 when the run can't start (a malformed flow, an unknown page).
 import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -74,6 +79,96 @@ export const STILL = ".animate-pulse, .animate-spin, .live-dot { animation: none
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
 
+/** What on the page says it's still loading, [] when nothing does. Run in the page, so it stands alone. A screenshot is
+ *  only taken when this is empty, and checked again after: a loading placeholder (the app's skeletons: .animate-pulse blocks),
+ *  anything marked aria-busy (a list being refreshed), the Investments page's badge before the live prices arrive (it
+ *  reads "Holdings updated …" until then, "Market closed · latest prices as of …" after), a transition still moving,
+ *  fonts or the document still loading. */
+export function unsettled(hidden = "[data-sonner-toaster], .just-saved, [style*=saved-fade]") {
+  const doc = globalThis.document;
+  const shown = (el) => el.getClientRects().length > 0 && globalThis.getComputedStyle(el).visibility !== "hidden";
+  const name = (el) => {
+    const label = el.getAttribute("aria-label"), cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).slice(0, 4).join(".") : "";
+    return `${el.tagName.toLowerCase()}${label ? `[aria-label="${label}"]` : ""}${cls ? `.${cls}` : ""}`;
+  };
+  const out = [];
+  if (doc.readyState !== "complete") out.push("the document is still loading");
+  if (doc.fonts && doc.fonts.status !== "loaded") out.push("fonts are still loading");
+  // A placeholder is a block (10px or more each way); a pulsing status dot ("Not synced yet", 6px) is the page as it is.
+  const block = (el) => { const r = el.getBoundingClientRect(); return r.width >= 10 && r.height >= 10; };
+  const pulse = [...doc.querySelectorAll(".animate-pulse")].find((el) => shown(el) && block(el));
+  if (pulse) out.push(`a loading placeholder is showing (${name(pulse)})`);
+  const busy = [...doc.querySelectorAll("[aria-busy=true]")].find(shown);
+  if (busy) out.push(`still busy (aria-busy on ${name(busy)})`);
+  // A transition or animation that ends (a sliding pill, a panel opening), still moving: caught part way, the image depends
+  // on the machine's speed. The endless ones (a pulsing dot) never end, and STILL stops them for the capture; what the
+  // images leave out (`hidden`, HIDE_TOASTS's: a toast, the "Saved ✓" that fades after each save) doesn't count.
+  const moving = (doc.getAnimations?.() ?? []).filter((a) => a.playState === "running" && a.effect?.getComputedTiming?.().endTime !== Infinity
+    && !a.effect?.target?.closest?.(hidden));
+  if (moving.length) out.push(`${moving.length} animation${moving.length === 1 ? " is" : "s are"} still running (${moving[0].animationName ?? moving[0].transitionProperty ?? "a transition"})`);
+  const prices = doc.querySelector("[data-testid=holdings-updated]");
+  if (prices && /^\s*Holdings updated/.test(prices.textContent ?? "")) out.push(`the live prices haven't arrived ("${prices.textContent.trim()}")`);
+  return out;
+}
+
+/** Run in each page before the app (an init script). Chromium takes a full-page screenshot by resizing the window for a
+ *  moment (to 1×1, then the whole page, then back), and the app reacts to that: at 1px wide its phone query matches,
+ *  so a desktop page switched to the phone layout and back mid-capture, which closed an open picker, collapsed an
+ *  expanded row and dropped the focus, before or after the pixels were taken depending on the machine's speed (the
+ *  card-projection-open and transactions-category-picker images came out either way). While `__verifyCapturing` is
+ *  set (capturing()), the app hears no media query change and no resize; after, one resize, at the real size. */
+export function holdLayout() {
+  const mql = globalThis.MediaQueryList?.prototype;
+  if (!mql || mql.__verifyHeld) return;
+  mql.__verifyHeld = true;
+  const add = mql.addEventListener, remove = mql.removeEventListener, wrapped = new WeakMap();
+  mql.addEventListener = function (type, fn, options) {
+    if (type !== "change" || typeof fn !== "function") return add.call(this, type, fn, options);
+    if (!wrapped.has(fn)) wrapped.set(fn, function (e) { if (!globalThis.__verifyCapturing) return fn.call(this, e); });
+    return add.call(this, type, wrapped.get(fn), options);
+  };
+  mql.removeEventListener = function (type, fn, options) { return remove.call(this, type, wrapped.get(fn) ?? fn, options); };
+  globalThis.addEventListener("resize", (e) => { if (globalThis.__verifyCapturing) e.stopImmediatePropagation(); }, true);
+}
+
+/** Run in the page around a capture (holdLayout). Ending it waits two frames first, so the change events the capture's
+ *  resizing queued are delivered (and dropped) while it's still held, then tells the app the window's real size once. */
+export async function capturing(on) {
+  if (on) { globalThis.__verifyCapturing = true; return; }
+  await new Promise((r) => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(r)));
+  globalThis.__verifyCapturing = false;
+  globalThis.dispatchEvent(new Event("resize"));
+}
+
+/** How many times longer than on an idle machine a wait may take: what runway/verify.py asked for (`base`, the load it
+ *  started at times the attempt), or the load now if that's more (per CPU, at most 8, times the attempt). Only the
+ *  limits stretch: every wait still ends as soon as what it waits for is there. */
+export function timeScale(base = 1, attempt = 1, load = loadavg()[0], cores = cpus().length) {
+  return Math.max(base, Math.min(8, Math.max(1, load / Math.max(1, cores))) * attempt);
+}
+
+/** The device cache check's item (it isn't a page or a flow, so its name can't be one). */
+export const DEVICE_CACHE = "device-cache";
+
+/** The items a run covers: every page, flow and the device cache check, or, given names, those pages (with the flows
+ *  that start on them; Transactions also brings the device cache check), flows by name and the device cache check by
+ *  its. `only` (ids, from a retry) narrows that. Returns { items } or { unknown } (the names that are none of those). */
+export function selectItems(names, flows, only) {
+  const flowNames = new Set(flows.map((f) => f.name));
+  const unknown = names.filter((n) => !PAGES.includes(n) && !flowNames.has(n) && n !== DEVICE_CACHE);
+  if (unknown.length) return { unknown };
+  const all = !names.length, items = [];
+  for (const p of PAGES) if (all || names.includes(p)) items.push({ id: `page:${p}`, page: p });
+  for (const f of flows) if (all || names.includes(f.name) || names.includes(f.page ?? "overview")) items.push({ id: `flow:${f.name}`, flow: f });
+  if (all || names.includes("transactions") || names.includes(DEVICE_CACHE)) items.push({ id: DEVICE_CACHE });
+  return { items: only ? items.filter((i) => only.includes(i.id)) : items };
+}
+
+// A flow's steps that check what's on screen, whose check is made again after a screenshot taken since the last action:
+// a state that falls apart while it's captured (a panel that closes again) fails the screenshot instead of being kept.
+const CHECKS = ["expect_text", "expect_focus"];
+const ACTS = ["goto", "click", "fill", "press", "tab", "reload", "scroll_to", "authenticator"];
+
 /** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
 const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string", tab: "object", expect_focus: "string", expect_inert: "string",
@@ -95,19 +190,50 @@ export function flowProblems(flow) {
   }
   if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
+  // A flow's name is how a run picks it (`make verify PAGES=budget-edit`), so it can't also be a page's.
+  if (typeof flow?.name === "string" && (PAGES.includes(flow.name) || flow.name === DEVICE_CACHE)) out.push(`the name ${flow.name} is taken (a page, or the device cache check)`);
   for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS) && !(v in LANDSCAPE)) out.push(`unknown viewport ${v}`);
   return out;
 }
 
+/** Waits until unsettled() finds nothing, up to `timeout` ms; returns what was still loading then ([] when settled). */
+async function waitSettled(page, timeout) {
+  try {
+    await page.waitForFunction(`(${unsettled.toString()})().length === 0`, undefined, { timeout, polling: 100 });
+    return [];
+  } catch {
+    return await page.evaluate(unsettled).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
+  }
+}
+
 async function runStep(page, step, shot) {
-  const timeout = step.timeout ?? 10000;
+  const timeout = page.t(step.timeout ?? 10000);
   // A scroll_to sets where the page is scrolled for the shots after it, until a goto or reload moves to another page.
   if ("scroll_to" in step) page.scrolledByFlow = true;
   else if ("goto" in step || "reload" in step) page.scrolledByFlow = false;
+  // The checks since the last action, made again after a screenshot (CHECKS).
+  const action = Object.keys(step).find((k) => k !== "timeout");
+  if (ACTS.includes(action)) page.checks = [];
   await doStep(page, step, shot, timeout);
+  if (CHECKS.includes(action)) page.checks.push(step);
   // What a click, a fill or a key press sets off (a fetch for a row's details) has landed before the next step looks at the
   // page, so a step that picks the first match picks the same one every run.
-  if ("click" in step || "fill" in step || "press" in step) await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => { /* a page that keeps a request open: the next step's own wait applies */ });
+  if ("click" in step || "fill" in step || "press" in step) await page.waitForLoadState("networkidle", { timeout: page.t(5000) }).catch(() => { /* a page that keeps a request open: the next step's own wait applies */ });
+  // A new page (or the app opened again) has loaded before the next step picks something on it: a step that ran while the
+  // list was still a placeholder, or before a refresh landed, acted on a page that then changed under it.
+  if ("goto" in step || "reload" in step) await waitSettled(page, page.t(15000));   // (best effort: a screenshot insists)
+}
+
+/** Checks a flow's CHECKS steps again (after a screenshot); the first that no longer holds, or null. */
+async function recheck(page) {
+  for (const step of page.checks ?? []) {
+    try {
+      await doStep(page, step, null, page.t(2000));
+    } catch (e) {
+      return `${JSON.stringify(step)} no longer held after the screenshot (${String(e.message).split("\n")[0]})`;
+    }
+  }
+  return null;
 }
 
 async function doStep(page, step, shot, timeout) {
@@ -215,11 +341,11 @@ async function until(test, what, timeout = 10000) {
  *  72-hour window it isn't painted (it's wiped at launch); signing out leaves nothing in IndexedDB. It signs the shared
  *  session out at the end, so it runs after every flow. */
 async function cacheCheck(page, base) {
-  const SLOW_MS = 6000;
+  const HOLD_MS = page.t(60000);
   // The lock screen offers the unlock on its own; should the browser want a tap first, the button.
   const launch = async () => {
     await page.reload({ waitUntil: "load" });
-    void page.locator("button:text-is('Unlock'):not([disabled])").click({ timeout: 8000 }).catch(() => { /* unlocked on its own */ });
+    void page.locator("button:text-is('Unlock'):not([disabled])").click({ timeout: page.t(8000) }).catch(() => { /* unlocked on its own */ });
   };
   if (!page.frozen) await page.clock.install();   // (time runs as usual; jumped ahead below; a frozen run installed it at the context)
   await page.goto(`${base}/#setup/data`, { waitUntil: "networkidle" });
@@ -228,8 +354,8 @@ async function cacheCheck(page, base) {
   // A launch: the lock screen, and the unlock it offers on its own (the authenticator verifies).
   await page.goto(`${base}/#transactions`);
   await launch();
-  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: 20000 });
-  await until(async () => (await cacheRows(page))?.some((r) => r.k.startsWith("r:transactions?")), "the Transactions list kept on the device");
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: page.t(20000) });
+  await until(async () => (await cacheRows(page))?.some((r) => r.k.startsWith("r:transactions?")), "the Transactions list kept on the device", page.t(10000));
   const rows = await cacheRows(page);
   if (!rows.some((r) => r.k === "share")) throw new Error("no sealed copy of the share on the device");
   const words = [...new Set((await page.locator("[data-tx-list]").innerText()).split(/\s+/).filter((w) => /^[A-Za-z]{5,}$/.test(w)))].slice(0, 20);
@@ -239,34 +365,43 @@ async function cacheCheck(page, base) {
   for (const r of rows) for (const f of Object.keys(r)) if (!["k", "v", "version", "at", "iv", "ct", "device", "fetchedAt", "expiresAt"].includes(f)) throw new Error(`unexpected field ${f} in a stored row`);
 
   // Cold start, the server slow to send the list: painted from the device (marked as not yet current), then replaced.
-  let held = 0, released = 0;
+  // The server's list is held until the check has seen what it looks for (not for a fixed time, which a slow machine
+  // outlasts: the list then arrived first and the check failed), or HOLD_MS at most.
+  let held = 0, released = 0, open = () => {};
+  let gate = new Promise((r) => { open = r; });
   await page.route(/\/api\/transactions\?/, async (route) => {
     held++;
-    await new Promise((r) => setTimeout(r, SLOW_MS));
+    await Promise.race([gate, new Promise((r) => setTimeout(r, HOLD_MS))]);
     released++;
     await route.continue().catch(() => { /* the page moved on */ });
   });
   await launch();
-  await page.locator("[data-testid=tx-rows][aria-busy=true] [data-tx-list]").waitFor({ timeout: 20000 });
+  await page.locator("[data-testid=tx-rows][aria-busy=true] [data-tx-list]").waitFor({ timeout: page.t(20000) });
   if (!held || released) throw new Error("the list wasn't painted from the device before the server's arrived");
-  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: SLOW_MS + 10000 });
+  open();
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: page.t(20000) });
 
   // Past the window: the copy of the share is out of date at launch, so the cache goes, and nothing is painted from it.
   await page.clock.setSystemTime(Date.now() + 73 * 3600 * 1000);
+  gate = new Promise((r) => { open = r; });
   await launch();
   // Either the page's loading placeholder (from the server: right) or rows painted from the device (wrong) comes first.
-  await page.locator("[role=status][aria-busy=true], [data-testid=tx-rows][aria-busy=true]").first().waitFor({ timeout: 20000 });
+  await page.locator("[role=status][aria-busy=true], [data-testid=tx-rows][aria-busy=true]").first().waitFor({ timeout: page.t(20000) });
   if (await page.locator("[data-testid=tx-rows][aria-busy=true]").count()) throw new Error("painted from a cache past its window");
-  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: SLOW_MS + 10000 });
+  open();
+  await page.locator("[data-testid=tx-rows][aria-busy=false] [data-tx-list]").waitFor({ timeout: page.t(20000) });
   await page.unroute(/\/api\/transactions\?/);
 
   // Signing out deletes it.
   await page.locator("a[aria-label='Sign out']").click();
-  await page.waitForURL((u) => !u.hash.includes("transactions"), { timeout: 15000 }).catch(() => { /* the page may already have moved on: the rows left are checked below */ });
+  await page.waitForURL((u) => !u.hash.includes("transactions"), { timeout: page.t(15000) }).catch(() => { /* the page may already have moved on: the rows left are checked below */ });
   await page.goto(`${base}/auth/signed-out`).catch(() => { /* signing out may navigate meanwhile: the rows left are checked below */ });
   const left = await cacheRows(page);
   if (left && left.length) throw new Error(`signing out left ${left.length} row(s) in IndexedDB`);
 }
+
+// A screenshot is retaken when the page wasn't settled (SHOT_TRIES in all) and fails after that: never kept half loaded.
+const SHOT_TRIES = 4;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -281,11 +416,12 @@ async function main() {
   // The day runway/verify.py froze the server and the demo seed at (libfaketime): the browser's clock is set to it too, so
   // the dates a page shows, and so its image, don't depend on the day it was taken. Run alone, with no --day, the clock is real.
   const day = opt("--day", process.env.RUNWAY_VERIFY_DAY);
+  // How much to stretch every wait's limit (runway/verify.py: the machine's load, times the attempt), and which attempt.
+  const baseScale = Number(opt("--time-scale", "1")), attempt = Number(opt("--attempt", "1"));
+  const only = opt("--only", undefined)?.split(",").filter(Boolean);
   if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) { console.error(`verify: --day is YYYY-MM-DD, not ${day}`); process.exit(2); }
+  if (!(baseScale >= 1) || !(attempt >= 1)) { console.error("verify: --time-scale and --attempt are numbers, at least 1"); process.exit(2); }
   if (!base) { console.error("verify: no server address (--url or RUNWAY_VERIFY_URL)"); process.exit(2); }
-  const unknown = unknownPages(args);
-  if (unknown.length) { console.error(`verify: no such page: ${unknown.join(", ")} (pages: ${PAGES.join(", ")})`); process.exit(2); }
-  const pages = args.length ? args : PAGES;
 
   const flows = existsSync(flowsDir) ? readdirSync(flowsDir).filter((f) => f.endsWith(".json")).sort().map((f) => {
     let flow;
@@ -294,19 +430,25 @@ async function main() {
     if (bad.length) { console.error(`verify: flow ${f}: ${bad.join("; ")}`); process.exit(2); }
     return flow;
   }) : [];
+  const { items, unknown } = selectItems(args, flows, only);
+  if (unknown) {
+    console.error(`verify: no such page or flow: ${unknown.join(", ")} (pages: ${PAGES.join(", ")}; flows: the names in ${flowsDir}; ${DEVICE_CACHE})`);
+    process.exit(2);
+  }
 
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
+  // Rewritten after each item, so a run that dies part way says which items it never reached.
+  const report = { base, attempt, items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
+  const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
+  save();
   const browser = await chromium.launch({ executablePath: findChromium() });
-  const problems = [];   // what makes the run fail
-  const notes = [];      // what's only reported
-  const results = [];
 
-  async function visit(label, viewport, work, signedIn = false, authenticator = {}) {
+  async function visit(result, label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     // The device cache check moves the clock itself (setSystemTime), so it gets a running one; every other visit's clock is
     // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
-    const moves = label === "device cache";
+    const moves = label === DEVICE_CACHE;
     if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
     // No smooth scrolling and no caret in the page from the start (not `animation: none`: a dialog that waits for its animation
     // to end is then never there for the next step; the capture stops only the endless ones, STILL).
@@ -322,73 +464,108 @@ async function main() {
       style.textContent = "*, *::before, *::after { scroll-behavior: auto !important; caret-color: transparent !important; }";
       globalThis.document.addEventListener("DOMContentLoaded", () => globalThis.document.head.append(style));
     });
+    await ctx.addInitScript(holdLayout);
     const page = await ctx.newPage();
+    // Every limit stretched by the load (each wait still ends as soon as what it waits for is there).
+    const scale = timeScale(baseScale, attempt);
+    page.t = (ms) => Math.round(ms * scale);
+    page.setDefaultTimeout(page.t(30000));
+    page.setDefaultNavigationTimeout(page.t(30000));
     page.frozen = !!day && moves;
     if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
     page.on("pageerror", (e) => consoleErrors.push(`uncaught: ${e.message}`));
-    page.on("response", (r) => { if (r.status() >= 500) problems.push(`${where}: ${r.status()} from ${r.request().method()} ${new URL(r.url()).pathname}`); });
-    page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
-    const files = [];
+    page.on("response", (r) => { if (r.status() >= 500) result.problems.push(`${where}: ${r.status()} from ${r.request().method()} ${new URL(r.url()).pathname}`); });
+    page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") result.notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
+    // A screenshot is taken only once the page has loaded (unsettled() finds nothing) and stopped changing (settle()), then
+    // taken again at once: kept when the two are byte for byte the same and nothing started loading meanwhile, retaken
+    // otherwise, and a failure after SHOT_TRIES. A flow's checks since its last action must still hold after it (CHECKS).
     const shot = async (name) => {
       const file = screenshotFile(name, viewport);
-      await page.waitForLoadState("networkidle").catch(() => { /* a page that keeps a request open: the stability wait below still runs */ });
-      await page.mouse.move(0, 0);   // no row under the pointer: a hovered row shows its checkbox and buttons
-      await page.evaluate(settle, !!page.scrolledByFlow);
-      // A modal (a confirm dialog, a sheet) is shot as the window shows it, not the whole page: a full-page capture resizes the
-      // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
-      const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible").count();
-      await page.screenshot({ path: join(out, file), fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}` });
-      files.push(file);
+      let why = "";
+      for (let i = 1; i <= SHOT_TRIES; i++) {
+        await page.waitForLoadState("networkidle", { timeout: page.t(10000) }).catch(() => { /* a page that keeps a request open: the readiness check below still applies */ });
+        const loading = await waitSettled(page, page.t(20000));
+        if (loading.length) { why = `still loading: ${loading.join("; ")}`; continue; }
+        await page.mouse.move(0, 0);   // no row under the pointer: a hovered row shows its checkbox and buttons
+        await page.evaluate(settle, !!page.scrolledByFlow);
+        // A modal (a confirm dialog, a sheet) is shot as the window shows it, not the whole page: a full-page capture resizes the
+        // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
+        const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible").count();
+        const options = { fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}`, timeout: page.t(30000) };
+        await page.evaluate(capturing, true);
+        const first = await page.screenshot(options), second = await page.screenshot(options);
+        await page.evaluate(capturing, false);
+        const after = await page.evaluate(unsettled);
+        if (after.length) { why = `started loading again: ${after.join("; ")}`; continue; }
+        if (!first.equals(second)) { why = "still changing (two captures in a row differed)"; continue; }
+        const lost = await recheck(page);
+        if (lost) throw new Error(lost);
+        writeFileSync(join(out, file), first);
+        result.files.push(file);
+        if (i > 1) result.notes.push(`${where}: ${file} taken on try ${i} (before that: ${why})`);
+        return;
+      }
+      throw new Error(`${file} never settled (${SHOT_TRIES} tries): ${why}`);
     };
     try {
       await work(page, shot);
     } catch (e) {
-      problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
+      result.problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
       console.error(`${where}: ${e.message}`);   // the whole message, with Playwright's call log, for finding why
       // Straight to page.screenshot, not shot(): a failed step keeps its evidence in artifacts/verify/ (sync_screenshots never commits -FAILED- files).
-      await page.screenshot({ path: join(out, screenshotFile(`${label.replace(/\W+/g, "-")}-FAILED`, viewport)), fullPage: true }).catch(() => { /* best effort: the step's own error is already recorded above */ });
+      const failed = screenshotFile(`${label.replace(/\W+/g, "-")}-FAILED`, viewport);
+      await page.screenshot({ path: join(out, failed), fullPage: true, timeout: page.t(30000) }).then(() => result.failed_files.push(failed))
+        .catch(() => { /* best effort: the step's own error is already recorded above */ });
     }
-    for (const c of consoleErrors) problems.push(`${where}: console error: ${c.slice(0, 300)}`);
-    results.push({ label, viewport, screenshots: files, consoleErrors });
+    for (const c of consoleErrors) result.problems.push(`${where}: console error: ${c.slice(0, 300)}`);
     await ctx.close();
   }
 
-  for (const name of pages) {
-    for (const viewport of DEFAULT_VIEWPORTS) {
-      await visit(name, viewport, async (page, shot) => {
-        await page.goto(`${base}/#${name}`, { waitUntil: "networkidle" });
-        await shot(name);
-      });
+  for (const item of items) {
+    const result = report.items.find((r) => r.id === item.id);
+    result.problems = [];
+    if (item.page) {
+      for (const viewport of DEFAULT_VIEWPORTS) {
+        await visit(result, item.page, viewport, async (page, shot) => {
+          await page.goto(`${base}/#${item.page}`, { waitUntil: "networkidle" });
+          await shot(item.page);
+        });
+      }
+    } else if (item.flow) {
+      const flow = item.flow;
+      if (flow.signed_in && !(signedInUrl && session)) result.notes.push(`flow ${flow.name}: skipped (no signed-in server: run it with make verify)`);
+      else {
+        for (const viewport of flow.viewports ?? DEFAULT_VIEWPORTS) {
+          await visit(result, `flow ${flow.name}`, viewport, async (page, shot) => {
+            await page.goto(`${flow.signed_in ? signedInUrl : base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
+            await waitSettled(page, page.t(15000));   // loaded before the first step picks something on it (a screenshot insists)
+            page.checks = [];
+            for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
+            await shot(`flow-${flow.name}`);
+          }, !!flow.signed_in);
+        }
+      }
+    } else if (signedInUrl && session) {   // the device cache check: last (selectItems), as it signs the shared session out
+      await visit(result, DEVICE_CACHE, "desktop", (page) => cacheCheck(page, signedInUrl), true, { prf: true });
+    } else {
+      result.notes.push(`${DEVICE_CACHE}: skipped (no signed-in server: run it with make verify)`);
     }
-  }
-  for (const flow of flows) {
-    if (args.length && !args.includes(flow.page ?? "overview")) continue;
-    if (flow.signed_in && !(signedInUrl && session)) { notes.push(`flow ${flow.name}: skipped (no signed-in server: run it with make verify)`); continue; }
-    for (const viewport of flow.viewports ?? DEFAULT_VIEWPORTS) {
-      await visit(`flow ${flow.name}`, viewport, async (page, shot) => {
-        await page.goto(`${flow.signed_in ? signedInUrl : base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
-        for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
-        await shot(`flow-${flow.name}`);
-      }, !!flow.signed_in);
-    }
-  }
-  // Last: it signs the shared session out.
-  if (!args.length || args.includes("transactions")) {
-    if (signedInUrl && session) await visit("device cache", "desktop", (page) => cacheCheck(page, signedInUrl), true, { prf: true });
-    else notes.push("device cache: skipped (no signed-in server: run it with make verify)");
+    result.ok = !result.problems.length;
+    save();
+    console.log(`  ${result.ok ? "ok  " : "FAIL"} ${item.id}${result.files.length ? ` (${result.files.length} image${result.files.length === 1 ? "" : "s"})` : ""}`);
+    for (const n of result.notes) console.log(`       note: ${n}`);
+    for (const p of result.problems) console.error(`       ${p}`);
   }
   await browser.close();
 
-  writeFileSync(join(out, "report.json"), JSON.stringify({ base, results, problems, notes }, null, 2));
-  const shots = results.reduce((n, r) => n + r.screenshots.length, 0);
-  console.log(`verify: ${results.length} visits, ${shots} screenshots in ${out}`);
-  for (const n of notes) console.log(`  note: ${n}`);
-  for (const p of problems) console.error(`  FAIL: ${p}`);
-  console.log(problems.length ? `verify: FAILED (${problems.length} problem${problems.length === 1 ? "" : "s"})` : "verify: OK, no console errors or 5xx responses");
-  process.exit(problems.length ? 1 : 0);
+  const failed = report.items.filter((r) => !r.ok);
+  const shots = report.items.reduce((n, r) => n + r.files.length, 0);
+  console.log(`verify: attempt ${attempt}: ${report.items.length} pages and flows, ${shots} screenshots in ${out}; ` +
+    (failed.length ? `FAILED: ${failed.map((r) => r.id).join(", ")}` : "all passed"));
+  process.exit(failed.length ? 1 : 0);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main().catch((e) => { console.error(e); process.exit(2); });

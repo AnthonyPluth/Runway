@@ -89,12 +89,15 @@ Link to another page by its address, base included: `[Configuration](/Runway/ref
 
 ## Verifying a change in the real app
 
-Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` (or `python run.py verify [page…]`) makes a temporary database, fills it with the demo data (the made-up data `python run.py demo` adds, never yours), starts Runway on a free port, and drives it with Playwright: each page (`overview`, `transactions`, `budget`, `recurring`, `networth`, `reports`, `churning`, `setup`) at phone (440×956 px, an iPhone 17 Pro Max) and desktop (1280×800 px) widths, and saves a full-page screenshot of each (`<page>-<width>.png`). There is no tablet width: a change to the tablet rail (768 to 1023 px) is looked at by resizing a browser, and nothing of that is committed. The screenshots and `report.json` (console errors, failed requests) go to `artifacts/verify/`, which is not committed. It exits non-zero on a console error, an uncaught error in the page, a 5xx response or a failed scripted step, and says which page, width and request.
+Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` (or `python run.py verify [page…]`) makes a temporary database, fills it with the demo data (the made-up data `python run.py demo` adds, never yours), starts Runway on a free port, and drives it with Playwright: each page (`overview`, `transactions`, `budget`, `recurring`, `networth`, `reports`, `churning`, `setup`) at phone (440×956 px, an iPhone 17 Pro Max) and desktop (1280×800 px) widths, and saves a full-page screenshot of each (`<page>-<width>.png`). There is no tablet width: a change to the tablet rail (768 to 1023 px) is looked at by resizing a browser, and nothing of that is committed. The screenshots and `report.json` (console errors, failed requests) go to `artifacts/verify/`, which is not committed. It exits non-zero on a console error, an uncaught error in the page, a 5xx response, a failed scripted step or a page that never finished loading, and says which page, width and request.
 
 ```bash
-make verify                          # every page, and the scripted flows
-make verify PAGES="budget setup"     # only these pages (and the flows that start on them)
+make verify                                # every page, and the scripted flows
+make verify PAGES="budget setup"           # only these pages (and the flows that start on them)
+make verify PAGES="budget-edit"            # only this flow (a flow's name is its file's), or device-cache
 ```
+
+Verify the pages you changed with `PAGES`: a full run takes several minutes, a page a minute or two.
 
 It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` by default); without one, run `npx playwright install chromium` in `frontend/` once. A scripted flow is a small JSON file in `frontend/verify/flows/`: a list of steps such as opening Settings → Categories and tapping a category's emoji. A pull request that changes the UI adds or edits a flow for it; the format is in `frontend/verify/flows/README.md`. A flow that needs a sign-in (`"signed_in": true`, the app lock) runs against a second demo server with sign-in on and a session made for it, with Chrome's virtual WebAuthn authenticator standing in for Face ID or Touch ID. Pull requests that change the UI commit the updated screenshots (below).
 
@@ -104,7 +107,17 @@ It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` 
 sudo apt-get install -y libfaketime
 ```
 
-So that two runs give identical images, each shot also stops the endless CSS animations, waits for the page to stop changing, scrolls to the top (unless the flow scrolled with `scroll_to`), moves the pointer off the page, writes the demo servers' port as a fixed number, and leaves toasts out. A shot with a modal open (a confirm dialog, a sheet) is the window as it shows, not the whole page, since resizing the window for a full-page capture could close the dialog. The app's once-a-minute refresh is switched off in the browser during the flows. Check it with `sha256sum artifacts/verify/*.png` after two runs.
+So that two runs give identical images, each shot also stops the endless CSS animations, waits for the page to stop changing, scrolls to the top (unless the flow scrolled with `scroll_to`), moves the pointer off the page, writes the demo servers' port as a fixed number, and leaves toasts out. A shot with a modal open (a confirm dialog, a sheet) is the window as it shows, not the whole page, since resizing the window for a full-page capture could close the dialog. The app's once-a-minute refresh is switched off in the browser during the flows. A shot is taken only once nothing on the page is still loading (no skeleton placeholder, nothing `aria-busy`, no transition still moving, the Investments page's live prices in) and is then taken a second time: it's kept when the two are byte for byte the same, retaken when not, and fails after four tries, so a half-loaded page is never kept. A flow's `expect_text` and `expect_focus` checks since its last action are made again after the shot, and the app doesn't see the window resizing that Chromium does for a full-page capture (it switched a desktop page to the phone layout for a moment, closing a picker or collapsing a row). `make verify-twice` runs everything twice, on fresh data, and fails on any image that differs.
+
+**On a busy machine** (several agents on one container), `make verify` takes care of itself:
+
+- One run at a time per machine: a second one prints `another verify is running on this machine (…), waiting...` and starts when the first ends (an hour at most, then it exits 3; `RUNWAY_VERIFY_LOCK_WAIT` in seconds). The lock is `/tmp/runway-verify.lock` (`flock`), let go of when its process ends however it ends.
+- It waits up to ten minutes for the load to drop below 1.5 per CPU before it starts, and stretches every wait's limit by the load (up to 8 times), since each wait ends as soon as what it waits for is there.
+- A page or flow that fails is run again, alone, on a fresh copy of the demo data, up to three times in all, more patiently each time. One that passed only on a retry is listed as `flaky` in the summary.
+- All or nothing: only a run where every page and flow passed puts its images in `artifacts/verify/`. A failed run leaves its `report.json`, each failed step's `-FAILED-` image and, under `unverified/`, what it did capture, for looking at, not committing.
+- The whole output also goes to its own log, `artifacts/verify-logs/verify-<time>-<pid>.log` (the path is printed first and last), so don't redirect it to a fixed file name another run could share.
+
+A failed run ends with a `FAIL:` line per page or flow, with its first problem (a step that timed out, `never settled` and what was still loading, a check that `no longer held after the screenshot`, a console error or a 5xx); the log has each attempt's full message.
 
 ![A page `make verify` saved: Runway's Budget page at phone width, with demo data](../../../../../screenshots/budget-phone.png)
 
@@ -124,7 +137,7 @@ The inactive labels and icons use `--nav-inactive` in `app.css` (`#b9bec7` in th
 make screenshots
 ```
 
-before its last push and commits what changed. `make screenshots` is a full `make verify` followed by `tools/sync_screenshots.py` (standard library only), which copies the new screenshots in, leaves identical files untouched and removes the ones whose page or flow is gone. The pull request's **Files changed** then shows each changed screenshot as an image diff (2-up, swipe or onion skin), so a reviewer sees what the change did to the page.
+before its last push and commits what changed. `make screenshots` is `make verify` followed by `tools/sync_screenshots.py` (standard library only), which copies the new screenshots in, leaves identical files untouched and removes the ones whose page or flow is gone. It copies nothing unless the whole run passed; `make screenshots PAGES="budget budget-edit"` updates only those pages' and flows' images and leaves the rest (removing a flow's image takes a full run). Never copy images into `screenshots/` by hand. The pull request's **Files changed** then shows each changed screenshot as an image diff (2-up, swipe or onion skin), so a reviewer sees what the change did to the page.
 
 Commit every change in the directory, including pages you didn't mean to touch: an unexpected diff is how a change that leaks into another page gets noticed. The clock is frozen (below), so a date or a chart's axis doesn't change with the day: an image changes only when the UI or its data does. The repository is public: only `make verify`'s made-up demo data is ever committed, and the independent review opens every added or changed image to check it. `make verify` captures the dark theme only; check the light theme yourself for a change that depends on it, and say so. A pull request with no UI change has nothing to update, and says so.
 
