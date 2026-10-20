@@ -13,7 +13,8 @@ one a correction that used to live as prose and now fails `make check` and CI in
   images belong (the extension's icons, the served assets, the docs site's logo and home page images); a hand-made before
   and after image fails.
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
-  every action pinned by SHA has its version in a comment; and `gh api` with `per_page` paginates.
+  every action pinned by SHA has its version in a comment; `gh api` with `per_page` paginates; and no `runner`, `steps`, `job` or
+  `env` expression in a workflow's or job's `env:` (GitHub rejects the whole file, which then never runs).
 
 Exits 1, listing each problem, when any check fails."""
 from __future__ import annotations
@@ -180,6 +181,12 @@ USES = re.compile(r"^[ \t]*(?:-[ \t]*)?uses:[ \t]*([^\s#]+)(.*)$", re.MULTILINE)
 PINNED = re.compile(r"@[0-9a-f]{40}$")
 BASH_DEFAULT = re.compile(r"^defaults:[ \t]*\n[ \t]+run:[ \t]*\n(?:[ \t]{4,}\S.*\n)*?[ \t]{4,}shell:[ \t]*bash[ \t]*(?:#.*)?$",
                           re.MULTILINE)
+# A workflow-level or job-level `env:` block (a step's is indented deeper). GitHub's context table lets these see `github`, `vars`,
+# `secrets`, `inputs`, `needs`, `strategy` and `matrix` only: a `runner`, `steps`, `job` or `env` expression there makes the
+# whole file invalid, so it never runs and shows as a failed run with no jobs. Put it in a step's `env:`.
+EARLY_ENV = re.compile(r"^( {0}| {4})env:[ \t]*\n((?:\1[ ]{2,}\S.*\n)+)", re.MULTILINE)
+# (not after a word character or a dot: `matrix.runner.os` and `needs.job.outputs.x` are fine; `.*` not `[^}]*`, which a `{0}` in a format() would stop)
+STEP_ONLY_CONTEXT = re.compile(r"\$\{\{.*(?<![\w.])(runner|steps|job|env)\.")
 GH_API_LIST = re.compile(r"\bgh api\b[^\n]*per_page=")
 
 
@@ -195,6 +202,12 @@ def check_workflow(name: str, text: str, workflow: bool = True) -> list[str]:
             problems.append(f"{name}: {target} isn't pinned by its commit SHA")
         elif not re.search(r"#\s*v?\d", rest):
             problems.append(f"{name}: {target} has no version in a comment (`# v1.2.3`)")
+    for block in EARLY_ENV.finditer(text if workflow else ""):
+        for line in block.group(2).splitlines():
+            m = STEP_ONLY_CONTEXT.search(line)
+            if m:
+                problems.append(f"{name}: `{m.group(1)}` isn't available in a workflow's or job's `env:` (the file would be invalid "
+                                f"and never run); set it in a step's `env:`: {line.strip()[:80]}")
     for line in text.splitlines():
         if GH_API_LIST.search(line) and "--paginate" not in line:
             problems.append(f"{name}: `gh api ... per_page=` without --paginate reads only the first page: {line.strip()[:80]}")

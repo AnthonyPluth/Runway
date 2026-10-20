@@ -94,6 +94,8 @@ describe("InvestmentsView", () => {
     await screen.findByText("Holdings");
     expect(container.querySelector("dl")).not.toBeNull();
     expect(screen.getByTestId("headline")).toHaveTextContent("Total value · 1 account");
+    // The status chip is part of the headline block (beside the valuation dates on desktop, under the gain chips on a phone), not a row of its own above it.
+    expect(screen.getByTestId("headline")).toContainElement(screen.getByTestId("holdings-updated"));
     for (const l of ["Today", "Total gain", "Return · 1Y", "Dividends · 12 mo"]) expect(screen.getByText(l, { selector: "dt span" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 holdings .* need a cost basis/ })).toBeInTheDocument();
     expect(screen.queryByText("Checks")).toBeNull();

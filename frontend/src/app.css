@@ -25,6 +25,9 @@
    56px of tabs, over the 12px it is lifted and the safe-area inset (the home indicator). What sits above the bar (page padding,
    the toasts, a sticky footer) uses it. */
 :root { --tabbar-h: calc(70px + env(safe-area-inset-bottom)); }
+/* The To review bar's height (ReviewCard): it sticks just above the tab bar on a phone, and the Transactions page leaves this much
+   room at its end while the bar is shown, so the last row isn't under it. */
+:root { --review-bar-h: 4rem; }
 
 /* shadcn-svelte's default theme (neutral). Runway uses the dark one (index.html sets class="dark"). */
 :root {

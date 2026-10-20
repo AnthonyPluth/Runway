@@ -25,7 +25,7 @@ set -euo pipefail
 CONTEXT="Merge gate"
 REQUIRED_WORKFLOWS=("Docker image" "Security scans" "CodeQL")   # take CodeQL out if its default setup is turned off
 REQUIRED_STATUSES=("Agent review")   # Dependabot's pull requests aren't reviewed (below)
-IGNORED_WORKFLOWS='^(Preview|Cancel runs on close|Merge gate)$'   # a preview deployment runs for an hour
+IGNORED_WORKFLOWS='^(Preview|Cancel runs on close|Merge gate|Screenshot diff)$'   # a preview deployment runs for an hour; the screenshot diff is a comment, never a verdict
 IGNORED_APPS='^(codecov|github-actions)$'   # Codecov's statuses are informational; Actions' runs are counted above
 IGNORED_STATUSES="^(${CONTEXT}|codecov/.*)$"
 OK_CONCLUSIONS='^(success|skipped|neutral)$'

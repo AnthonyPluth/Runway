@@ -48,7 +48,7 @@ ALLOWED = [
     "POST /api/equity/grants/{id}/remove", "POST /api/investments/cost", "POST /api/investments/plan", "POST /api/overrides",
     "POST /api/recategorize", "POST /api/recurring", "POST /api/recurring/dismiss", "POST /api/recurring/preview", "POST /api/recurring/suggestions/dismiss",
     "POST /api/recurring/suggestions/restore", "POST /api/recurring/{id}", "POST /api/recurring/{id}/amount",
-    "POST /api/recurring/{id}/match", "POST /api/retail/charges/{id}/apply", "POST /api/retail/charges/{id}/link",
+    "POST /api/recurring/{id}/end", "POST /api/recurring/{id}/match", "POST /api/recurring/{id}/skip-missed", "POST /api/retail/charges/{id}/apply", "POST /api/retail/charges/{id}/link",
     "POST /api/retail/charges/{id}/restore", "POST /api/retail/charges/{id}/unlink", "POST /api/retail/items/{id}",
     "POST /api/retail/items/{id}/restore", "POST /api/retail/match", "POST /api/retail/orders/{id}/suggest", "POST /api/rules",
     "POST /api/rules/preview", "POST /api/rules/{id}", "POST /api/rules/{id}/apply", "POST /api/tracked/{id}", "POST /api/transactions",
@@ -458,10 +458,12 @@ class AllowlistTests(unittest.TestCase):
     def test_what_is_destructive(self):
         for m, p in (("DELETE", "/api/rules/{id}"), ("DELETE", "/api/overrides"), ("POST", "/api/categories/remove"),
                      ("POST", "/api/accounts/{id}/remove"), ("POST", "/api/recategorize"), ("POST", "/api/transactions/bulk"),
-                     ("POST", "/api/transactions/bulk-delete"), ("POST", "/api/rules/{id}/apply"), ("POST", "/api/ai/apply"), ("POST", "/api/recurring/dismiss")):
+                     ("POST", "/api/transactions/bulk-delete"), ("POST", "/api/rules/{id}/apply"), ("POST", "/api/ai/apply"), ("POST", "/api/recurring/dismiss"),
+                     ("POST", "/api/recurring/{id}/skip-missed")):
             self.assertTrue(mcp_access.destructive(m, p), p)
         for m, p in (("POST", "/api/transactions"), ("POST", "/api/transactions/import"), ("POST", "/api/rules/{id}"),
-                     ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore")):
+                     ("POST", "/api/accounts/{id}/restore"), ("POST", "/api/retail/items/{id}/restore"),
+                     ("POST", "/api/recurring/{id}/end")):   # one item's end date, undoable: not "many"
             self.assertFalse(mcp_access.destructive(m, p), p)
 
 
