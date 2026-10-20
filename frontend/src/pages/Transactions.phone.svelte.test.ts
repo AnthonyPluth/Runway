@@ -81,6 +81,11 @@ describe("Transactions on a phone: filters", () => {
     expect(screen.getByRole("combobox", { name: "Category" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Dates:/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "More filters" })).toBeInTheDocument();
+    // Two buttons side by side, two icons: sliders for the master Filters button, an ellipsis for More.
+    const more = screen.getByRole("button", { name: "More filters" });
+    expect(button.querySelector("svg.lucide-sliders-horizontal")).not.toBeNull();
+    expect(more.querySelector("svg.lucide-ellipsis")).not.toBeNull();
+    expect(more.querySelector("svg.lucide-sliders-horizontal")).toBeNull();
   });
 
   it("counts the active filters, lists each with an ✕, and clearing restores the list", async () => {
