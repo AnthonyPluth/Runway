@@ -245,7 +245,9 @@ class ListPageTests(DbCase):
         self.same(accounts.api_accounts(self.c, {}, {}), old_api_accounts(self.c))
 
     def test_recurring_answers_as_before(self):
-        self.same(api_recurring.api_recurring(self.c, {}, {}), old_api_recurring(self.c))
+        # (missed_run is newer than the old way: tests/test_recurring.py's MissedGroupTests check it)
+        self.same([{k: v for k, v in it.items() if k != "missed_run"} for it in api_recurring.api_recurring(self.c, {}, {})],
+                  old_api_recurring(self.c))
         self.same(recurring.missed(self.c, TODAY), old_missed(self.c, TODAY))
 
     def test_state_answers_as_before(self):

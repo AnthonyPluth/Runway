@@ -6,7 +6,7 @@ import type { RecurringItem } from "./types";
 /** An item without what's worked out from today and the forecast (when it's due, what's missed, what it's expected to
  *  come to): that mustn't be painted as if current. */
 const undated = (r: RecurringItem): RecurringItem => {
-  const { next_date: _n, late_date: _l, missed: _m, expected_amount: _e, suggested_amount: _s, skipped: _k, ...rest } = r;
+  const { next_date: _n, late_date: _l, missed: _m, missed_run: _r, expected_amount: _e, suggested_amount: _s, skipped: _k, ...rest } = r;
   return rest;
 };
 

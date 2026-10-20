@@ -58,7 +58,7 @@ from .api.networth import (
 from .api.notifications import api_push, api_push_prefs, api_push_subscribe, api_push_test, api_push_unsubscribe
 from .api.recurring import (
     api_recurring, api_recurring_add, api_recurring_amount, api_recurring_candidates, api_recurring_delete, api_recurring_dismiss, api_recurring_missed, api_recurring_preview,
-    api_recurring_add_text, api_recurring_suggestion_dismiss, api_recurring_suggestion_restore, api_recurring_suggestions,
+    api_recurring_end, api_recurring_skip_missed, api_recurring_add_text, api_recurring_suggestion_dismiss, api_recurring_suggestion_restore, api_recurring_suggestions,
     api_recurring_suggestions_dismissed, api_recurring_update, api_tx_recurring
 )
 from .api.reports import (
@@ -168,6 +168,8 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/recurring/{id}/match", api_recurring_add_text),
     ("GET", "/api/recurring/{id}/candidates", api_recurring_candidates),
     ("POST", "/api/recurring/{id}/amount", api_recurring_amount),
+    ("POST", "/api/recurring/{id}/skip-missed", api_recurring_skip_missed),
+    ("POST", "/api/recurring/{id}/end", api_recurring_end),
     ("POST", "/api/recurring/{id}", api_recurring_update),
     ("DELETE", "/api/recurring/{id}", api_recurring_delete),
     ("POST", "/api/connect", api_connect),

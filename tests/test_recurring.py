@@ -710,5 +710,126 @@ class RecurringCategoryTests(LedgerCase):
         self.assertIsNone(self.conn.execute(select(Recurring.category)).scalar())
 
 
+class MissedGroupTests(LedgerCase):
+    """A $25 weekly gym fee on Mondays, paid Aug 3 to Aug 24 and then not again: by Wednesday Sep 23 it has missed three
+    in a row (Aug 31, Sep 8 after Labor Day, Sep 14), and Sep 21's window is still open."""
+
+    def setUp(self):
+        super().setUp()
+        from runway.server.api import recurring as api
+        from runway.server.api import state
+        self.api, self.state = api, state
+        self.acct("chk", "checking", 2000.0)
+        for d in ("2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24"):
+            self.tx("chk", d, -25.0, "GYM CLUB DUES")
+        self.body = {"name": "Gym", "account_id": "chk", "amount": -25, "frequency": "weekly",
+                     "anchor_date": "2026-08-03", "match": "gym club"}
+        self.rid = self.api.api_recurring_add(self.conn, None, self.body)["id"]
+
+    def call(self, fn, *args, today=TODAY):
+        with mock.patch.object(self.api, "date", wraps=date) as d:
+            d.today.return_value = today
+            return fn(*args)
+
+    def listed(self, today=TODAY):
+        return next(i for i in self.call(self.api.api_recurring, self.conn, None, None, today=today) if i["id"] == self.rid)
+
+    def missed(self, today=TODAY):
+        return [m["date"] for m in recurring.missed(self.conn, today) if m["recurring_id"] == self.rid]
+
+    def overrides(self):
+        return sorted(self.conn.execute(select(Override.key, Override.amount)).fetchall())
+
+    def events(self, today=TODAY):
+        return [e["date"] for e in forecast.build(self.conn, today, 60)["events"] if e.get("recurring_id") == self.rid]
+
+    def test_skip_all_skips_every_missed_one_at_once_and_undo_puts_back_exactly_what_was_there(self):
+        self.assertEqual(self.missed(), ["2026-09-14", "2026-09-08", "2026-08-31"])
+        # One of them had its amount changed by hand, and a date that isn't missed has its own edit.
+        self.state.api_override_set(self.conn, None, {"key": f"rec:{self.rid}:2026-09-08", "amount": -27.5})
+        self.state.api_override_set(self.conn, None, {"key": f"rec:{self.rid}:2026-10-05", "amount": -30})
+        before = self.overrides()
+        r = self.call(self.api.api_recurring_skip_missed, self.conn, None, {}, str(self.rid))
+        keys = [f"rec:{self.rid}:{d}" for d in ("2026-08-31", "2026-09-08", "2026-09-14")]
+        self.assertEqual(r["keys"], keys)
+        self.assertEqual(r["previous"], [{"key": keys[0], "amount": None}, {"key": keys[1], "amount": -27.5}, {"key": keys[2], "amount": None}])
+        self.assertEqual(self.missed(), [])
+        self.assertEqual(self.listed()["missed"], [])
+        self.assertEqual({k: a for k, a in self.overrides() if k in keys}, dict.fromkeys(keys, 0))
+        with self.assertRaises(ApiError):   # nothing left to skip
+            self.call(self.api.api_recurring_skip_missed, self.conn, None, {}, str(self.rid))
+        self.api.api_recurring_skip_missed(self.conn, None, {"restore": r["previous"]}, str(self.rid))
+        self.assertEqual(self.overrides(), before)
+        self.assertEqual(self.missed(), ["2026-09-14", "2026-09-08", "2026-08-31"])
+        for bad in ([], "all", [{"key": "rec:999:2026-09-14", "amount": None}], [{"key": f"rec:{self.rid}:soon", "amount": None}],
+                    [{"key": keys[0], "amount": "lots"}], [{"key": keys[0]}], [{"key": keys[0], "amount": None, "extra": 1}]):
+            with self.subTest(restore=bad), self.assertRaises(ApiError):
+                self.api.api_recurring_skip_missed(self.conn, None, {"restore": bad}, str(self.rid))
+        self.assertEqual(self.overrides(), before)
+        with self.assertRaises(ApiError) as e:
+            self.call(self.api.api_recurring_skip_missed, self.conn, None, {}, "999")
+        self.assertEqual(e.exception.status, 404)
+        # Undo for an item that's gone since: not found, and no dates written.
+        self.api.api_recurring_delete(self.conn, None, None, str(self.rid))
+        with self.assertRaises(ApiError) as e:
+            self.api.api_recurring_skip_missed(self.conn, None, {"restore": r["previous"]}, str(self.rid))
+        self.assertEqual(e.exception.status, 404)
+        self.assertEqual(self.overrides(), [])
+
+    def test_mark_as_ended_ends_it_the_day_before_the_first_missed_and_nothing_after_is_expected(self):
+        item = self.listed()
+        self.assertEqual(item["missed_run"], [f"rec:{self.rid}:{d}" for d in ("2026-08-31", "2026-09-08", "2026-09-14")])
+        self.assertEqual(item["next_date"], "2026-09-28")
+        # Sep 21's is late, so the forecast has it today; Oct 12 is Columbus Day.
+        self.assertEqual(self.events(), ["2026-09-23", "2026-09-28", "2026-10-05", "2026-10-13", "2026-10-19", "2026-10-26",
+                                         "2026-11-02", "2026-11-09", "2026-11-16"])
+        r = self.call(self.api.api_recurring_end, self.conn, None, {}, str(self.rid))
+        self.assertEqual((r["end_date"], r["previous"]), ("2026-08-30", {"end_date": None}))
+        self.assertEqual(self.conn.execute(select(Recurring.end_date)).scalar(), "2026-08-30")
+        # Not forecast (Upcoming lists the forecast's events), not due, not missed.
+        self.assertEqual(self.events(), [])
+        ended = dict(self.conn.execute(select(Recurring)).fetchone())   # what came before the end date is still its schedule
+        self.assertEqual(forecast.occurrences(ended, date(2026, 8, 20), date(2026, 12, 31)), [date(2026, 8, 24)])
+        item = self.listed()
+        self.assertEqual((item["next_date"], item["late_date"], item["missed"], item["missed_run"]), (None, None, [], []))
+        self.assertEqual(self.missed(), [])
+        with self.assertRaises(ApiError):   # once ended, it hasn't missed any
+            self.call(self.api.api_recurring_end, self.conn, None, {}, str(self.rid))
+        self.api.api_recurring_end(self.conn, None, {"restore": r["previous"]}, str(self.rid))
+        self.assertIsNone(self.conn.execute(select(Recurring.end_date)).scalar())
+        self.assertEqual(self.missed(), ["2026-09-14", "2026-09-08", "2026-08-31"])
+        self.assertEqual(len(self.events()), 9)
+        for bad in ({}, {"end_date": "soon"}, {"end_date": 5}, {"end_date": None, "x": 1}, None):
+            with self.subTest(restore=bad), self.assertRaises(ApiError):
+                self.api.api_recurring_end(self.conn, None, {"restore": bad}, str(self.rid))
+        self.api.api_recurring_end(self.conn, None, {"restore": {"end_date": "2027-03-01"}}, str(self.rid))
+        self.assertEqual(self.conn.execute(select(Recurring.end_date)).scalar(), "2027-03-01")
+
+    def test_mark_as_ended_needs_three_in_a_row(self):
+        self.tx("chk", "2026-09-08", -25.0, "GYM CLUB DUES")   # paid after Labor Day: only Sep 14 is missed since
+        recurring.auto_match(self.conn)
+        self.assertEqual(self.missed(), ["2026-09-14", "2026-08-31"])
+        self.assertEqual(self.listed()["missed_run"], [])
+        self.assertEqual(self.listed(date(2026, 10, 6))["missed_run"], [f"rec:{self.rid}:{d}" for d in ("2026-09-14", "2026-09-21", "2026-09-28")])
+        with self.assertRaises(ApiError) as e:
+            self.call(self.api.api_recurring_end, self.conn, None, {}, str(self.rid))
+        self.assertEqual(str(e.exception), "It hasn’t missed 3 payments in a row")
+        self.assertEqual(self.call(self.api.api_recurring_end, self.conn, None, {}, str(self.rid), today=date(2026, 10, 6))["end_date"],
+                         "2026-09-13")
+        # Skipping one ends a run too.
+        self.api.api_recurring_end(self.conn, None, {"restore": {"end_date": None}}, str(self.rid))
+        self.state.api_override_set(self.conn, None, {"key": f"rec:{self.rid}:2026-09-21", "amount": 0})
+        self.assertEqual(self.listed(date(2026, 10, 6))["missed_run"], [])
+
+    def test_the_end_date_stops_an_occurrence_moved_off_a_weekend_too(self):
+        # Money out due on a Saturday moves to Monday; its end date counts the Saturday, so it has to fall before that.
+        item = {"frequency": "weekly", "anchor_date": "2026-08-01", "amount": -10, "end_date": None, "dates": None}
+        self.assertEqual(forecast.occurrences(item, date(2026, 8, 9), date(2026, 8, 10)), [date(2026, 8, 10)])
+        self.assertEqual(recurring.end_before(item, date(2026, 8, 10)), "2026-08-07")
+        self.assertEqual(forecast.occurrences({**item, "end_date": "2026-08-07"}, date(2026, 8, 2), date(2026, 8, 20)), [date(2026, 8, 3)])
+        # It never came at all: no end date before it starts.
+        self.assertIsNone(recurring.end_before(item, date(2026, 8, 3)))
+
+
 if __name__ == "__main__":
     unittest.main()

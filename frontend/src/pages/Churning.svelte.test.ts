@@ -108,6 +108,19 @@ describe("the Churning page", () => {
     expect(await screen.findByPlaceholderText("e.g. Sapphire Preferred")).toBeInTheDocument();
   });
 
+  it("says what Churning is for until the first card is added, and not once there is one", async () => {
+    serve({});
+    const { unmount } = render(Churning, { sub: "cards" });
+    const intro = await screen.findByTestId("churning-intro");
+    expect(intro).toHaveTextContent("Churning keeps track of the cards you open for their bonuses");
+    expect(intro).toHaveTextContent("Add a card, or add one Runway found on your accounts below.");
+    unmount();
+    serve({ cards: [card()] });
+    render(Churning, { sub: "cards" });
+    await screen.findByRole("button", { name: "Add a card" });
+    expect(screen.queryByTestId("churning-intro")).toBeNull();
+  });
+
   it("collapses empty sections to one line and hides Best card, and Rewards is a line, when there is one card and little else", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card({ status: "closed" })] }))) as never);
     render(Churning, { sub: "" });
