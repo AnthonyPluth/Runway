@@ -20,7 +20,8 @@ from ..storage.models import Account, Budget, MonthBudget
 def load(conn) -> dict[str, dict]:
     """Every budget by category: its row (`amount`, the usual amount; `rollover_from`) with `months`, the months that
     have an amount of their own ({"YYYY-MM": amount})."""
-    out = {r["category"]: {**r, "months": {}} for r in db.rows(conn.execute(select(Budget)))}
+    # By category: the order budget_plan, and so the forecast's budgets used and skipped, takes them in.
+    out = {r["category"]: {**r, "months": {}} for r in db.rows(conn.execute(select(Budget).order_by(Budget.category)))}
     for cat, month, amount in conn.execute(select(MonthBudget.category, MonthBudget.month, MonthBudget.amount)).fetchall():
         if cat in out:
             out[cat]["months"][month] = amount

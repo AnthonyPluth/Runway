@@ -189,7 +189,7 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
         select(T.account_id, T.posted, T.amount, T.payee, T.description, T.category)
         .where(T.account_id.in_(account_ids), T.posted > (today - timedelta(days=SPEND_WINDOW_DAYS)).isoformat(),
                T.posted <= today.isoformat(), T.pending == 0, T.amount < -ONE_OFF_LIMIT, T.recurring_id.is_(None))
-        .order_by(T.amount)))
+        .order_by(T.amount, T.posted, T.id)))   # biggest first; of the same amount, the earliest (the warning names three)
     tests = {a: paid_by_recurring([r for r in recurring if r["account_id"] == a]) for a in account_ids}
     return [t for t in txs if t["category"] not in transfers and not tests[t["account_id"]](t)]
 
@@ -1421,6 +1421,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)
         .where(Account.kind.in_(["checking", "savings", "credit"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
                T.posted > (today - timedelta(days=lookback_days)).isoformat())
+        .order_by(T.posted, T.id)   # suggestions of the same amount in the order their payees first showed up
     ))
     groups: dict[tuple, list[dict]] = {}
     for t in txs:

@@ -49,7 +49,8 @@ def recurring_logos(conn, items: list[dict]) -> dict[int, str | None]:
         return {}
     last: dict[int, dict] = {}
     for t in db.rows(conn.execute(
-            select(Transaction).where(Transaction.recurring_id.in_(ids)).order_by(Transaction.posted.desc()))):
+            # the latest, and of two on that day the one matched_by_item lists first (its last_matched)
+            select(Transaction).where(Transaction.recurring_id.in_(ids)).order_by(Transaction.posted.desc(), Transaction.id))):
         last.setdefault(t["recurring_id"], t)
     logos = tx_logos(conn, list(last.values()))
     out = {rid: logos.get(t["id"]) for rid, t in last.items()}
