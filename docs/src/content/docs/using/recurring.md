@@ -29,7 +29,7 @@ Items are grouped into **Money in** and **Money out**, late ones first and then 
 
 ## Matching
 
-Transactions are matched to their item automatically by merchant text, on the item's account and the same way the money moves, whatever the amount. An item can have several texts, one per line, and an amount range ("Only amounts between $1,500 and $7,000") to leave out other payments with the same text. To link one by hand, use the repeat icon on a transaction (on a phone, **Link to a recurring item** in its details); Runway offers to match its text from now on.
+Transactions are matched to their item automatically by merchant text, on the item's account and the same way the money moves, whatever the amount. An item can have several texts, one per line, and an amount range ("Only amounts between $1,500 and $7,000") to leave out other payments with the same text. When several items' texts fit one transaction, the item with the longest text takes it, and of items with texts as long, the one made first. To link one by hand, use the repeat icon on a transaction (on a phone, **Link to a recurring item** in its details); Runway offers to match its text from now on.
 
 Payments for one date are added up, so a paycheck in two deposits is one payment. When a fixed amount comes in short by more than 10%, the rest is still expected until the payment's window closes.
 
