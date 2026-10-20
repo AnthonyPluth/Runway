@@ -2,7 +2,7 @@
 title: Browser extension
 description: Bring in Amazon, Target, Costco and Carta orders and grants.
 sidebar:
-  order: 2
+  order: 10
 ---
 
 Amazon, Target and Costco don't offer an API for your own order history, so this small extension reads it the way their
@@ -108,5 +108,5 @@ extension says it couldn't find how costco.com signs its requests, open Account 
 once and import again; if it still can't, the account page's address or the names of the values the page keeps in
 storage need updating, which is a change in Runway only.
 
-For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Connections -> Browser extension ->
-Carta -> **Download what the extension read** shows why a grant was missed.
+For Carta, whose web app isn't documented either, Runway keeps what the extension read: **Settings → Connections → Browser extension → Carta → Download what the extension
+read** shows why a grant was missed.

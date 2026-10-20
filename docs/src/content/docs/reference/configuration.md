@@ -27,7 +27,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_NO_SYNC` | | `1` turns off the automatic background sync. |
 | `TZ` | America/New_York (Docker image); the system's otherwise | Decides what "today" is for forecasts and budgets, and when the daily sync runs. |
 
-With no `OIDC_ISSUER`, Runway refuses to listen beyond `localhost` unless `RUNWAY_ALLOW_NO_AUTH` is set. See [Deployment](/Runway/start/deployment/) and [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md).
+With no `OIDC_ISSUER`, Runway refuses to listen beyond `localhost` unless `RUNWAY_ALLOW_NO_AUTH` is set. See [Install with Docker](/Runway/start/docker/) and [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md).
 
 ## Advanced
 
