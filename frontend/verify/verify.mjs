@@ -76,14 +76,15 @@ export const HIDE_TOASTS = "[data-sonner-toaster] { visibility: hidden !importan
  *  cancels them all, which closed a confirm dialog that was still waiting for its own): only these, which never end. */
 export const STILL = ".animate-pulse, .animate-spin, .live-dot { animation: none !important; }";
 
-/** In every page from the start: no smooth scrolling, no caret, and the transitions and the open/close animations of
- *  dialogs, sheets and popovers (`[data-state]`) over at once, so a step after one sees where it ends and a capture
+/** In every page from the start: no smooth scrolling, no caret, and the transitions and the opening animations of
+ *  dialogs, sheets and popovers (`[data-state=open]`) over at once, so a step after one sees where it ends and a capture
  *  never holds it part way. Not `animation: none`, which a dialog waiting for its animation's end would wait on forever:
  *  a zero length still ends, with its event. (A sheet that slid in kept the raster of its last animated frame, a
- *  fraction of a pixel off and different each run: budget-suggest's images differed run to run.) */
+ *  fraction of a pixel off and different each run: budget-suggest's images differed run to run.) Closing animations
+ *  stay: with them instant, the page behind a dialog closed and another opened came back scrolled elsewhere. */
 export const PAGE_STYLE = "*, *::before, *::after { scroll-behavior: auto !important; caret-color: transparent !important; "
   + "transition-duration: 0s !important; transition-delay: 0s !important; } "
-  + "[data-state], [data-state]::before, [data-state]::after { animation-duration: 0s !important; animation-delay: 0s !important; }";
+  + "[data-state=open], [data-state=open]::before, [data-state=open]::after { animation-duration: 0s !important; animation-delay: 0s !important; }";
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;

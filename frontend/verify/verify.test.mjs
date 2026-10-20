@@ -97,7 +97,8 @@ describe("the frozen clock", () => {
 
   it("ends transitions and dialogs' animations at once, without taking the animations away (a dialog waits for their end)", () => {
     expect(PAGE_STYLE).toContain("transition-duration: 0s !important");
-    expect(PAGE_STYLE).toMatch(/\[data-state\][^{]*\{ animation-duration: 0s !important/);
+    expect(PAGE_STYLE).toMatch(/\[data-state=open\][^{]*\{ animation-duration: 0s !important/);
+    expect(PAGE_STYLE).not.toMatch(/\[data-state=closed\]|\[data-state\][^=]/);   // closing keeps its animation (and the scroll it restores)
     expect(PAGE_STYLE).not.toMatch(/animation: none/);
   });
 });
