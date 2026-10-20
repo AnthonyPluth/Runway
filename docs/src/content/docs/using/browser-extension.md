@@ -15,8 +15,8 @@ A matched transaction has a **receipt** badge on Transactions: click it to see w
 - **Target:** online orders and in-store purchases linked to your Target account (Target Circle, the Wallet barcode,
   a saved card or your phone number at the register).
 - **Costco:** your warehouse, gas station and car wash receipts, as costco.com's Orders & Purchases page lists them,
-  each with all of its items (instant savings are taken off the items they're for). Orders placed on costco.com
-  aren't read yet.
+  each with all of its items (instant savings are taken off the items they're for). Your Costco sign-in never leaves
+  the browser: only the receipts go to Runway. Orders placed on costco.com aren't read yet.
 - **Carta:** your stock options, RSUs and shares, and each company's latest share price, as carta.com shows them to
   you. It reads only; it never follows sign-out, exercise, accept or download links. Click **Carta** in the
   extension; once an import has worked, the daily import includes it, or about once a week or month if you choose
@@ -55,9 +55,9 @@ sign-in page in a tab, brought to the front. Sign in there and the import carrie
 to 12 hours, or until you close that tab.
 
 The daily import may run while you're busy with something else, so it doesn't take the focus: the window asks for
-your attention in the taskbar or Dock, and Runway sends a notification to your devices if you've turned on
-**Browser extension needs a sign-in** under Settings → Notifications. It names only the store, and is sent once per
-store while the sign-in waits.
+your attention in the taskbar or Dock, and Runway sends a notification to the devices of the person who made the
+extension's key, if they've turned on **Browser extension needs a sign-in** under Settings → Notifications. It names
+only the store, and is sent once per store while the sign-in waits.
 
 The extension also loads in Firefox 128 and later (`about:debugging` → **This Firefox** → **Load Temporary
 Add-on…**, pick `manifest.json`; Firefox forgets temporary add-ons when it restarts), but has only been tried in
