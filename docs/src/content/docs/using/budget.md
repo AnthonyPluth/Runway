@@ -7,7 +7,7 @@ sidebar:
 
 A monthly budget per category, with how much of it is spent and what's still coming.
 
-![Runway's Budget page on a desktop, with demo data: each category's budget for the month and how much of it is spent](../../../../../screenshots/budget-desktop.png)
+![Runway's Budget page on a desktop: each category's budget for the month and how much of it is spent](../../../../../screenshots/budget-desktop.png)
 
 ## Reading the page
 

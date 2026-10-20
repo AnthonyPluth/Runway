@@ -7,7 +7,7 @@ sidebar:
 
 Holdings and performance for your brokerage and retirement accounts, from the positions SimpleFIN or Plaid report. Accounts neither can see into, like some 401(k)s, can be tracked by hand.
 
-![Runway's Investments page on a desktop, with demo data: the headline, the chart, and the holdings table](../../../../../screenshots/investments-desktop.png)
+![Runway's Investments page on a desktop: the headline, the chart, and the holdings table](../../../../../screenshots/investments-desktop.png)
 
 ## The page
 

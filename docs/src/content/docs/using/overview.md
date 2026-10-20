@@ -5,11 +5,11 @@ sidebar:
   order: 1
 ---
 
-Runway's pages sit in the sidebar (a tab bar at the bottom on a phone, a rail of icons on a tablet), in two groups: **Day to day** (**Overview**, **Transactions**, **Budget**, **Recurring** and **Reports**) and **Wealth** (**Investments**, **Net worth** with its Summary, Equity and Retirement tabs, and **Churning**), with **Settings** at the bottom. The phone's tab bar keeps Overview, Transactions, Budget and Invest, with the rest under **More**. Every page and editor works at any width; this guide has one page for each.
+Runway's pages sit in the sidebar (a tab bar at the bottom on a phone, a rail of icons on a tablet), in two groups: **Day to day** (**Overview**, **Transactions**, **Budget**, **Recurring** and **Reports**) and **Wealth** (**Investments**, **Net worth** with its Summary, Equity and Retirement tabs, and **Churning**), with **Settings** at the bottom. The phone's tab bar keeps Overview, Transactions, Budget and Invest, with the rest under **More**. Every page and editor works at any width.
 
 Overview is the forecast: your chosen account's balance, day by day, for the next 30 days to 6 months.
 
-![Runway's Overview page on a desktop, with demo data: the checking balance, the 90-day forecast chart, what's coming up, this month's spending, investments and budgets](../../../../../screenshots/overview-desktop.png)
+![Runway's Overview page on a desktop: the checking balance, the 90-day forecast chart, what's coming up, this month's spending, investments and budgets](../../../../../screenshots/overview-desktop.png)
 
 ## The forecast
 
