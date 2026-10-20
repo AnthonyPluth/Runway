@@ -76,6 +76,15 @@ export const HIDE_TOASTS = "[data-sonner-toaster] { visibility: hidden !importan
  *  cancels them all, which closed a confirm dialog that was still waiting for its own): only these, which never end. */
 export const STILL = ".animate-pulse, .animate-spin, .live-dot { animation: none !important; }";
 
+/** In every page from the start: no smooth scrolling, no caret, and the transitions and the open/close animations of
+ *  dialogs, sheets and popovers (`[data-state]`) over at once, so a step after one sees where it ends and a capture
+ *  never holds it part way. Not `animation: none`, which a dialog waiting for its animation's end would wait on forever:
+ *  a zero length still ends, with its event. (A sheet that slid in kept the raster of its last animated frame, a
+ *  fraction of a pixel off and different each run: budget-suggest's images differed run to run.) */
+export const PAGE_STYLE = "*, *::before, *::after { scroll-behavior: auto !important; caret-color: transparent !important; "
+  + "transition-duration: 0s !important; transition-delay: 0s !important; } "
+  + "[data-state], [data-state]::before, [data-state]::after { animation-duration: 0s !important; animation-delay: 0s !important; }";
+
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
 
@@ -129,6 +138,13 @@ export function holdLayout() {
   };
   mql.removeEventListener = function (type, fn, options) { return remove.call(this, type, wrapped.get(fn) ?? fn, options); };
   globalThis.addEventListener("resize", (e) => { if (globalThis.__verifyCapturing) e.stopImmediatePropagation(); }, true);
+  // Elements resize with the window (a chart redrawn at 1px wide): their observers hear the size they're back at after.
+  const Observer = globalThis.ResizeObserver;
+  if (Observer) {
+    globalThis.ResizeObserver = class extends Observer {
+      constructor(callback) { super((entries, observer) => { if (!globalThis.__verifyCapturing) callback(entries, observer); }); }
+    };
+  }
 }
 
 /** Run in the page around a capture (holdLayout). Ending it waits two frames first, so the change events the capture's
@@ -197,12 +213,13 @@ export function flowProblems(flow) {
 }
 
 /** Waits until unsettled() finds nothing, up to `timeout` ms; returns what was still loading then ([] when settled). */
+// (Polled from here with page.evaluate: page.waitForFunction would eval a string in the page, which the app's CSP refuses.)
 async function waitSettled(page, timeout) {
-  try {
-    await page.waitForFunction(`(${unsettled.toString()})().length === 0`, undefined, { timeout, polling: 100 });
-    return [];
-  } catch {
-    return await page.evaluate(unsettled).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
+  const end = Date.now() + timeout;
+  for (;;) {
+    const left = await page.evaluate(unsettled).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
+    if (!left.length || Date.now() > end) return left;
+    await new Promise((r) => setTimeout(r, 100));
   }
 }
 
@@ -450,8 +467,7 @@ async function main() {
     // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
     const moves = label === DEVICE_CACHE;
     if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
-    // No smooth scrolling and no caret in the page from the start (not `animation: none`: a dialog that waits for its animation
-    // to end is then never there for the next step; the capture stops only the endless ones, STILL).
+    // PAGE_STYLE in the page from the start (the capture also stops the endless animations, STILL).
     // Nor the app's check-in every minute (setInterval(checkIn, 60_000) in lib/app.svelte.ts): its refresh re-renders the lists, which
     // drops an open confirm dialog or an expanded row wherever in a flow it lands (a guess at the transactions-delete flake, and the card
     // projection that's sometimes collapsed in its shot). The device cache check keeps it: it tests the app as it runs.
@@ -459,11 +475,11 @@ async function main() {
       const real = globalThis.setInterval.bind(globalThis);
       globalThis.setInterval = (fn, ms, ...rest) => (ms >= 30000 ? 0 : real(fn, ms, ...rest));
     });
-    await ctx.addInitScript(() => {
+    await ctx.addInitScript((css) => {
       const style = globalThis.document.createElement("style");
-      style.textContent = "*, *::before, *::after { scroll-behavior: auto !important; caret-color: transparent !important; }";
+      style.textContent = css;
       globalThis.document.addEventListener("DOMContentLoaded", () => globalThis.document.head.append(style));
-    });
+    }, PAGE_STYLE);
     await ctx.addInitScript(holdLayout);
     const page = await ctx.newPage();
     // Every limit stretched by the load (each wait still ends as soon as what it waits for is there).

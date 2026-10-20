@@ -1,9 +1,11 @@
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -188,18 +190,28 @@ class MachineLockTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.path = os.path.join(tmp.name, "verify.lock")
 
+    def hold(self):
+        """Another run holding the lock: a process of its own, in machine_lock until killed."""
+        holder = subprocess.Popen([sys.executable, "-c", "import time; from runway import verify\n"
+                                   f"with verify.machine_lock({self.path!r}): print('held', flush=True); time.sleep(60)"],
+                                  cwd=verify.ROOT, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (holder.kill(), holder.wait(10)))
+        assert holder.stdout is not None
+        self.assertEqual(holder.stdout.readline().strip(), "held")
+        return holder
+
     def test_a_second_run_waits_saying_who_has_it_and_gives_up_after_the_most_it_waits(self):
         said, clock = [], [0.0]
 
         def sleep(s):
             clock[0] += s
-        with verify.machine_lock(self.path, say=said.append):
-            with self.assertRaisesRegex(verify.MachineBusy, "gave up waiting"), \
-                    verify.machine_lock(self.path, max_wait=120, say=said.append, now=lambda: clock[0], sleep=sleep, poll=10):
-                self.fail("got a lock another run holds")
+        holder = self.hold()
+        with self.assertRaisesRegex(verify.MachineBusy, "gave up waiting"), \
+                verify.machine_lock(self.path, max_wait=120, say=said.append, now=lambda: clock[0], sleep=sleep, poll=10):
+            self.fail("got a lock another run holds")
         self.assertGreaterEqual(clock[0], 120)
         self.assertIn("another verify is running on this machine", said[0])
-        self.assertIn(f"pid {os.getpid()}", said[0])   # who holds it
+        self.assertIn(f"pid {holder.pid} in {verify.ROOT}", said[0])   # who holds it
         self.assertEqual(len(said), 2)   # once at the start, once a minute: not every poll
 
     def test_it_is_free_again_once_the_holder_is_done(self):
@@ -223,6 +235,42 @@ class MachineLockTests(unittest.TestCase):
             holder.wait(10)
             with verify.machine_lock(self.path, max_wait=5, poll=0.05):
                 pass
+        finally:
+            holder.kill()
+            holder.wait(10)
+
+    def test_a_run_started_under_flock_on_the_same_file_does_not_wait_for_itself(self):
+        """`flock /tmp/runway-verify.lock make verify` holds the lock for the run it starts: that run must not wait on it."""
+        if not shutil.which("flock"):
+            self.skipTest("no flock command")
+        code = ("import sys; from runway import verify\n"
+                f"with verify.machine_lock({self.path!r}, max_wait=0, say=print): print('ran')")
+        done = subprocess.run(["flock", self.path, sys.executable, "-c", code], cwd=verify.ROOT, capture_output=True,
+                              text=True, timeout=60)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "ran"), done.stderr)
+        with verify.machine_lock(self.path, max_wait=0):   # and it's free again after
+            pass
+
+    def test_the_holders_message_names_a_holder_that_wrote_nothing(self):
+        holder = subprocess.Popen(["flock", self.path, "sleep", "30"]) if shutil.which("flock") else None
+        if holder is None:
+            self.skipTest("no flock command")
+        try:
+            said: list[str] = []
+            for _ in range(100):
+                if not os.path.exists(self.path):   # flock hasn't made it yet
+                    time.sleep(0.05)
+                    continue
+                fd = os.open(self.path, os.O_RDONLY)
+                try:
+                    if verify.lock_holders(fd):
+                        break
+                finally:
+                    os.close(fd)
+                time.sleep(0.05)
+            with self.assertRaises(verify.MachineBusy) as e, verify.machine_lock(self.path, max_wait=0, say=said.append):
+                pass
+            self.assertIn(f"pid {holder.pid}: flock", str(e.exception))
         finally:
             holder.kill()
             holder.wait(10)

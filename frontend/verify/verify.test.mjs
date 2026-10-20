@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGES, screenshotFile, selectItems,
+import { capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
   timeScale, unknownPages, unsettled, VIEWPORTS } from "./verify.mjs";
 
 describe("flowProblems", () => {
@@ -94,6 +94,12 @@ describe("the frozen clock", () => {
   });
 
   it("leaves toasts out of the images, as they depend on timing", () => expect(HIDE_TOASTS).toContain("[data-sonner-toaster]"));
+
+  it("ends transitions and dialogs' animations at once, without taking the animations away (a dialog waits for their end)", () => {
+    expect(PAGE_STYLE).toContain("transition-duration: 0s !important");
+    expect(PAGE_STYLE).toMatch(/\[data-state\][^{]*\{ animation-duration: 0s !important/);
+    expect(PAGE_STYLE).not.toMatch(/animation: none/);
+  });
 });
 
 describe("selectItems (PAGES=…)", () => {

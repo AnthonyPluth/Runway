@@ -153,6 +153,49 @@ def wait_ready(url: str, server: subprocess.Popen, timeout: float = 60) -> None:
 
 # --- Sharing the machine -------------------------------------------------------------------------------------------
 
+def _span(seconds: float) -> str:
+    return f"{seconds / 60:.0f} minutes" if seconds >= 120 else f"{seconds:.0f} seconds"
+
+
+def lock_holders(fd: int, locks: str = "/proc/locks") -> set[int]:
+    """The processes holding a lock on fd's file, from /proc/locks (empty when it can't be read)."""
+    st = os.fstat(fd)
+    me = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
+    out = set()
+    try:
+        with open(locks) as f:
+            for line in f:
+                parts = line.split()
+                if "->" in parts:   # a waiter, listed under the holder
+                    continue
+                if len(parts) > 5 and parts[5] == me and parts[4].isdigit():
+                    out.add(int(parts[4]))
+    except OSError:
+        pass
+    return out
+
+
+def ancestors(pid: int | None = None) -> set[int]:
+    """pid (this process by default) and the processes that started it, up to init."""
+    out, pid = set(), os.getpid() if pid is None else pid
+    while pid > 1 and pid not in out:
+        out.add(pid)
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+    return out
+
+
+def _cmdline(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read().replace(b"\0", b" ").decode(errors="replace").strip()[:120] or "?"
+    except OSError:
+        return "?"
+
+
 class MachineBusy(Exception):
     """Another run held the machine-wide lock for longer than this one would wait."""
 
@@ -178,14 +221,19 @@ def machine_lock(path: str | None = None, max_wait: float | None = None, *, say:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
+                holders = lock_holders(fd)
+                if holders & ancestors():   # `flock <file> make verify`: the run it started is the one holding it
+                    yield
+                    return
                 waited = now() - start
-                holder = os.pread(fd, 300, 0).decode(errors="replace").strip() or "another process"
+                holder = os.pread(fd, 300, 0).decode(errors="replace").strip() or ", ".join(
+                    f"pid {p}: {_cmdline(p)}" for p in sorted(holders)) or "another process"
                 if waited >= max_wait:
-                    raise MachineBusy(f"verify: another verify ({holder}) has held the machine for {waited / 60:.0f} minutes; "
+                    raise MachineBusy(f"verify: another verify ({holder}) has held the machine for {_span(waited)}; "
                                       f"gave up waiting (RUNWAY_VERIFY_LOCK_WAIT sets how long, in seconds)") from None
                 if told is None or now() - told >= 60:
                     say(f"verify: another verify is running on this machine ({holder}), waiting... "
-                        f"({waited / 60:.0f} of at most {max_wait / 60:.0f} minutes)")
+                        f"({_span(waited)} so far, {_span(max_wait)} at most)")
                     told = now()
                 sleep(poll)
         with contextlib.suppress(OSError):
@@ -226,11 +274,11 @@ def wait_for_quiet(max_wait: float | None = None, *, busy: float = BUSY, say: Ca
     while (ratio := load()) > busy and now() - start < max_wait:
         if told is None or now() - told >= 60:
             say(f"verify: the machine is busy (load {ratio:.1f} per CPU, more than {busy}), waiting for it to settle... "
-                f"({(now() - start) / 60:.0f} of at most {max_wait / 60:.0f} minutes)")
+                f"({_span(now() - start)} so far, {_span(max_wait)} at most)")
             told = now()
         sleep(poll)
     if ratio > busy:
-        say(f"verify: still busy (load {ratio:.1f} per CPU) after {max_wait / 60:.0f} minutes; going ahead with longer waits")
+        say(f"verify: still busy (load {ratio:.1f} per CPU) after {_span(max_wait)}; going ahead with longer waits")
     return ratio
 
 
@@ -281,7 +329,7 @@ def summary(failed: dict[str, list[str]], flaky: dict[str, list[str]], total: in
         lines.extend(f"        {p}" for p in problems[1:4])
     if failed:
         lines.append(f"verify: FAILED: {len(failed)} of {total} pages and flows ({', '.join(_plain(i) for i in sorted(failed))}), "
-                     f"after {ATTEMPTS} attempts each. screenshots/ is untouched; artifacts/verify/ has the report, each failed "
+                     f"after up to {ATTEMPTS} attempts each. screenshots/ is untouched; artifacts/verify/ has the report, each failed "
                      "step's -FAILED- image and, under unverified/, what was captured")
     else:
         lines.append(f"verify: OK, {total} pages and flows")
@@ -312,6 +360,11 @@ def publish(out: str, results: dict[str, Result], report: dict[str, Any], stage_
         for f in item.get("failed_files", []):
             if os.path.isfile(src := os.path.join(folder, f)):
                 shutil.copyfile(src, os.path.join(stage, f))
+        if "first_run" in item:   # --twice: the first run's version of each image that came out different
+            first_folder, differ = item.pop("first_run")
+            os.makedirs(first := os.path.join(stage, "unverified", "first-run"), exist_ok=True)
+            for f in differ:
+                shutil.copyfile(os.path.join(first_folder, f), os.path.join(first, f))
     report["files"] = sorted(files) if report["ok"] else []
     with open(os.path.join(stage, "report.json"), "w") as fh:
         json.dump(report, fh, indent=2)
@@ -446,7 +499,9 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
                 differ = differing(first[0], again["out"], first[1]["files"]) if first else []
                 if not item["ok"] or differ:
                     problems = [f"the same tree gave different images the second time: {', '.join(differ)}"] if differ else item["problems"]
-                    results[item["id"]] = (again["out"], {**item, "ok": False, "problems": problems})
+                    # Both versions are kept, for comparing: the second run's under unverified/, the first's under unverified/first-run/.
+                    first_run = {"first_run": (first[0], differ)} if first and differ else {}
+                    results[item["id"]] = (again["out"], {**item, "ok": False, "problems": problems, **first_run})
         failed = {i: item["problems"] for i, (_, item) in results.items() if not item["ok"]}
         ok = not failed and bool(results)
         report = {"ok": ok, "limited": bool(pages), "pages": pages, "items": planned, "failed": failed, "flaky": flaky,
