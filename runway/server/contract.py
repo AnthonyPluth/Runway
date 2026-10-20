@@ -456,3 +456,19 @@ class LockKeyShare(TypedDict):
     by the server's clock: the time of this reply plus applock.SHARE_WINDOW, 72 hours)."""
     share: str
     expires: int
+
+
+# Plaid connections
+
+class PlaidRefreshSet(TypedDict):
+    """POST /api/plaid/items/{id}/refresh: whether Runway asks Plaid to refresh this connection's transactions before the
+    daily sync (Plaid's Transactions Refresh). Turning it on also ends a pause."""
+    on: bool
+
+
+class PlaidRefresh(TypedDict):
+    """A connection's refreshing as it stands: on or off, and, when it stopped after failing several times in a row,
+    Plaid's reason and when (UTC, "YYYY-MM-DD HH:MM:SS"), else None."""
+    refresh: bool
+    refresh_paused: str | None
+    refresh_paused_at: str | None

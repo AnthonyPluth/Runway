@@ -99,3 +99,52 @@ describe("removing a Plaid connection", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
+
+describe("refreshing a Plaid connection early", () => {
+  it("shows the switch as it stands, and turns it off", async () => {
+    vi.mocked(api).mockResolvedValue({ refresh: false, refresh_paused: null, refresh_paused_at: null });
+    row(item({ refresh: true }));
+    const box = screen.getByRole("checkbox", { name: "Refresh transactions early" });
+    expect(box).toBeChecked();
+    await userEvent.click(box);
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/plaid/items/it1/refresh", { method: "POST", body: { on: false } }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Waits for the daily sync from now on"));
+    expect(reload).toHaveBeenCalled();
+    expect(box).not.toBeChecked();
+  });
+
+  it("puts the switch back when saving fails", async () => {
+    vi.mocked(api).mockRejectedValue(new Error("Connection not found"));
+    row(item({ refresh: false }));
+    const box = screen.getByRole("checkbox", { name: "Refresh transactions early" });
+    await userEvent.click(box);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Connection not found"));
+    expect(box).not.toBeChecked();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("says why it paused, and turning it on again asks to try again", async () => {
+    vi.mocked(api).mockResolvedValue({ refresh: true, refresh_paused: null, refresh_paused_at: null });
+    row(item({ refresh: true, refresh_paused: "Plaid: too many refreshes (TRANSACTIONS_LIMIT)", refresh_paused_at: "2026-09-30 15:00:00" }));
+    const note = screen.getByText(/^Refresh paused: Plaid: too many refreshes \(TRANSACTIONS_LIMIT\) · since Sep 30/);
+    expect(note).toHaveClass("text-(--low)");
+    const box = screen.getByRole("checkbox", { name: "Refresh transactions early" });
+    await userEvent.click(box);   // off
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/plaid/items/it1/refresh", { method: "POST", body: { on: false } }));
+    await userEvent.click(box);   // on again
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/plaid/items/it1/refresh", { method: "POST", body: { on: true } }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Refreshes early from now on"));
+  });
+
+  it("has no switch for a connection without transactions, and no note when it isn't paused", () => {
+    const { unmount } = row(item({ products: ["liabilities"], refresh: true }));
+    expect(screen.queryByRole("checkbox", { name: "Refresh transactions early" })).not.toBeInTheDocument();
+    unmount();
+    const inv = row(item({ bank: false, products: ["investments"], accounts: [] }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    inv.unmount();
+    row(item({ refresh: false }));
+    expect(screen.getByRole("checkbox", { name: "Refresh transactions early" })).not.toBeChecked();
+    expect(screen.queryByText(/Refresh paused/)).not.toBeInTheDocument();
+  });
+});

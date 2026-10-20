@@ -357,6 +357,24 @@ export interface PlaidLink {
   statement_note: string | null;
 }
 
+/**
+ * A connection's refreshing as it stands: on or off, and, when it stopped after failing several times in a row,
+ * Plaid's reason and when (UTC, "YYYY-MM-DD HH:MM:SS"), else None.
+ */
+export interface PlaidRefresh {
+  refresh: boolean;
+  refresh_paused: string | null;
+  refresh_paused_at: string | null;
+}
+
+/**
+ * POST /api/plaid/items/{id}/refresh: whether Runway asks Plaid to refresh this connection's transactions before the
+ * daily sync (Plaid's Transactions Refresh). Turning it on also ends a pause.
+ */
+export interface PlaidRefreshSet {
+  on: boolean;
+}
+
 /** A card's statement from Plaid (the forecast uses it over one you entered). */
 export interface PlaidStatement {
   source: "plaid";
@@ -473,6 +491,7 @@ export interface Endpoints {
   "GET /api/budget": { body: never; reply: BudgetMonth };
   "POST /api/budget": { body: BudgetSet; reply: BudgetSaved };
   "GET /api/budget/suggestions": { body: never; reply: BudgetSuggestions };
+  "POST /api/plaid/items/{id}/refresh": { body: PlaidRefreshSet; reply: PlaidRefresh };
   "GET /api/investments/summary": { body: never; reply: InvestmentsSummary };
   "GET /api/investments/holding/{id}": { body: never; reply: HoldingDetail };
 }

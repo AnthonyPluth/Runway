@@ -10,11 +10,12 @@ from sqlalchemy import func, select
 
 from ...domain import categorize, recurring
 from ...storage import db
-from ... import monitoring
+from ... import monitoring, validate
 from ...providers import plaid, plaidbank, simplefin
 from ...storage import settings_keys as sk
 from ...storage.models import Account, CardStatement, InvAccount, PlaidAccount, PlaidItem
 from ..common import ApiError, own_session, text
+from ..contract import PlaidRefresh, PlaidRefreshSet
 from ..sync import _inv_lock, _sync_lock, refresh_prices, run_sync, sync_on_visit
 
 
@@ -37,9 +38,11 @@ def api_connect(conn, _q, body):
 def api_plaid_status(conn, _q, _b):
     items = db.rows(conn.execute(
         select(PlaidItem.item_id, PlaidItem.institution_name, PlaidItem.env, PlaidItem.created_at, PlaidItem.last_sync,
-               PlaidItem.error, PlaidItem.products, PlaidItem.inv_last_sync, PlaidItem.inv_error)
+               PlaidItem.error, PlaidItem.products, PlaidItem.inv_last_sync, PlaidItem.inv_error, PlaidItem.refresh,
+               PlaidItem.refresh_paused, PlaidItem.refresh_paused_at)
         .order_by(PlaidItem.institution_name)))
     for it in items:
+        it["refresh"] = plaidbank.refresh_on(conn, it)   # asked to refresh before the daily sync (only with transactions)
         # Each sync that reads the connection keeps its own error and time ("sides"); the connection's own error is
         # either one's (the bank side's first), and its last sync the older one's (none until both have synced).
         mine = {"bank": (it["last_sync"], it["error"]), "investments": (it.pop("inv_last_sync"), it.pop("inv_error"))}
@@ -229,6 +232,21 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
     except plaid.PlaidError as e:
         raise ApiError(monitoring.public_text(str(e)), 502) from e
     return {"ok": True}
+
+
+def api_plaid_item_refresh(conn, _q, body: PlaidRefreshSet, item_id) -> PlaidRefresh:
+    """Turn a connection's refresh before the daily sync on or off (on again ends a pause). The daily sync itself goes
+    on either way."""
+    if "on" not in body:
+        raise ApiError("Say whether to refresh this connection (on: true or false)")
+    item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
+    if not item:
+        raise ApiError("Connection not found", 404)
+    if "transactions" not in plaidbank.products(item):
+        raise ApiError("This connection doesn’t bring in transactions, so there’s nothing to refresh.")
+    on = validate.on(body["on"])
+    plaidbank.set_refresh(conn, item_id, on)
+    return {"refresh": on, "refresh_paused": None, "refresh_paused_at": None}
 
 
 def api_plaid_match(conn, _q, body):

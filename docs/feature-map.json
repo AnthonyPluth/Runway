@@ -1555,6 +1555,21 @@
     },
     {
       "method": "POST",
+      "path": "/api/plaid/items/{id}/refresh",
+      "handler": "runway/server/api/connections.py:api_plaid_item_refresh",
+      "web": [
+        "frontend/src/lib/components/settings/PlaidItemRow.svelte"
+      ],
+      "tests": [
+        "tests/test_api_contract.py",
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/settings"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/plaid/match",
       "handler": "runway/server/api/connections.py:api_plaid_match",
       "web": [

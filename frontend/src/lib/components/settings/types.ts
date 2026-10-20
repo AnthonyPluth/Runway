@@ -58,6 +58,9 @@ export interface PlaidItem {
   /** Each kind of sync that reads the connection, with its own last time (the investments side is the holdings sync). */
   sides?: Partial<Record<"bank" | "investments", { last_sync: string | null; error: string | null }>>;
   accounts: PlaidAccount[];
+  /** Whether Runway asks Plaid to refresh its transactions before the daily sync (only a connection with transactions),
+   *  and, when that stopped after failing several times in a row, Plaid's reason and when (UTC). */
+  refresh?: boolean; refresh_paused?: string | null; refresh_paused_at?: string | null;
   candidates?: { id: string; name: string; display_name?: string | null; balance?: number | null; linked_to?: string | null }[];
 }
 /** What SimpleFIN sends for an investment account (Settings' diagnostics). */

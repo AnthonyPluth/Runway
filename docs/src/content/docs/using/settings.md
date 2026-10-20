@@ -22,6 +22,8 @@ The optional services live here too: **OpenRouter** or **Ollama** for [AI catego
 
 **Sync** runs once a day at 7 AM in Runway's time zone (`TZ`), late enough for overnight ACH, and whenever you press **Sync now** in the sidebar.
 
+**Refresh transactions early**, beside each Plaid connection that brings in transactions, has Runway ask Plaid at 6:30 AM to fetch new transactions from the bank (Plaid's Transactions Refresh), so the 7 AM sync gets the night's activity. Plaid refreshes a whole connection, not single accounts. It starts on for a connection with a bank account and off for one with only credit cards; turning it off changes only that early fetch, and the daily sync goes on as before. When Plaid refuses the refresh 3 times in a row (once a day), Runway stops asking and the connection says **Refresh paused** with Plaid's reason: fix the cause (reconnecting, say), then turn the switch off and on again to try again, or leave it off.
+
 ## Accounts
 
 Every account from your banks, with its source, balance and last sync.

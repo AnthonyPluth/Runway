@@ -12,8 +12,9 @@
   import { openPlaidLink } from "./plaid.svelte";
   import { plaidProblem } from "./plaidErrors";
   import type { PlaidItem } from "./types";
-  import { linkCls, warnText } from "./ui";
+  import { checkCls, linkCls, warnText } from "./ui";
   import { act } from "$lib/act";
+  import { apiCall } from "$lib/contract";
 
   // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Its accounts are
   // matched to yours under Settings → Accounts.
@@ -71,6 +72,26 @@
     });
     reload();
   }
+  // Refreshing early (Plaid's Transactions Refresh, before the daily sync): only a connection that brings in transactions.
+  // Turning it on again after a pause tries again; the server clears the pause either way.
+  const refreshable = $derived(it.bank && it.products.includes("transactions"));
+  const paused = $derived(it.refresh && it.refresh_paused ? it.refresh_paused : "");
+  const pausedOn = $derived.by(() => {
+    const d = it.refresh_paused_at ? utc(it.refresh_paused_at) : null;
+    return d && !isNaN(d.getTime()) ? ` · since ${fmtDateTime(d)}` : "";
+  });
+  let savingRefresh = $state(false);
+  async function setRefresh(e: Event) {
+    const box = e.currentTarget as HTMLInputElement;
+    const on = box.checked;
+    const ok = await act(async () => {
+      await apiCall<"POST /api/plaid/items/{id}/refresh">(`/api/plaid/items/${encodeURIComponent(it.item_id)}/refresh`,
+        { method: "POST", body: { on } });
+      toast.success(on ? "Refreshes early from now on" : "Waits for the daily sync from now on");
+    }, { busy: (b) => (savingRefresh = b) });
+    if (!ok) box.checked = !on;   // as it was: nothing changed
+    else reload();
+  }
   async function reconnect() {
     await act(async () => { if (await openPlaidLink(it.item_id, "update")) reload(); });
   }
@@ -105,6 +126,12 @@
   <div class="mt-1.5 sm:ml-10">
     <p class="border-t pt-2 text-sm text-muted-foreground">{#if !accounts.length}no accounts yet{:else}{accounts.length === 1 ? "1 account" : `${accounts.length} accounts`}{#if waiting}{" · "}<a class={linkCls}
       href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}{/if}</p>
+    {#if refreshable}
+      <label class={cn(checkCls, "mt-1")} title="Asks Plaid to fetch new transactions from the bank before the daily sync. Off, they come in with the daily sync as usual.">
+        <input type="checkbox" checked={!!it.refresh} disabled={savingRefresh} onchange={setRefresh} />
+        Refresh transactions early</label>
+      {#if paused}<p class={cn("text-sm", warnText)}>Refresh paused: {paused}{pausedOn}</p>{/if}
+    {/if}
   </div>
 </div>
 

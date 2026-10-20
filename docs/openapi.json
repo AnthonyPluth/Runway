@@ -538,6 +538,56 @@
         }
       }
     },
+    "/api/plaid/items/{id}/refresh": {
+      "post": {
+        "operationId": "api_plaid_item_refresh",
+        "x-handler": "runway/server/api/connections.py:api_plaid_item_refresh",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Runway",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Sent with every request that isn't a GET; Runway refuses one without it (CSRF)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaidRefreshSet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidRefresh"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/investments/summary": {
       "get": {
         "operationId": "api_investments_summary",
@@ -1902,6 +1952,46 @@
           "closed",
           "due",
           "statement_note"
+        ],
+        "additionalProperties": false
+      },
+      "PlaidRefresh": {
+        "type": "object",
+        "description": "A connection's refreshing as it stands: on or off, and, when it stopped after failing several times in a row,\nPlaid's reason and when (UTC, \"YYYY-MM-DD HH:MM:SS\"), else None.",
+        "properties": {
+          "refresh": {
+            "type": "boolean"
+          },
+          "refresh_paused": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refresh_paused_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "refresh",
+          "refresh_paused",
+          "refresh_paused_at"
+        ],
+        "additionalProperties": false
+      },
+      "PlaidRefreshSet": {
+        "type": "object",
+        "description": "POST /api/plaid/items/{id}/refresh: whether Runway asks Plaid to refresh this connection's transactions before the\ndaily sync (Plaid's Transactions Refresh). Turning it on also ends a pause.",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on"
         ],
         "additionalProperties": false
       },
