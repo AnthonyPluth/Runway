@@ -116,7 +116,8 @@
         "tests/test_hardening.py",
         "tests/test_http_pinned.py",
         "tests/test_merchants.py",
-        "tests/test_monitoring.py"
+        "tests/test_monitoring.py",
+        "tests/test_recurring.py"
       ],
       "docs": [
         "using/transactions"
