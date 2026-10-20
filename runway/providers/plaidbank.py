@@ -22,7 +22,7 @@ from sqlalchemy import delete, func, select, update
 from . import banktx
 from ..domain import brands, merchants, splits
 from ..storage import db
-from .. import validate
+from .. import monitoring, validate
 from ..storage import settings_keys as sk
 from ..domain.categorize import bank_payee, clean_payee, kept_bank_names
 from ..storage.models import (Account, CardStatement, DeletedAccount, DeletedCharge, LoanTerms, PlaidAccount, PlaidItem,
@@ -329,6 +329,9 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
                                        "official_name": a.get("official_name"), "mask": a.get("mask"), "type": a.get("type"),
                                        "subtype": a.get("subtype"), "current": bal.get("current"), "available": bal.get("available")},
                   key=["plaid_account_id"], update=["name", "official_name", "mask", "type", "subtype", "current", "available"])
+    if item["refresh"] is None and res.get("accounts"):   # a new connection: whether to refresh it, now its accounts are known
+        conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
+                     .values(refresh=int(refresh_default(a.get("type") for a in res["accounts"]))))
     matched = auto_match(conn, item_id)
     for acct in db.rows(conn.execute(
             select(Account.id, PlaidAccount).select_from(Account)
@@ -537,17 +540,61 @@ def sync_all(conn, today: date | None = None) -> dict:
     return out
 
 
+REFRESH_PAUSE_AFTER = 3   # refreshes failed in a row, with an error from Plaid, before a connection's refreshing pauses
+NOT_THE_CONNECTION = ("RUNWAY_SECRET_KEY",)   # errors with a code that aren't Plaid's about the connection (plaidapi.call)
+
+
+def refresh_default(types) -> bool:
+    """Whether a connection with accounts of these Plaid types refreshes until you say otherwise: on, unless they're all
+    credit cards (a card's new charges can wait for the daily sync; a bank's paychecks and bills are what's worth asking
+    for early). One with no accounts yet is on."""
+    types = list(types)
+    return not types or any(t != "credit" for t in types)
+
+
+def refresh_on(conn, item) -> bool:
+    """Whether you want this connection refreshed (Settings → Connections): your choice, or refresh_default from its
+    accounts until there's one. Paused or not."""
+    if item["refresh"] is not None:
+        return bool(item["refresh"])
+    return refresh_default(conn.execute(select(PlaidAccount.type).where(PlaidAccount.item_id == item["item_id"])).scalars())
+
+
+def set_refresh(conn, item_id: str, on: bool) -> None:
+    """Turn a connection's refreshing on or off. Either way it starts again from nothing: turning it on after a pause
+    tries again at the next refresh, and turning it off forgets why it paused."""
+    if not conn.execute(select(PlaidItem.item_id).where(PlaidItem.item_id == item_id)).fetchone():
+        raise PlaidError("Connection not found")
+    conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
+                 .values(refresh=int(on), refresh_failures=0, refresh_paused=None, refresh_paused_at=None))
+
+
 def refresh_all(conn) -> list[str]:
-    """Ask Plaid to fetch new transactions from each bank now (the Transactions Refresh add-on). Plaid does it in the
-    background and returns nothing; the next /transactions/sync picks it up. Returns the problems, one per connection."""
+    """Ask Plaid to fetch new transactions from each bank now (the Transactions Refresh add-on), for the connections
+    that have it on and aren't paused. Plaid does it in the background and returns nothing; the next /transactions/sync
+    picks it up. Each connection is asked once: a failure waits for the next day's refresh, and REFRESH_PAUSE_AFTER of
+    them in a row pause it (with Plaid's reason, for Settings) until you turn it on again; a success starts the count
+    again. Only Plaid's own errors count: not reaching Plaid at all says nothing about the connection, so it neither
+    counts nor resets the count. Returns the problems, one per connection."""
     errors = []
     for item in conn.execute(select(PlaidItem)).fetchall():
-        if "transactions" not in products(item):
+        if "transactions" not in products(item) or item["refresh_paused"] or not refresh_on(conn, item):
             continue
+        conn.commit()   # nothing of ours open across the network call
         try:
             call(conn, "/transactions/refresh", {"access_token": item["access_token"]})
         except PlaidError as e:
             errors.append(f"{item['institution_name'] or 'Plaid'}: {e}")
+            if e.code and e.code not in NOT_THE_CONNECTION:   # counted in the database: the switch may have changed meanwhile
+                mine = PlaidItem.item_id == item["item_id"]
+                conn.execute(update(PlaidItem).where(mine).values(refresh_failures=func.coalesce(PlaidItem.refresh_failures, 0) + 1))
+                conn.execute(update(PlaidItem).where(mine, PlaidItem.refresh_failures >= REFRESH_PAUSE_AFTER)
+                             .values(refresh_paused=monitoring.public_text(str(e)), refresh_paused_at=_now()))
+                conn.commit()
+            continue
+        if item["refresh_failures"]:
+            conn.execute(update(PlaidItem).where(PlaidItem.item_id == item["item_id"]).values(refresh_failures=0))
+            conn.commit()
     return errors
 
 

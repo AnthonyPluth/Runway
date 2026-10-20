@@ -485,15 +485,122 @@ class PlaidBankTests(DbCase):
         self.assertEqual((out["items"], len(out["errors"])), (0, 2))
         self.assertTrue(self.c.execute(select(PlaidItem.error).where(PlaidItem.item_id == "item-a")).fetchone()[0])
 
-    def test_refresh_asks_each_transactions_connection(self):
+    def refresh_state(self, item_id="item-b"):
+        r = self.c.execute(select(PlaidItem.refresh, PlaidItem.refresh_failures, PlaidItem.refresh_paused,
+                                  PlaidItem.refresh_paused_at).where(PlaidItem.item_id == item_id)).fetchone()
+        return tuple(r)
+
+    def refreshes(self) -> int:
+        n = len([p for p, _ in MockBank.calls if p == "/transactions/refresh"])
+        MockBank.calls = []
+        return n
+
+    def test_refresh_asks_each_transactions_connection_that_has_it_on(self):
         self.link()
         self.c.execute(insert(PlaidItem).values(item_id="item-c", access_token="access-c", institution_name="Amex",
-                                                products="liabilities"))
+                                                products="liabilities"))   # card statements only: nothing to refresh
+        self.c.execute(insert(PlaidItem).values(item_id="item-d", access_token="access-d", institution_name="Citi",
+                                                products="transactions", refresh=0))   # turned off
         MockBank.calls = []
         self.assertEqual(plaidbank.refresh_all(self.c), [])
         self.assertEqual([p for p, _ in MockBank.calls], ["/transactions/refresh"])
         MockBank.fail = {"/transactions/refresh": (400, {"error_code": "PRODUCTS_NOT_SUPPORTED", "error_message": "no"})}
+        self.assertEqual(plaidbank.refresh_all(self.c), ["Chase: Plaid: no (PRODUCTS_NOT_SUPPORTED)"])
+
+    def test_a_new_connection_refreshes_unless_its_accounts_are_all_cards(self):
+        self.link()   # a checking account and two cards
+        self.assertEqual(self.refresh_state()[0], 1)
+        # Your choice stays through later syncs.
+        self.c.execute(update(PlaidItem).values(refresh=0))
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(self.refresh_state()[0], 0)
+        # Cards only: off from the first sync.
+        self.c.execute(delete(PlaidAccount)); self.c.execute(delete(PlaidItem))
+        MockBank.accounts = [{"account_id": "p-csp", "name": "Sapphire Preferred", "mask": "1234", "type": "credit",
+                              "subtype": "credit card", "balances": {"current": 812.34}}]
+        self.link()
+        self.assertEqual(self.refresh_state(), (0, 0, None, None))
+        MockBank.calls = []
+        plaidbank.refresh_all(self.c)
+        self.assertEqual(self.refreshes(), 0)
+        # The rule itself: on unless every account is a card; no accounts yet is on.
+        for types, want in (([], True), (["credit"], False), (["credit", "credit"], False),
+                            (["credit", "depository"], True), (["loan"], True)):
+            self.assertEqual(plaidbank.refresh_default(types), want, types)
+
+    def test_a_connection_not_decided_yet_goes_by_its_stored_accounts(self):
+        self.c.execute(insert(PlaidItem).values(item_id="item-e", access_token="access-e", products="transactions"))
+        item = lambda: self.c.execute(select(PlaidItem).where(PlaidItem.item_id == "item-e")).fetchone()
+        self.assertTrue(plaidbank.refresh_on(self.c, item()))   # no accounts yet
+        self.c.execute(insert(PlaidAccount).values(plaid_account_id="e1", item_id="item-e", type="credit"))
+        self.assertFalse(plaidbank.refresh_on(self.c, item()))
+        self.c.execute(insert(PlaidAccount).values(plaid_account_id="e2", item_id="item-e", type="depository"))
+        self.assertTrue(plaidbank.refresh_on(self.c, item()))
+
+    def test_refresh_pauses_after_failing_three_times_in_a_row(self):
+        self.link()
+        fail = {"/transactions/refresh": (400, {"error_code": "TRANSACTIONS_LIMIT", "error_message": "too many refreshes"})}
+        MockBank.calls, MockBank.fail = [], fail
+        for _ in range(2):
+            plaidbank.refresh_all(self.c)
+        self.assertEqual(self.refreshes(), 2)   # once a run: no retries
+        self.assertEqual(self.refresh_state(), (1, 2, None, None))
+        MockBank.fail = {}   # a success starts the count again
+        self.assertEqual(plaidbank.refresh_all(self.c), [])
+        self.assertEqual(self.refresh_state(), (1, 0, None, None))
+        # Not reaching Plaid says nothing about the connection: it neither counts nor resets.
+        MockBank.fail = fail
+        plaidbank.refresh_all(self.c)
+        MockBank.drop = {"/transactions/refresh"}
         self.assertEqual(len(plaidbank.refresh_all(self.c)), 1)
+        self.assertEqual(self.refresh_state()[1], 1)
+        MockBank.drop = set()
+        plaidbank.refresh_all(self.c)
+        plaidbank.refresh_all(self.c)
+        on, failures, reason, at = self.refresh_state()
+        self.assertEqual((on, failures, reason), (1, plaidbank.REFRESH_PAUSE_AFTER, "Plaid: too many refreshes (TRANSACTIONS_LIMIT)"))
+        self.assertTrue(at)
+        MockBank.calls = []
+        self.assertEqual(plaidbank.refresh_all(self.c), [])   # paused: not asked any more, and nothing to report
+        self.assertEqual(self.refreshes(), 0)
+        # The daily sync goes on as before.
+        plaidbank.sync_all(self.c, TODAY)
+        self.assertIn("/transactions/sync", [p for p, _ in MockBank.calls])
+        self.assertEqual(self.refresh_state()[2], "Plaid: too many refreshes (TRANSACTIONS_LIMIT)")
+        # On again: the pause is gone and the next run asks.
+        plaidbank.set_refresh(self.c, "item-b", True)
+        self.assertEqual(self.refresh_state(), (1, 0, None, None))
+        MockBank.fail, MockBank.calls = {}, []
+        plaidbank.refresh_all(self.c)
+        self.assertEqual(self.refreshes(), 1)
+
+    def test_refresh_switch_in_settings(self):
+        from runway import server
+        self.link()
+        self.c.execute(update(PlaidItem).values(refresh_failures=3, refresh_paused="Plaid: no (X)",
+                                                refresh_paused_at="2026-09-20 10:30:00"))
+        status = next(it for it in server.api_plaid_status(self.c, {}, {})["items"] if it["item_id"] == "item-b")
+        self.assertEqual((status["refresh"], status["refresh_paused"], status["refresh_paused_at"]),
+                         (True, "Plaid: no (X)", "2026-09-20 10:30:00"))
+        self.assertEqual(server.api_plaid_item_refresh(self.c, {}, {"on": False}, "item-b"),
+                         {"refresh": False, "refresh_paused": None, "refresh_paused_at": None})
+        self.assertEqual(self.refresh_state(), (0, 0, None, None))   # off forgets the pause too
+        status = next(it for it in server.api_plaid_status(self.c, {}, {})["items"] if it["item_id"] == "item-b")
+        self.assertEqual((status["refresh"], status["refresh_paused"]), (False, None))
+        MockBank.calls = []
+        plaidbank.refresh_all(self.c)
+        self.assertEqual(self.refreshes(), 0)
+        self.assertTrue(server.api_plaid_item_refresh(self.c, {}, {"on": True}, "item-b")["refresh"])
+        self.assertEqual(self.refresh_state()[0], 1)
+        # What it refuses, and changes nothing for.
+        self.c.execute(insert(PlaidItem).values(item_id="item-c", access_token="access-c", products="liabilities"))
+        for body, item_id, status_code in (({"on": True}, "nope", 404), ({"on": True}, "item-c", 400), ({}, "item-b", 400)):
+            with self.subTest(item_id=item_id, body=body):
+                with self.assertRaises(server.ApiError) as e:
+                    server.api_plaid_item_refresh(self.c, {}, body, item_id)
+                self.assertEqual(e.exception.status, status_code)
+        self.assertEqual(self.refresh_state()[0], 1)
+        self.assertIsNone(self.refresh_state("item-c")[0])
 
     def test_matching_an_account_added_as_its_own_retires_the_copy(self):
         self.link()
@@ -653,7 +760,8 @@ class PlaidBankTests(DbCase):
         self.assertEqual([it["item_id"] for it in s["items"]], ["item-b", "inv"])
         bank, inv = s["items"]
         self.assertEqual(list(bank), ["item_id", "institution_name", "env", "created_at", "last_sync", "error", "products",
-                                      "sides", "bank", "duplicates", "accounts"])
+                                      "refresh", "refresh_paused", "refresh_paused_at", "sides", "bank", "duplicates", "accounts"])
+        self.assertEqual((bank["refresh"], bank["refresh_paused"], bank["refresh_paused_at"]), (True, None, None))
         self.assertEqual(list(bank["sides"]), ["bank"])
         self.assertEqual(bank["sides"]["bank"], {"last_sync": bank["last_sync"], "error": None})
         self.assertEqual((bank["bank"], bank["products"], bank["duplicates"]), (True, ["liabilities", "transactions"], []))

@@ -12,7 +12,7 @@ from sqlalchemy import func, insert, select
 from runway.storage import db, schema
 from runway.storage.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore,
                                    ChurnTask, ChurnWish, DeletedAccount, DeletedCharge, InvAccount, LoanTerms, ManualStatement,
-                                   MonthBudget, Recurring, Rule, Setting, Transaction)
+                                   MonthBudget, PlaidItem, Recurring, Rule, Setting, Transaction)
 from tests.shared import database_path, scratch_dir
 
 
@@ -550,6 +550,34 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:   # and back down
             command.downgrade(db.alembic_config(c), "0045")
             self.assertNotIn("deleted_charges", sa.inspect(c).get_table_names())
+
+    def test_0047_plaid_refresh_switch_from_the_accounts_already_stored(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0046")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("refresh", {col["name"] for col in sa.inspect(c).get_columns("plaid_items")})
+            c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, products) VALUES "
+                              "('bank', 't1', 'transactions,liabilities'), ('cards', 't2', 'transactions'), "
+                              "('empty', 't3', 'transactions'), ('inv', 't4', 'investments'), ('odd', 't5', 'transactions')")
+            c.exec_driver_sql("INSERT INTO plaid_accounts(plaid_account_id, item_id, type) VALUES "
+                              "('b1', 'bank', 'credit'), ('b2', 'bank', 'depository'), "   # a card and a checking account
+                              "('c1', 'cards', 'credit'), ('c2', 'cards', 'credit'), "     # cards only
+                              "('o1', 'odd', NULL)")                                        # Plaid didn't say
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            got = {r[0]: tuple(r[1:]) for r in conn.execute(select(
+                PlaidItem.item_id, PlaidItem.refresh, PlaidItem.refresh_failures, PlaidItem.refresh_paused, PlaidItem.refresh_paused_at))}
+            self.assertEqual(got, {"bank": (1, 0, None, None), "cards": (0, 0, None, None), "empty": (None, 0, None, None),
+                                   "inv": (None, 0, None, None), "odd": (1, 0, None, None)})
+        with db.engine(self.path).begin() as c:   # and back down, the connections as they were
+            command.downgrade(db.alembic_config(c), "0046")
+            self.assertFalse({"refresh", "refresh_failures", "refresh_paused", "refresh_paused_at"}
+                             & {col["name"] for col in sa.inspect(c).get_columns("plaid_items")})
+            self.assertEqual(c.exec_driver_sql("SELECT count(*) FROM plaid_items").scalar(), 5)
 
     def test_0044_adds_the_key_share_to_app_locks_and_it_goes_with_the_row(self):
         from alembic import command

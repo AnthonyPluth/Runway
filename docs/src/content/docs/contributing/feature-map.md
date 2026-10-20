@@ -7,7 +7,7 @@ description: Every API route, with its handler, the web app files that call it, 
 
 Where each feature lives. Every route in `runway/server/routes.py` is listed with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. The same data, for tools and agents, is in [`docs/feature-map.json`](https://github.com/AnthonyPluth/Runway/blob/main/docs/feature-map.json). `make feature-map` regenerates both; `make check` and CI fail when they are out of date, or when a route has no test and isn't on `tools/feature_map_allowlist.txt` (a list that only shrinks).
 
-188 routes; 27 have no test yet.
+189 routes; 27 have no test yet.
 
 A route counts as tested when a file in `tests/` names its handler, or calls its address (with its method, when the test writes one). A web app caller is an `api(` or `apiCall(` call with a literal address; one built in a variable isn't seen.
 
@@ -112,6 +112,7 @@ A route counts as tested when a file in `tests/` names its handler, or calls its
 | `POST /api/plaid/exchange` | `connections.py:api_plaid_exchange` | `lib/components/settings/plaid.svelte.ts` | `test_investments.py` | [using/settings](/Runway/using/settings/) |
 | `POST /api/plaid/items/{id}/sync` | `connections.py:api_plaid_item_sync` | `lib/components/settings/PlaidItemRow.svelte`, `lib/components/settings/plaid.svelte.ts` | `test_plaidbank.py` | [using/settings](/Runway/using/settings/) |
 | `POST /api/plaid/items/{id}/remove` | `connections.py:api_plaid_item_remove` | `lib/components/settings/PlaidItemRow.svelte` | `test_mcp.py` | [using/settings](/Runway/using/settings/) |
+| `POST /api/plaid/items/{id}/refresh` | `connections.py:api_plaid_item_refresh` | `lib/components/settings/PlaidItemRow.svelte` | `test_api_contract.py`, `test_plaidbank.py` | [using/settings](/Runway/using/settings/) |
 | `POST /api/plaid/match` | `connections.py:api_plaid_match` | `lib/components/settings/plaid.svelte.ts` | `test_plaidbank.py` | [using/settings](/Runway/using/settings/) |
 | `GET /api/plaid/oauth_resume` | `connections.py:api_plaid_oauth_resume` | `lib/components/settings/plaid.svelte.ts` | `test_plaidbank.py` | [using/settings](/Runway/using/settings/) |
 | `GET /api/investments` | `investments.py:api_investments` | `lib/components/investments/InvestmentsView.svelte`, `lib/components/networth/RetirementView.svelte` | none (allowed) | [using/investments](/Runway/using/investments/) |

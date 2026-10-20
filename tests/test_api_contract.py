@@ -15,7 +15,7 @@ from sqlalchemy import delete, insert, select, update
 from runway.domain import demo, splits
 from runway.storage.models import (Account, AuthSession, CardStatement, InvAccount, PlaidAccount, PlaidItem, RetailCharge, RetailOrder,
                                    Transaction)
-from runway.server.api import accounts, budget, budget_suggest, investments, lock, transactions
+from runway.server.api import accounts, budget, budget_suggest, connections, investments, lock, transactions
 from runway.server.common import _current
 from tests.shared import TODAY, DbCase, freeze_today
 from tests.webauthn_support import ORIGIN, Authenticator
@@ -102,6 +102,7 @@ class Replies(DbCase):
         self.test_lock()
         self.test_investments_holding()
         self.test_investments_summary()
+        self.test_plaid_refresh()
         self.assertEqual(self.checked, covered(), "check each route the contract covers here")
 
     def test_accounts(self):
@@ -177,6 +178,13 @@ class Replies(DbCase):
         reply = investments.api_investments_holding(self.c, {"period": ["3M"]}, {}, "demo-DEMOTM")
         self.assertTrue(reply["history"]["prices"])
         self.check("GET /api/investments/holding/{id}", reply)
+
+    def test_plaid_refresh(self):
+        self.c.execute(insert(PlaidItem).values(item_id="it-r", access_token="x", institution_name="Bank", products="transactions",
+                                                refresh=1, refresh_failures=3, refresh_paused="Plaid: no (X)",
+                                                refresh_paused_at="2026-09-01 10:30:00"))
+        for on in (False, True):
+            self.check("POST /api/plaid/items/{id}/refresh", connections.api_plaid_item_refresh(self.c, {}, {"on": on}, "it-r"))
 
     def test_lock(self):
         # Without sign-in there's none; with it, this session's, turned on with a software passkey, locked and unlocked.

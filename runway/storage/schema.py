@@ -299,6 +299,11 @@ plaid_items = Table(
     Column('cursor', Text, doc='/transactions/sync position'),
     Column('inv_last_sync', Text, doc='the investment sync: holdings and activity (plaid.sync_investments)'),
     Column('inv_error', Text, doc='the investment sync\'s'),
+    Column('refresh', Integer, doc='1: ask Plaid to refresh its transactions before the daily sync (plaidbank.refresh_all); '
+                                   'NULL until its accounts are known, then on unless they are all cards'),
+    Column('refresh_failures', Integer, server_default=text('0'), doc='refreshes failed in a row'),
+    Column('refresh_paused', Text, doc="why refreshing stopped after REFRESH_PAUSE_AFTER failures in a row (Plaid's error)"),
+    Column('refresh_paused_at', Text, doc='when it stopped (UTC)'),
 )
 
 plaid_accounts = Table(
