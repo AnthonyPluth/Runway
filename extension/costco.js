@@ -65,7 +65,7 @@ async function costcoReady(page, g) {
   if (page.hidden) throw new HiddenUnavailable("no sign-in for Costco's order service in the hidden page");
   // Names of what's missing and of what the page does keep (never the values), so a report says what changed.
   const seen = last && last.missing && last.missing.length
-    ? ` (Missing in the page's storage: ${last.missing.join(", ")}. It keeps: ${(last.keys || []).join(", ") || "nothing"}.)` : "";
+    ? ` (Missing in the page's storage: ${last.missing.join(", ")}. Sign-in-like keys it does keep: ${(last.keys || []).join(", ") || "none"}.)` : "";
   throw new Error("Couldn't find how costco.com signs its order requests. Sign in to costco.com in this browser and open " +
     "Account → Orders & Purchases once, then import again. If that doesn't help, Runway may need an update for Costco's site." + seen);
 }

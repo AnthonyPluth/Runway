@@ -91,10 +91,11 @@ function costcoState(storage) {
     } catch (_) { return false; }
   });
   const link = [...document.querySelectorAll('a[href*="ordersandpurchases"]')].map((a) => a.href)[0] || null;
-  // Names only, never values: what the extension tells you when the sign-in can't be found.
+  // Names only, never values: what the extension tells you when the sign-in can't be found. The page's own keys are
+  // listed only if they look like a sign-in's (and with long numbers, which could be an id, blanked).
   const missing = entries.filter(([key]) => !get(key)).map(([key]) => key);
   return { url: location.href, link, ready: present && !expired, stale: present && expired, missing,
-           keys: names.slice(0, 40).map((n) => n.slice(0, 40)),
+           keys: names.filter((n) => /token|auth|client/i.test(n)).slice(0, 10).map((n) => n.slice(0, 40).replace(/\d{3,}/g, "#")),
            signedOut: /\/(LogonForm|LogoffView)|signin\.costco\.com/i.test(location.href) };
 }
 
@@ -106,6 +107,7 @@ async function costcoFetch(url, init, storage) {
     if (u.protocol !== "https:") throw new Error("not an https address");
     const headers = { ...((init && init.headers) || {}) };
     for (const [header, [key, prefix]] of Object.entries(storage || {})) {
+      // (the same lookup as costcoState's: each is run in the page on its own, so they can't share a helper)
       const names = Object.keys(localStorage), flat = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
       const value = localStorage.getItem(names.includes(key) ? key : names.find((n) => flat(n) === flat(key)) || key);
       if (!value) return { ok: false, status: 0, url, text: "", signedOut: true, error: "not signed in" };

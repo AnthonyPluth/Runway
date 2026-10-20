@@ -24,6 +24,8 @@ interface Worker {
   costcoWindows: (since: string | null, days: number, today?: Date) => [Date, Date][];
   costcoSignedOut: (url: string | null) => boolean;
   costcoDate: (d: Date) => string;
+  costcoState: (storage: Record<string, [string, string]>) => { ready: boolean; stale: boolean; missing: string[]; keys: string[] };
+  costcoReady: (page: unknown, g: unknown) => Promise<void>;
   targetHistoryUrl: (tpl: string, api: Api, type: string, page: number, size: number) => string;
   targetUrl: (tpl: string, api: Api, order: string) => string;
   targetApiFromRequests: () => { base: string; key: string; from: string } | null;
@@ -46,7 +48,7 @@ function load(): Worker {
     offscreen: { createDocument: async () => {} },
   };
   const body = Object.values(FILES).join("\n") + `
-    return { storeUrl, checkedArgs, costcoWindows, costcoSignedOut, costcoDate, targetHistoryUrl, targetUrl, targetApiFromRequests,
+    return { storeUrl, checkedArgs, costcoWindows, costcoSignedOut, costcoDate, costcoState, costcoReady, targetHistoryUrl, targetUrl, targetApiFromRequests,
              cartaDays, inParallel, withTimeout, stopsImport, HiddenUnavailable, TARGET_OLD_HISTORY };`;
   const w = new Function("chrome", body)(chrome) as Worker;
   return { ...w, requested: (url) => onRequest({ url }) };
@@ -467,5 +469,56 @@ describe("waiting for a sign-in", () => {
     await s.tabLoaded(8, "https://app.carta.com/investors/", resume);
     expect(resume).not.toHaveBeenCalled();
     expect(data.signIns).toEqual({});
+  });
+});
+
+describe("costcoState", () => {
+  const STORAGE: Record<string, [string, string]> = { a: ["idToken", "Bearer "], c: ["clientID", ""] };
+  const jwt = (exp: number) => `h.${btoa(JSON.stringify({ exp })).replace(/=/g, "")}.s`;
+  const store = (items: Record<string, string>) => {
+    vi.stubGlobal("localStorage", Object.assign(Object.create({ getItem: (k: string) => items[k] ?? null }), items));
+    vi.stubGlobal("document", { querySelectorAll: () => [] });
+    vi.stubGlobal("location", { href: "https://www.costco.com/myaccount/" });
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is ready with the keys under their own names and a token that lasts", () => {
+    store({ idToken: jwt(Date.now() / 1000 + 900), clientID: "x" });
+    expect(w.costcoState(STORAGE)).toMatchObject({ ready: true, stale: false, missing: [] });
+  });
+
+  it("finds a key written in other letters or punctuation", () => {
+    store({ id_token: jwt(Date.now() / 1000 + 900), CLIENTID: "x" });
+    expect(w.costcoState(STORAGE)).toMatchObject({ ready: true, missing: [] });
+  });
+
+  it("is stale when the token is about to run out", () => {
+    store({ idToken: jwt(Date.now() / 1000 + 30), clientID: "x" });
+    expect(w.costcoState(STORAGE)).toMatchObject({ ready: false, stale: true });
+  });
+
+  it("names what's missing, and lists only sign-in-like keys with long numbers blanked", () => {
+    store({ clientID: "x", authToken123456: "v", cartItems: "v", email_a_b: "v" });
+    const s = w.costcoState(STORAGE);
+    expect(s).toMatchObject({ ready: false, stale: false, missing: ["idToken"] });
+    expect(s.keys).toContain("authToken#");
+    expect(s.keys).not.toContain("cartItems");
+    expect(JSON.stringify(s)).not.toContain("123456");
+  });
+});
+
+describe("costcoReady", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("says which keys are missing, by name only", async () => {
+    vi.useFakeTimers();
+    const state = { ready: false, stale: false, missing: ["idToken"], keys: ["authToken#"], url: "https://www.costco.com/myaccount/" };
+    const page = { hidden: false, url: state.url, run: async () => state };
+    const done = w.costcoReady(page, { storage_headers: {}, page: state.url }).catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(30000);
+    const e = (await done) as Error;
+    expect(e.message).toMatch(/Couldn't find how costco\.com signs its order requests/);
+    expect(e.message).toContain("Missing in the page's storage: idToken.");
+    expect(e.message).toContain("Sign-in-like keys it does keep: authToken#.");
   });
 });
