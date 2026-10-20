@@ -5,7 +5,8 @@
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
-  // The Accounts chip under All's search (the account filter, a native picker). It sets the page's own account filter
+  // The Accounts chip under All's search on a tablet or desktop (the account filter, a native picker; on a phone the
+  // account sits in the Filters panel with the others). It sets the page's own account filter
   // (filters.svelte.ts). There are no All, To review or Pending chips: the To review tab and the card's See all open
   // the review list, and Clear filters resets the rest.
   let { f, accounts, onaccount }: { f: TxFilters; accounts: LoadedAccount[]; onaccount: () => void } = $props();

@@ -97,7 +97,7 @@
   let reviewOpen = $state(false);
   let barShown = $state(false);   // the sticky review bar is up (ReviewCard): leave it room at the end of the page
   // How many of the secondary filters are on (the search and the primary chips aren't counted: they stay in view).
-  const filterCount = $derived((review && txs.f.account ? 1 : 0) + (txs.f.category ? 1 : 0) + (txs.f.from || txs.f.to ? 1 : 0) + (txs.f.kind ? 1 : 0) + (txs.f.min || txs.f.max ? 1 : 0));
+  const filterCount = $derived((txs.f.account ? 1 : 0) + (txs.f.category ? 1 : 0) + (txs.f.from || txs.f.to ? 1 : 0) + (txs.f.kind ? 1 : 0) + (txs.f.min || txs.f.max ? 1 : 0));
 
   // The review card (All only): what is waiting for review, loaded on its own so the filters of the list below don't
   // narrow it. A decision takes the transaction out of it at once; an undo loads it again (reloadWas).
@@ -319,20 +319,21 @@
         value={txs.f.q} oninput={(e) => txs.search(e.currentTarget.value)} />
     </div>
     {#if viewport.phone}
-      <!-- The secondary filters (account on Review, category, dates, kind, amount) sit behind this one button; the active ones stay summarized below. -->
+      <!-- The secondary filters (account, category, dates, kind, amount) sit behind this one button; the active ones stay summarized below. -->
       <Button variant="outline" class={cn("h-11 shrink-0 rounded-full", filterCount && "border-primary bg-primary/15 text-primary")} aria-expanded={filtersOpen} aria-controls="tx-filters"
         aria-label={filterCount ? `Filters (${filterCount} on)` : "Filters"} onclick={() => (filtersOpen = !filtersOpen)}>
         <SlidersHorizontal aria-hidden="true" />Filters{#if filterCount}<span class="tabular-nums" data-filter-count>{filterCount}</span>{/if}
       </Button>
     {/if}
   </div>
-  {#if !review}
+  {#if !review && !viewport.phone}
+    <!-- On a phone the account is one of the secondary filters, in the panel below. -->
     <FilterChips f={txs.f} accounts={accounts.filter((a) => a.kind !== "investment")} onaccount={txs.load} />
   {/if}
 
   <div id="tx-filters" class={cn("mb-3 flex flex-wrap items-center gap-2", viewport.phone && !filtersOpen && !isFiltered(txs.f) && "hidden")}>
     {#if !viewport.phone || filtersOpen}
-    {#if review}
+    {#if review || viewport.phone}
     <NativeSelect aria-label="Account" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-48" bind:value={txs.f.account} onchange={txs.load}>
       <option value="">All accounts</option>
       {#each accounts.filter((a) => a.kind !== "investment") as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
@@ -346,8 +347,8 @@
     <DateRange from={txs.f.from} to={txs.f.to} note={txs.f.scope === "budget" ? "Budget accounts" : ""} onchange={txs.setDates} />
     <MoreFilters kind={txs.f.kind} min={txs.f.min} max={txs.f.max} onchange={txs.setMore} />
     {:else}
-      <!-- Closed on a phone: what is on, each with its own ✕ (the account on Review; All has it as a chip above). -->
-      {#if review && txs.f.account}{@render chip((() => { const a = accounts.find((x) => x.id === txs.f.account); return a ? accountName(a) : txs.f.account; })(), "Show every account", () => { txs.f.account = ""; txs.load(); })}{/if}
+      <!-- Closed on a phone: what is on, each with its own ✕ (the account too). -->
+      {#if txs.f.account}{@render chip((() => { const a = accounts.find((x) => x.id === txs.f.account); return a ? accountName(a) : txs.f.account; })(), "Show every account", () => { txs.f.account = ""; txs.load(); })}{/if}
       {#if txs.f.category}{@render chip(txs.f.category === "__none__" ? "Uncategorized" : txs.f.category, "Show every category", () => { txs.f.category = ""; txs.load(); })}{/if}
       {#if txs.f.from || txs.f.to}{@render chip(rangeLabel(txs.f.from, txs.f.to), "Show all dates", () => txs.setDates("", ""))}{/if}
     {/if}
