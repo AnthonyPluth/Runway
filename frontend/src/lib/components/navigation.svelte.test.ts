@@ -36,12 +36,14 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "#setup");
   });
 
-  it("lists Investments right after Budget", () => {
+  it("names two groups, Day to day and Wealth, with Investments first in Wealth", () => {
     app.state = state();
     render(Sidebar);
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(
-      ["Overview", "Transactions", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning"]);
+    expect(Array.from(nav.querySelectorAll("a, p")).map((e) => e.textContent!.trim())).toEqual(
+      ["Day to day", "Overview", "Transactions", "Budget", "Recurring", "Reports", "Wealth", "Investments", "Net worth", "Churning"]);
+    const label = within(nav).getByText("Wealth");
+    expect(label).toHaveClass("text-[11px]", "uppercase", "tracking-wide", "text-muted-foreground", "rail:hidden");
   });
 
   it.each([["investments", "", "Investments"], ["investments", "holding/sec1", "Investments"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["recurring", "", "Recurring"]])(
@@ -162,7 +164,10 @@ describe("Sidebar as a tablet rail", () => {
     const sheet = screen.getByRole("dialog");
     const pages = within(sheet).getByRole("navigation", { name: "All pages" });
     expect(within(pages).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(
-      ["Overview", "Transactions 3", "Budget", "Investments", "Recurring", "Reports", "Net worth", "Churning", "Settings"]);
+      ["Overview", "Transactions 3", "Budget", "Recurring", "Reports", "Investments", "Net worth", "Churning", "Settings"]);
+    // The sheet keeps the group labels, which the rail itself hides.
+    expect(within(pages).getByText("Day to day")).not.toHaveClass("rail:hidden");
+    expect(within(pages).getByText("Wealth")).not.toHaveClass("rail:hidden");
     expect(within(sheet).getByRole("link", { name: "Net worth" })).toHaveAttribute("href", "#networth");
     expect(within(sheet).getByText("Ann Lee")).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "Synced · 1 bank needs attention" })).toHaveAttribute("href", "#setup/connections");

@@ -17,18 +17,27 @@ import { forget as forgetLock } from "./lock.svelte";
 /** `short`: a shorter label for the phone's tab bar. */
 export interface NavItem { page: string; label: string; icon: typeof House; short?: string }
 
-export const MAIN_NAV: NavItem[] = [
-  { page: "overview", label: "Overview", icon: House },
-  { page: "transactions", label: "Transactions", icon: List },
-  { page: "budget", label: "Budget", icon: ChartPie },
-  { page: "investments", label: "Investments", icon: TrendingUp, short: "Invest" },
-  { page: "recurring", label: "Recurring", icon: Repeat },
-  { page: "reports", label: "Reports", icon: ChartColumn },
-];
-export const MONEY_NAV: NavItem[] = [
-  { page: "networth", label: "Net worth", icon: Landmark },
-  { page: "churning", label: "Churning", icon: CreditCard },
-];
+/** A labelled run of pages: the sidebar (and the tablet's Menu sheet) names each group. */
+export interface NavGroup { label: string; items: NavItem[] }
+
+export const MAIN_NAV: NavGroup = {
+  label: "Day to day",
+  items: [
+    { page: "overview", label: "Overview", icon: House },
+    { page: "transactions", label: "Transactions", icon: List },
+    { page: "budget", label: "Budget", icon: ChartPie },
+    { page: "recurring", label: "Recurring", icon: Repeat },
+    { page: "reports", label: "Reports", icon: ChartColumn },
+  ],
+};
+export const MONEY_NAV: NavGroup = {
+  label: "Wealth",
+  items: [
+    { page: "investments", label: "Investments", icon: TrendingUp, short: "Invest" },
+    { page: "networth", label: "Net worth", icon: Landmark },
+    { page: "churning", label: "Churning", icon: CreditCard },
+  ],
+};
 
 /** The nav item to light up: Review is a tab of Transactions. */
 export const currentPage = () => (route.page === "review" ? "transactions" : route.page);
