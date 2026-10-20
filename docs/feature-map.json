@@ -800,7 +800,6 @@
       "handler": "runway/server/api/budget.py:api_budget",
       "web": [
         "frontend/src/lib/components/budget/BudgetView.svelte",
-        "frontend/src/lib/components/overview/SummaryTiles.svelte",
         "frontend/src/lib/components/overview/ThisMonth.svelte"
       ],
       "tests": [
@@ -1033,7 +1032,6 @@
       "path": "/api/month_pace",
       "handler": "runway/server/api/reports.py:api_month_pace",
       "web": [
-        "frontend/src/lib/components/overview/SummaryTiles.svelte",
         "frontend/src/lib/components/overview/ThisMonth.svelte"
       ],
       "tests": [],

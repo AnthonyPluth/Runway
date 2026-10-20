@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-Runway's pages sit in the sidebar (a tab bar at the bottom on a phone, a rail of icons on a tablet): **Overview**, **Transactions**, **Budget**, **Investments**, **Recurring**, **Reports**, **Net worth** (Summary, Equity and Retirement), **Churning** and **Settings**. On a phone, Recurring, Reports, Net worth, Churning and Settings are under **More**. Every page and editor works at any width; this guide has one page for each.
+Runway's pages sit in the sidebar (a tab bar at the bottom on a phone, a rail of icons on a tablet), in two groups: **Day to day** (**Overview**, **Transactions**, **Budget**, **Recurring** and **Reports**) and **Wealth** (**Investments**, **Net worth** with its Summary, Equity and Retirement tabs, and **Churning**), with **Settings** at the bottom. The phone's tab bar keeps Overview, Transactions, Budget and Invest, with the rest under **More**. Every page and editor works at any width; this guide has one page for each.
 
 Overview is the forecast: your chosen account's balance, day by day, for the next 30 days to 6 months.
 
@@ -40,8 +40,8 @@ The first alert shows as a banner, with **+N more** for the rest. Each links to 
 
 ## The rest of the page
 
-- **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions, linking to Budget and Transactions.
-- **Net worth:** the total and its change this month, linking to Net worth.
+- **This month:** its heading links to Budget. A bar shows what your budgeted categories have spent against what they're budgeted, with a marker for how far through the month it is and a line saying how far over or under pace you are; then the comparison with last month, the day-by-day chart, the budgets closest to their limit and the latest transactions.
+- **Net worth:** a tile with the total and its change this month, linking to Net worth.
 - **Investments:** with an investment account, a card shows the portfolio's value, today's change, the last month as a small line and the three holdings that moved most today, with live prices while the market is open. It opens Investments.
 
 ## The setup checklist

@@ -11,7 +11,7 @@ Three tabs: **Summary**, **Equity** and **Retirement**.
 
 ## Summary
 
-- Every account plus homes, vehicles and anything else you own, minus cards and loans, recorded each day you open Runway. The change over 1M, 3M or 1Y ("+$4,210 (+2.9%) in the last month") is measured from the latest snapshot at least that old; pointing at the chart shows that day's total.
+- Every account plus homes, vehicles and anything else you own, minus cards and loans, recorded each day you open Runway. The change over 1M, 3M or 1Y ("+$4,210 (+2.9%) in the last month") is measured from the latest snapshot at least that old. Until there are two days of history, a dashed box where the chart will be says it builds up each day you open Runway. Pointing at the chart shows that day's total.
 - **Homes** can be valued automatically through [Realie](https://www.realie.ai) (a key under Settings → Connections, each home looked up at most weekly) or by hand; vehicles and other assets by hand, with a yearly change if you like.
 - **Loans go down between updates:** a loan with an interest rate and monthly payment (the lender's through Plaid, or what you enter under Settings → Accounts) is paid down month by month from its last balance, so a home's equity grows even when the bank doesn't send a new balance.
 - **What makes it up** lists each kind of asset and debt in its own colour. Debts that are all $0 show as "Nothing owed".
