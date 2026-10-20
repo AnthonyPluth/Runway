@@ -14,13 +14,24 @@ that directory:
   by two pixels so one pixel can be seen) and the boxes outlined in blue. If the size changed, the canvas is the larger of
   the two, and light blue is where the old image does not reach;
 - `summary.md`, the comment's body (it starts with MARKER, which is how the workflow finds its comment again);
-- `summary.json`, the same facts for a program.
+- `summary.json`, the same facts for a program;
+- `report.html`, one self-contained page (no network, every image a data URI, vanilla JS and CSS inline) that shows each
+  changed screenshot with the tabs Diff, Reference, Actual and Slider, the way Vitest's browser UI does. Tall images are
+  embedded as the bands of rows around the changes (REPORT_CONTEXT rows of context, unchanged rows left out and labelled)
+  and, when the size allows, whole. The file is kept under REPORT_BUDGET: past it the context shrinks, then the images are
+  scaled down, and the page says so.
+
+`--from-json summary.json --report-url URL` renders the comment again from an earlier run's summary.json, with the link to
+the report at its top (the link is only known once the report has been uploaded).
 
 It is informational: it exits 0 whatever it finds, and fails only when it cannot read the history."""
 from __future__ import annotations
 
 import argparse
+import base64
+import html
 import io
+import itertools
 import json
 import subprocess
 import sys
@@ -44,6 +55,17 @@ CHANGED = (255, 0, 102)    # changed pixels in the highlight
 OUTLINE = (0, 102, 255)    # the boxes
 BEYOND = (214, 228, 255)   # where the old image doesn't reach, when the size changed
 MAX_COMMENT_CHARS = 30_000   # GitHub's limit is 65,536
+REPORT = "report.html"
+REPORT_BUDGET = 25 * 1024 * 1024      # the most bytes of report.html
+FULL_BUDGET = 12 * 1024 * 1024        # whole images are embedded only while the file stays under this
+REPORT_CONTEXT = 150                  # rows of context above and below a change
+BAND_GAP = 40                         # bands this close (rows between them) are one band
+MAX_BANDS = 40                        # per image: more are merged, nearest first
+WEBP_MAX = 16383                      # WebP's limit on one side
+# (context rows, scale) tried in turn until the report fits: first less context, then smaller images.
+LEVELS = [(REPORT_CONTEXT, 1.0), (60, 1.0), (20, 1.0), (0, 1.0), (0, 0.75), (0, 0.5), (0, 0.35), (0, 0.25)]
+NEW_ONLY = (34, 197, 94)              # rows only the new image has (diff of a resized image)
+OLD_ONLY = (245, 158, 11)             # rows only the old image has
 REMINDER = ("An unexpected diff on a page this change doesn't touch is a leak or a nondeterminism bug, "
             "not noise: find out why (AGENTS.md, \"Git and PRs\").")
 
@@ -262,9 +284,11 @@ def _take(lines: list[str], room: int) -> tuple[list[str], int]:
     return kept, len(lines) - len(kept)
 
 
-def render(report: dict, run_url: str | None = None, max_chars: int = MAX_COMMENT_CHARS) -> str:
-    """The comment: MARKER first, then a table of the modified screenshots (biggest change first) and the added and deleted
-    ones. Lines that would take it past max_chars are left out, and it says how many."""
+def render(report: dict, run_url: str | None = None, max_chars: int = MAX_COMMENT_CHARS,
+           report_url: str | None = None) -> str:
+    """The comment: MARKER first, then (with a report_url) the link to report.html, then a table of the modified screenshots
+    (biggest change first) and the added and deleted ones. Lines that would take it past max_chars are left out, and it
+    says how many."""
     files = report["files"]
     if not files:
         return f"{MARKER}\n### Screenshot changes\n\nNo screenshot changes in this pull request.\n"
@@ -274,7 +298,13 @@ def render(report: dict, run_url: str | None = None, max_chars: int = MAX_COMMEN
     counts = [f"{len(modified)} modified", f"{len(added)} added", f"{len(deleted)} deleted"]
     head = [MARKER, "### Screenshot changes", "",
             f"{', '.join(c for c in counts if not c.startswith('0 '))} (compared pixel by pixel against the merge base)."]
-    if any(f["highlight"] for f in modified):
+    if report_url:
+        # Only people logged in to GitHub with access to the repository can open the artifact's link.
+        head.insert(3, f"**View the visual diff: [{REPORT}]({report_url})**")
+        head.insert(4, "")
+        head += ["", "_One HTML page with the tabs Diff, Reference, Actual and Slider for each image. The link needs you to be "
+                     f"logged in to GitHub, and the file is kept {RETENTION_DAYS} days._"]
+    elif any(f["highlight"] for f in modified):
         head += ["", f"The changed pixels are highlighted in magenta, with the boxes in blue, in the `{ARTIFACT}` artifact"
                     + (f" of [this run]({run_url}#artifacts)" if run_url else "")
                     + f" (kept {RETENTION_DAYS} days): one `<name>.diff.png` per modified screenshot."]
@@ -297,24 +327,651 @@ def render(report: dict, run_url: str | None = None, max_chars: int = MAX_COMMEN
     return "\n".join(head + body + tail)
 
 
+REPORT_CSS = r"""
+:root{color-scheme:dark light;--bg:#0d1117;--panel:#161b22;--raised:#1f2630;--border:#30363d;--text:#e6edf3;--muted:#9da7b3;
+--accent:#58a6ff;--accent-ink:#0d1117;--s-modified:#d29922;--s-resized:#db6d28;--s-added:#3fb950;--s-deleted:#f85149;--s-error:#f85149;
+--hatch:#2a313a}
+@media (prefers-color-scheme:light){:root{--bg:#ffffff;--panel:#f6f8fa;--raised:#eaeef2;--border:#d0d7de;--text:#1f2328;
+--muted:#59636e;--accent:#0969da;--accent-ink:#ffffff;--s-modified:#9a6700;--s-resized:#bc4c00;--s-added:#1a7f37;
+--s-deleted:#cf222e;--s-error:#cf222e;--hatch:#dde3ea}}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1500px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.5rem;margin:0 0 4px}
+h2{font-size:1rem;margin:0;word-break:break-all}
+a{color:var(--accent)}
+.lead{margin:0 0 12px;color:var(--muted)}
+.notices{margin:0 0 16px;padding:10px 12px 10px 28px;background:var(--panel);border:1px solid var(--s-modified);border-radius:6px}
+.controls{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 12px}
+.controls label{display:flex;align-items:center;gap:8px;color:var(--muted)}
+input,select,button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 10px}
+input{min-width:min(100%,260px)}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#index{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 16px;margin:0 0 24px;padding:12px 12px 12px 36px;
+background:var(--panel);border:1px solid var(--border);border-radius:8px;max-height:260px;overflow:auto}
+#index li{word-break:break-all}
+.n{color:var(--muted);font-size:.85em;white-space:nowrap}
+.badge{display:inline-block;padding:0 8px;border:1px solid currentColor;border-radius:999px;font-size:.75rem;line-height:1.5;font-weight:600;white-space:nowrap}
+.s-modified{color:var(--s-modified)}.s-resized{color:var(--s-resized)}.s-added{color:var(--s-added)}.s-deleted{color:var(--s-deleted)}.s-error{color:var(--s-error)}
+.card{margin:0 0 32px;padding:16px;background:var(--panel);border:1px solid var(--border);border-radius:10px;scroll-margin-top:12px}
+.card[hidden],#index li[hidden]{display:none}
+.card>header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.verdict{margin:8px 0 4px;font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 12px;color:var(--muted);font-size:.9rem}
+.note{margin:8px 0;color:var(--muted);font-size:.9rem}
+.tools{margin:0 0 8px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);overflow-x:auto}
+.tabs [role=tab]{border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:none;color:var(--muted);padding:8px 14px}
+.tabs [role=tab][aria-selected=true]{color:var(--text);border-bottom-color:var(--accent);background:var(--raised)}
+.pane{padding:12px 0 0}
+.js .pane[hidden]{display:none}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 8px;font-size:.85rem;color:var(--muted)}
+.sw{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;border-radius:2px}
+.hatch-new{background:repeating-linear-gradient(135deg,#22c55e 0 3px,transparent 3px 7px)}
+.hatch-old{background:repeating-linear-gradient(135deg,#f59e0b 0 3px,transparent 3px 7px)}
+.seg{margin:0 0 4px}
+figcaption{margin:8px 0 4px;color:var(--muted);font-size:.85rem}
+.gap{margin:8px 0;padding:6px;text-align:center;color:var(--muted);font-size:.85rem;border:1px dashed var(--border);border-radius:6px}
+.win{position:relative;width:100%;max-width:var(--w);overflow:hidden;background:repeating-linear-gradient(135deg,var(--hatch) 0 6px,transparent 6px 12px);
+outline:1px solid var(--border)}
+.win img{position:absolute;left:0;display:block;max-width:none}
+.win.none{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.85rem;padding:8px}
+.allview{display:none}
+.card.all .allview{display:block}
+.card.all .bands{display:none}
+.cmp{position:relative;width:100%;max-width:var(--w);touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:ew-resize}
+.cmp .win{max-width:none}
+.cmp .win.top{position:absolute;inset:0;width:auto;aspect-ratio:auto;clip-path:inset(0 calc(100% - var(--p,50%)) 0 0)}
+.cmp .tag{position:absolute;top:6px;padding:1px 8px;border-radius:999px;font-size:.75rem;background:rgb(0 0 0/.65);color:#fff;pointer-events:none}
+.cmp .tag.l{left:6px}.cmp .tag.r{right:6px}
+.cmp .handle{position:absolute;top:0;bottom:0;left:var(--p,50%);width:44px;margin-left:-22px;cursor:ew-resize}
+.cmp .handle:focus-visible{outline:none}
+.cmp .handle:focus-visible::after{outline:3px solid var(--text);outline-offset:2px}
+.cmp .handle::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;margin-left:-1px;background:var(--accent);box-shadow:0 0 0 1px rgb(0 0 0/.4)}
+.cmp .handle::after{content:"↔";position:absolute;top:50%;left:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;
+background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;box-shadow:0 1px 4px rgb(0 0 0/.5)}
+footer{margin-top:32px;color:var(--muted);font-size:.8rem}
+@media (max-width:600px){.card{padding:12px}#index{grid-template-columns:1fr}}
+"""
+
+REPORT_JS = r"""
+(function(){
+"use strict";
+var doc=document,root=doc.documentElement;
+root.classList.add("js");
+function all(sel,ctx){return Array.prototype.slice.call((ctx||doc).querySelectorAll(sel));}
+function el(tag,cls,text){var e=doc.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;}
+
+// The before/after slider: reference on the left of the handle, actual on the right.
+function slider(refWin,actWin){
+  var box=el("div","cmp"),base=actWin.cloneNode(true),top=refWin.cloneNode(true),handle=el("div","handle"),pos=50;
+  top.classList.add("top");
+  handle.setAttribute("role","slider");handle.tabIndex=0;
+  handle.setAttribute("aria-label","Comparison position: reference on the left, actual on the right");
+  handle.setAttribute("aria-valuemin","0");handle.setAttribute("aria-valuemax","100");handle.setAttribute("aria-orientation","horizontal");
+  box.append(base,top,el("span","tag l","Reference"),el("span","tag r","Actual"),handle);
+  function set(p){
+    pos=Math.max(0,Math.min(100,p));
+    box.style.setProperty("--p",pos+"%");
+    handle.setAttribute("aria-valuenow",String(Math.round(pos)));
+    handle.setAttribute("aria-valuetext",Math.round(pos)+"% reference, "+Math.round(100-pos)+"% actual");
+  }
+  function fromEvent(e){var r=box.getBoundingClientRect();set((e.clientX-r.left)/r.width*100);}
+  box.addEventListener("pointerdown",function(e){
+    if(e.button>0)return;
+    box.setPointerCapture(e.pointerId);box.dataset.drag="1";fromEvent(e);handle.focus({preventScroll:true});
+  });
+  box.addEventListener("pointermove",function(e){if(box.dataset.drag)fromEvent(e);});
+  function end(e){delete box.dataset.drag;if(box.hasPointerCapture(e.pointerId))box.releasePointerCapture(e.pointerId);}
+  box.addEventListener("pointerup",end);box.addEventListener("pointercancel",end);
+  handle.addEventListener("keydown",function(e){
+    var step=e.shiftKey?10:1,k=e.key;
+    if(k==="ArrowLeft"||k==="ArrowDown")set(pos-step);
+    else if(k==="ArrowRight"||k==="ArrowUp")set(pos+step);
+    else if(k==="PageDown")set(pos-10);else if(k==="PageUp")set(pos+10);
+    else if(k==="Home")set(0);else if(k==="End")set(100);
+    else return;
+    e.preventDefault();
+  });
+  set(50);
+  return box;
+}
+
+// One window onto a whole image (the "all rows" view): the image of the first band, shown from its top.
+function wholeWindow(card,pane){
+  var img=pane.querySelector(".win img");
+  if(!img)return null;
+  var w=+card.dataset.w,h=+card.dataset.h,win=el("div","win"),c=img.cloneNode();
+  win.style.aspectRatio=w+"/"+h;
+  c.style.top="0";c.style.height=(+img.dataset.ih/h*100)+"%";c.style.width=(+img.dataset.iw/w*100)+"%";c.setAttribute("loading","lazy");
+  win.append(c);
+  return win;
+}
+function fill(view,win,title){var f=el("figure","seg");f.append(el("figcaption","",title),win);view.append(f);}
+
+all("img[data-reuse]").forEach(function(img){img.src=img.closest(".pane").querySelector("img[src]").src;});
+
+all(".card").forEach(function(card){
+  var tabs=all('[role=tab]',card);
+  var panes=tabs.map(function(t){return doc.getElementById(t.getAttribute("aria-controls"));});
+  function select(i,focus){
+    tabs.forEach(function(t,k){
+      var on=k===i;
+      t.setAttribute("aria-selected",on?"true":"false");t.tabIndex=on?0:-1;panes[k].hidden=!on;
+    });
+    if(focus)tabs[i].focus();
+  }
+  if(tabs.length){
+    select(0,false);
+    tabs.forEach(function(t,i){
+      t.addEventListener("click",function(){select(i,false);});
+      t.addEventListener("keydown",function(e){
+        var n=tabs.length,k=e.key,j=-1;
+        if(k==="ArrowRight")j=(i+1)%n;else if(k==="ArrowLeft")j=(i+n-1)%n;else if(k==="Home")j=0;else if(k==="End")j=n-1;
+        if(j<0)return;
+        e.preventDefault();select(j,true);
+      });
+    });
+  }
+  var refPane=card.querySelector(".pane-ref"),actPane=card.querySelector(".pane-act"),sl=card.querySelector(".pane-slider");
+  if(sl&&refPane&&actPane){
+    var refWins=all(".bands .win",refPane),actWins=all(".bands .win",actPane);
+    all(".host",sl).forEach(function(h,i){h.replaceWith(slider(refWins[i],actWins[i]));});
+  }
+  var btn=card.querySelector(".allbtn");
+  if(btn){
+    var built=false;
+    btn.addEventListener("click",function(){
+      var on=!card.classList.contains("all");
+      if(on&&!built){
+        built=true;
+        var title="All "+Number(card.dataset.h).toLocaleString("en-US")+" rows",wins={};
+        all(".pane",card).forEach(function(p){
+          var kind=p.className.match(/pane-(\w+)/)[1];
+          if(kind==="slider")return;
+          var w=wholeWindow(card,p);
+          if(w){wins[kind]=w;fill(p.querySelector(".allview"),w,title);}
+        });
+        if(sl&&wins.ref&&wins.act)fill(sl.querySelector(".allview"),slider(wins.ref,wins.act),title);
+      }
+      card.classList.toggle("all",on);
+      btn.setAttribute("aria-pressed",on?"true":"false");
+      btn.textContent=on?"Show only the changed rows":"Show all "+Number(card.dataset.h).toLocaleString("en-US")+" rows";
+    });
+  }
+});
+
+// Filter: the index and the cards follow the text and the status.
+var q=doc.getElementById("filter"),st=doc.getElementById("status"),count=doc.getElementById("count");
+function apply(){
+  var text=q.value.trim().toLowerCase(),status=st.value,shown=0,total=+count.dataset.total;
+  all("#index li, .card").forEach(function(n){
+    var ok=(!text||n.dataset.name.indexOf(text)>=0)&&(!status||n.dataset.status===status);
+    n.hidden=!ok;
+    if(ok&&n.tagName==="LI")shown++;
+  });
+  doc.getElementById("none").hidden=shown>0;
+  var base=count.dataset.base||(count.dataset.base=count.textContent);
+  count.textContent=shown===total?base:base+" Showing "+shown+" of "+total+".";
+}
+q.addEventListener("input",apply);st.addEventListener("change",apply);
+})();
+"""
+
+
+# --- the report ---------------------------------------------------------------------------------------------------
+
+class OverBudget(Exception):
+    """The images of a level need more bytes than the report may have."""
+
+
+class Meter:
+    """Counts the bytes of the images embedded so far (as base64, which is what the file holds)."""
+
+    def __init__(self, room: int) -> None:
+        self.room, self.used = room, 0
+
+    def add(self, nbytes: int) -> None:
+        self.used += nbytes * 4 // 3 + 32
+        if self.used > self.room:
+            raise OverBudget
+
+
+@dataclass
+class Piece:
+    """A run of rows of one image, encoded: rows y0 to y1 (the canvas's rows) of an image `width` pixels wide."""
+    y0: int
+    y1: int
+    width: int
+    src: str
+
+
+@dataclass
+class Plan:
+    """What the report shows for one file: the bands (y0, y1) of the canvas to display, and the pieces of the images."""
+    f: dict
+    canvas: tuple[int, int] = (0, 0)
+    bands: list[tuple[int, int]] = field(default_factory=list)
+    pieces: dict[str, list[Piece]] = field(default_factory=dict)    # "ref", "act", "diff"
+    whole: bool = False        # the pieces are whole images (so every row can be shown)
+    omitted: bool = False      # left without images: the size budget was used up
+
+    @property
+    def nbytes(self) -> int:
+        return sum(len(p.src) for ps in self.pieces.values() for p in ps)
+
+
+def _runs(flags) -> list[tuple[int, int]]:
+    runs, y = [], 0
+    for key, group in itertools.groupby(flags):
+        n = len(list(group))
+        if key:
+            runs.append((y, y + n))
+        y += n
+    return runs
+
+
+def changed_runs(old: Image.Image, new: Image.Image, mask: Image.Image) -> list[tuple[int, int]]:
+    """The runs of rows (of the larger canvas) that differ: rows with a changed pixel, and rows only one image has. A
+    different width changes every row, since the columns past the narrower image differ."""
+    height = max(old.height, new.height)
+    if old.width != new.width:
+        return [(0, height)]
+    runs = _runs(mask.getprojection()[1])
+    if old.height != new.height:
+        runs.append((min(old.height, new.height), height))
+    joined: list[tuple[int, int]] = []
+    for a, b in sorted(runs):
+        if joined and a <= joined[-1][1]:
+            joined[-1] = (joined[-1][0], max(b, joined[-1][1]))
+        else:
+            joined.append((a, b))
+    return joined
+
+
+def make_bands(runs: list[tuple[int, int]], height: int, context: int) -> list[tuple[int, int]]:
+    """Each run with `context` rows around it, bands that touch or nearly touch joined, and at most MAX_BANDS of them."""
+    bands: list[tuple[int, int]] = []
+    for a, b in runs:
+        a, b = max(a - context, 0), min(b + context, height)
+        if bands and a <= bands[-1][1] + BAND_GAP:
+            bands[-1] = (bands[-1][0], max(b, bands[-1][1]))
+        else:
+            bands.append((a, b))
+    while len(bands) > MAX_BANDS:
+        i = min(range(len(bands) - 1), key=lambda k: bands[k + 1][0] - bands[k][1])
+        bands[i:i + 2] = [(bands[i][0], bands[i + 1][1])]
+    return bands
+
+
+def report_diff(old: Image.Image, new: Image.Image, mask: Image.Image, boxes: list) -> Image.Image:
+    """The highlight, plus, when the sizes differ, diagonal stripes over the rows and columns only one image has: green
+    where only the new image reaches, amber where only the old one does."""
+    canvas = highlight(old, mask, [tuple(b) for b in boxes], new.size)
+    if old.size == new.size:
+        return canvas
+    stripes = Image.new("L", canvas.size, 0)
+    draw = ImageDraw.Draw(stripes)
+    for k in range(-canvas.height, canvas.width, 12):
+        draw.line((k, 0, k + canvas.height, canvas.height), fill=255, width=3)
+    for keep, drop, color in ((new, old, NEW_ONLY), (old, new, OLD_ONLY)):
+        only = Image.new("L", canvas.size, 0)
+        only.paste(255, (0, 0, keep.width, keep.height))
+        only.paste(0, (0, 0, drop.width, drop.height))
+        canvas.paste(Image.new("RGB", canvas.size, color), (0, 0), ImageChops.multiply(only, stripes))
+    return canvas
+
+
+def encode(img: Image.Image, scale: float) -> tuple[str, bytes]:
+    """Lossless WebP (every browser reads it, and flat screenshots shrink a lot), PNG past WebP's size limit."""
+    if scale < 1:
+        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.Resampling.LANCZOS)
+    if img.mode == "RGBA" and img.getchannel("A").getextrema() == (255, 255):
+        img = img.convert("RGB")
+    buf = io.BytesIO()
+    if max(img.size) <= WEBP_MAX:
+        img.save(buf, "WEBP", lossless=True, quality=75, method=4)
+        return "image/webp", buf.getvalue()
+    img.save(buf, "PNG", optimize=True)
+    return "image/png", buf.getvalue()
+
+
+def _piece(img: Image.Image, y0: int, y1: int, scale: float, meter: Meter) -> Piece:
+    mime, data = encode(img.crop((0, y0, img.width, y1)), scale)
+    meter.add(len(data))
+    return Piece(y0, y1, img.width, f"data:{mime};base64,{base64.b64encode(data).decode()}")
+
+
+def build_plan(f: dict, merge_base: str, head: str, repo: Path, context: int, scale: float, meter: Meter,
+               whole: bool = False) -> Plan:
+    """The bands and encoded pieces for one file. `whole` embeds the whole images instead of the bands' rows only."""
+    plan = Plan(f)
+    if f["error"]:
+        return plan
+    try:
+        old = blob(merge_base, f["path"], repo) if f["status"] != "added" else None
+        new = blob(head, f["path"], repo) if f["status"] != "deleted" else None
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return plan
+    sizes = [i.size for i in (old, new) if i is not None]
+    plan.canvas = (max(s[0] for s in sizes), max(s[1] for s in sizes))
+    height = plan.canvas[1]
+    images: dict[str, Image.Image] = {}
+    if old is not None and new is not None:
+        mask = changed_mask(old, new)
+        runs = changed_runs(old, new, mask)
+        if not runs:
+            return plan
+        plan.bands = make_bands(runs, height, context)
+        images = {"diff": report_diff(old, new, mask, f["boxes"]), "ref": old, "act": new}
+    else:
+        plan.bands = [(0, height)]
+        images = {"ref": old} if old is not None else {"act": new}   # type: ignore[dict-item]
+    plan.whole = whole or plan.bands == [(0, height)]
+    for kind, img in images.items():
+        ranges = [(0, img.height)] if whole else [(a, min(b, img.height)) for a, b in plan.bands if a < img.height]
+        plan.pieces[kind] = [_piece(img, a, b, scale, meter) for a, b in ranges]
+    return plan
+
+
+def _n(x: int) -> str:
+    return f"{x:,}"
+
+
+def _ratio(r: float) -> str:
+    """The share of changed pixels as a fraction, the way Vitest prints it (0.02 is 2%)."""
+    if r <= 0:
+        return "0"
+    return "<0.0001" if r < 0.0001 else f"{r:.4f}".rstrip("0").rstrip(".")
+
+
+def _status(f: dict) -> str:
+    if f["error"]:
+        return "error"
+    return "resized" if f["status"] == "modified" and f["old_size"] != f["new_size"] else f["status"]
+
+
+def _share(f: dict) -> float:
+    return f["changed_pixels"] / f["compared_pixels"] if f["compared_pixels"] else 0.0
+
+
+def _verdict(f: dict) -> str:
+    status, px = _status(f), f["changed_pixels"]
+    differ = f"{_n(px)} pixels (ratio {_ratio(_share(f))}) differ"
+    if status == "error":
+        return f"Could not be compared: {f['error']}"
+    if status == "added":
+        return "New screenshot: there is no stored reference."
+    if status == "deleted":
+        return "Screenshot removed: there is no actual image any more."
+    if status == "resized":
+        return (f"Screenshot size changed from {_size(f['old_size'])} to {_size(f['new_size'])}. "
+                + (f"{differ} in the area both images have." if px else "No pixel differs in the area both images have."))
+    if not px:
+        return "Same pixels as the stored reference: only the file's bytes changed (it was re-encoded)."
+    return f"Screenshot does not match the stored reference. {differ}."
+
+
+def _find(pieces: list[Piece], y: int) -> Piece | None:
+    return next((p for p in pieces if p.y0 <= y < p.y1), None)
+
+
+def _window(plan: Plan, kind: str, label: str, band: tuple[int, int], eager: bool, seen: set[int]) -> str:
+    """The band's rows of one image, in a box with the band's proportions: the image is placed in it by percentages, so
+    one embedded image serves every band that shows a part of it. Its bytes are written once: the later windows onto the
+    same piece (`seen`) carry no src, and the page's script copies the first one's."""
+    width = plan.canvas[0]
+    y0, y1 = band
+    piece = _find(plan.pieces.get(kind, []), y0)
+    style = f"aspect-ratio:{width}/{y1 - y0}"
+    if piece is None:
+        return f'<div class="win none" style="{style}"><span>No rows here: the {label} image is shorter.</span></div>'
+    top, tall = -(y0 - piece.y0) / (y1 - y0) * 100, (piece.y1 - piece.y0) / (y1 - y0) * 100
+    alt = {"ref": f"Reference screenshot {plan.f['path']}", "act": f"Actual screenshot {plan.f['path']}",
+           "diff": f"Changed pixels of {plan.f['path']}, in magenta over the faded reference"}[kind]
+    if (y0, y1) != (0, plan.canvas[1]):
+        alt += f", rows {y0} to {y1}"
+    source = 'data-reuse="" ' if id(piece) in seen else f'src="{piece.src}" '
+    seen.add(id(piece))
+    return (f'<div class="win" style="{style}"><img {source}alt="{html.escape(alt)}" '
+            f'loading="{"eager" if eager else "lazy"}" decoding="async" data-iw="{piece.width}" data-ih="{piece.y1 - piece.y0}" '
+            f'style="top:{top:.4f}%;height:{tall:.4f}%;width:{piece.width / width * 100:.4f}%"></div>')
+
+
+def _gap(plan: Plan, y0: int, y1: int) -> str:
+    what = "hidden: use “Show all rows”" if plan.whole else "omitted from this report"
+    return f'<div class="gap">⋯ {_n(y1 - y0)} unchanged rows (y {_n(y0)}–{_n(y1)}) {what} ⋯</div>'
+
+
+def _pane(plan: Plan, kind: str, label: str, eager: bool) -> str:
+    """The bands for one tab, each with its y-range and a line for the rows left out between them. `kind` "slider" makes
+    empty hosts that the page's script fills with the reference and actual windows."""
+    height = plan.canvas[1]
+    out = ['<div class="bands">']
+    seen: set[int] = set()
+    end = 0
+    for k, (y0, y1) in enumerate(plan.bands):
+        if y0 > end:
+            out.append(_gap(plan, end, y0))
+        title = (f"All {_n(height)} rows" if (y0, y1) == (0, height)
+                 else f"Rows y {_n(y0)}–{_n(y1)} of {_n(height)}" + ("" if plan.whole else " (unchanged rows omitted)"))
+        body = (f'<div class="host" data-i="{k}"></div>' if kind == "slider"
+                else _window(plan, kind, label, (y0, y1), eager and k == 0, seen))
+        out.append(f'<figure class="seg"><figcaption>{title}</figcaption>{body}</figure>')
+        end = y1
+    if end < height:
+        out.append(_gap(plan, end, height))
+    out.append('</div><div class="allview"></div>')
+    return "".join(out)
+
+
+def _legend(plan: Plan) -> str:
+    f = plan.f
+    parts = ['<span><i class="sw" style="background:#ff0066"></i>changed pixel (grown 2 px)</span>',
+             '<span><i class="sw" style="border:2px solid #0066ff"></i>region around changes</span>',
+             '<span><i class="sw" style="background:#b2b2b2"></i>reference, faded</span>']
+    note = ""
+    if _status(f) == "resized":
+        (ow, oh), (nw, nh) = f["old_size"], f["new_size"]
+        parts += ['<span><i class="sw hatch-new"></i>only in actual</span>', '<span><i class="sw hatch-old"></i>only in reference</span>']
+        extra = (f" The reference has {_n(oh - nh)} more rows than the actual image." if oh > nh
+                 else f" The actual image has {_n(nh - oh)} more rows than the reference." if nh > oh else "")
+        note = (f'<p class="note">Dimensions differ: reference {_size(f["old_size"])}, actual {_size(f["new_size"])}. The diff '
+                f"compares the {min(ow, nw)}×{min(oh, nh)} area both images have (top-aligned).{extra} The rows and columns "
+                "only one of them has are striped (green: only in actual, amber: only in reference).</p>")
+    return f'<p class="legend">{"".join(parts)}</p>{note}'
+
+
+def _card(i: int, plan: Plan) -> str:
+    f, status = plan.f, _status(plan.f)
+    name = html.escape(f["path"])
+    width, height = plan.canvas
+    if f["old_size"] and f["new_size"]:
+        sizes = _size(f["old_size"]) if f["old_size"] == f["new_size"] else f"{_size(f['old_size'])} → {_size(f['new_size'])}"
+    else:
+        sizes = _size(f["new_size"] or f["old_size"])
+    meta = [f"<span>{sizes}</span>"]
+    if status in ("modified", "resized"):
+        meta += [f"<span>{_n(f['changed_pixels'])} changed pixels</span>", f"<span>ratio {_ratio(_share(f))}</span>"]
+        if f["boxes"]:
+            meta.append("<span>" + "; ".join(f"({b[0]}, {b[1]}) {b[2] - b[0]}×{b[3] - b[1]}" for b in f["boxes"]) + "</span>")
+    tabs = [("diff", "Diff"), ("ref", "Reference"), ("act", "Actual"), ("slider", "Slider")]
+    if status == "added":
+        tabs = [("act", "Actual")]
+    elif status == "deleted":
+        tabs = [("ref", "Reference")]
+    elif not plan.pieces:
+        tabs = []
+    out = [f'<article class="card" id="img-{i}" data-status="{status}" data-name="{name.lower()}" data-w="{width}" '
+           f'data-h="{height}" style="--w:{width}px"><header><h2><a href="#img-{i}">{name}</a></h2>'
+           f'<span class="badge s-{status}">{status}</span></header><p class="verdict">{html.escape(_verdict(f))}</p>'
+           f'<p class="meta">{"".join(meta)}</p>']
+    if plan.omitted:
+        out.append('<p class="note">The images of this file are left out: the report would have gone past its size budget.</p>')
+    if not tabs:
+        return "".join(out) + "</article>"
+    if plan.whole and plan.bands != [(0, height)]:
+        out.append(f'<p class="tools"><button type="button" class="allbtn" aria-pressed="false">Show all {_n(height)} rows</button></p>')
+    out.append(f'<div class="tabs" role="tablist" aria-label="Views of {name}">')
+    for k, (kind, label) in enumerate(tabs):
+        out.append(f'<button type="button" role="tab" id="t-{i}-{kind}" aria-controls="p-{i}-{kind}" '
+                   f'aria-selected="{"true" if k == 0 else "false"}" tabindex="{0 if k == 0 else -1}">{label}</button>')
+    out.append("</div>")
+    for kind, _label in tabs:
+        extra = ""
+        if kind == "diff":
+            extra = _legend(plan)
+        elif kind == "slider":
+            extra = '<p class="note">Drag the handle, or focus it and use the arrow keys: reference on the left, actual on the right.</p>'
+        out.append(f'<div role="tabpanel" class="pane pane-{kind}" id="p-{i}-{kind}" aria-labelledby="t-{i}-{kind}" tabindex="0">'
+                   f'{extra}{_pane(plan, kind, "actual" if kind == "act" else "reference", i < 2)}</div>')
+    out.append("</article>")
+    return "".join(out)
+
+
+def render_report(plans: list[Plan], notes: list[str], run_url: str | None = None) -> str:
+    """The page: heading, summary, filter, index, then one card per file."""
+    counts: dict[str, int] = {}
+    for p in plans:
+        counts[_status(p.f)] = counts.get(_status(p.f), 0) + 1
+    word = "image" if len(plans) == 1 else "images"
+    parts = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+    index = "".join(
+        f'<li data-status="{_status(p.f)}" data-name="{html.escape(p.f["path"].lower())}"><a href="#img-{i}">'
+        f'{html.escape(Path(p.f["path"]).name)}</a> <span class="badge s-{_status(p.f)}">{_status(p.f)}</span>'
+        + (f' <span class="n">{_n(p.f["changed_pixels"])} px</span>' if p.f["changed_pixels"] else "") + "</li>"
+        for i, p in enumerate(plans))
+    options = "".join(f'<option value="{s}">{s} ({n})</option>' for s, n in sorted(counts.items()))
+    notices = "".join(f"<li>{html.escape(n)}</li>" for n in notes)
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<meta name="color-scheme" content="dark light"><title>Screenshot diff report</title>'
+        f"<style>{REPORT_CSS}</style></head><body><main>"
+        f'<h1>Screenshot diff</h1><p id="count" class="lead" aria-live="polite" data-total="{len(plans)}">'
+        f"{len(plans)} {word} changed ({parts}).</p>"
+        + (f'<ul class="notices" aria-label="Notes on this report">{notices}</ul>' if notices else "")
+        + '<div class="controls"><label>Filter <input type="search" id="filter" placeholder="path contains…"></label>'
+        f'<label>Status <select id="status"><option value="">all</option>{options}</select></label></div>'
+        f'<nav aria-label="Changed images"><ol id="index">{index}</ol></nav>'
+        '<p id="none" class="note" hidden>No image matches the filter.</p>'
+        + "".join(_card(i, p) for i, p in enumerate(plans))
+        + f'<footer>Made by tools/screenshot_diff.py{" for " + html.escape(run_url) if run_url else ""}. '
+          "This page is one file: every image, script and style is inline, and it makes no network requests.</footer>"
+        + f"</main><script>{REPORT_JS}</script></body></html>\n")
+
+
+def build_report(report: dict, repo: Path = ROOT, budget: int = REPORT_BUDGET, run_url: str | None = None,
+                 full_budget: int = FULL_BUDGET) -> tuple[str, list[str]]:
+    """report.html for a `diff()` result, and the notes on what it had to cut to stay under `budget` bytes (the UTF-8 bytes
+    of the returned text, notes included, which is what gets written). It never fails for size: it uses less context
+    around the changes, then smaller images, and as a last resort leaves out the images of the largest files (and says so)."""
+    order = {"modified": 0, "added": 1, "deleted": 2}
+    files = sorted(report["files"], key=lambda f: (order[f["status"]], -f["changed_pixels"], f["path"]))
+    merge_base, head = report["merge_base"], report["head"]
+    room = max(budget - (60_000 + 9_000 * len(files)), 0)    # the images' share: the rest is the script, style and markup
+
+    def notes_for(context: int, scale: float, plans: list[Plan]) -> list[str]:
+        notes: list[str] = []
+        if (context, scale) != (REPORT_CONTEXT, 1.0):
+            notes.append(f"To keep this file under {budget / 2**20:.3g} MB, the context around each change was cut from "
+                         f"{REPORT_CONTEXT} to {context} rows" + (f" and the images were scaled down to {round(scale * 100)}%"
+                                                                  if scale < 1 else "") + ".")
+        left_out = sum(p.omitted for p in plans)
+        if left_out:
+            notes.append(f"{left_out} of {len(plans)} files are listed without their images: even at {round(scale * 100)}% "
+                         "the report would have gone past its size budget.")
+        return notes
+
+    def page_of(plans: list[Plan], context: int, scale: float) -> tuple[str, list[str]]:
+        notes = notes_for(context, scale, plans)
+        return render_report(plans, notes, run_url), notes
+
+    plans: list[Plan] = []
+    chosen = None
+    for context, scale in LEVELS:
+        meter = Meter(room)
+        try:
+            plans = [build_plan(f, merge_base, head, repo, context, scale, meter) for f in files]
+        except OverBudget:
+            continue
+        if len(page_of(plans, context, scale)[0].encode()) <= budget:
+            chosen = (context, scale)
+            break
+    if chosen is None:          # not even the smallest level fits: keep the files that do, the biggest changes first
+        context, scale = LEVELS[-1]
+        meter, plans = Meter(room), []
+        for f in files:
+            before = meter.used
+            try:
+                plans.append(build_plan(f, merge_base, head, repo, context, scale, meter))
+            except OverBudget:
+                meter.used = before
+                plans.append(Plan(f, omitted=True))
+        # the notes and markup are in the file too: drop the biggest images until the exact text fits
+        while len(page_of(plans, context, scale)[0].encode()) > budget and any(p.pieces for p in plans):
+            biggest = max(plans, key=lambda p: p.nbytes)
+            biggest.pieces, biggest.omitted = {}, True
+    else:
+        context, scale = chosen
+    # Whole images, smallest first, while the file stays small: each replaces its file's bands, so one click shows every row.
+    bands_only = {id(p): p.pieces for p in plans}
+    used = sum(p.nbytes for p in plans)
+    for p in sorted((p for p in plans if p.pieces and not p.whole), key=lambda p: p.canvas[0] * p.canvas[1]):
+        try:
+            whole = build_plan(p.f, merge_base, head, repo, context, scale,
+                               Meter(min(full_budget, room) - used + p.nbytes), whole=True)
+        except OverBudget:
+            break
+        used += whole.nbytes - p.nbytes
+        p.pieces, p.whole = whole.pieces, True
+    page, notes = page_of(plans, context, scale)
+    if len(page.encode()) > budget:      # the estimate for the markup was too low: fall back to the bands, which fitted
+        for p in plans:
+            if id(p) in bands_only and p.whole and p.bands != [(0, p.canvas[1])]:
+                p.pieces, p.whole = bands_only[id(p)], False
+        page, notes = page_of(plans, context, scale)
+    return page, notes
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--base", required=True, help="the pull request's base (a ref or sha)")
+    ap.add_argument("--base", help="the pull request's base (a ref or sha)")
     ap.add_argument("--head", default="HEAD", help="the pull request's head (a ref or sha)")
     ap.add_argument("--out", type=Path, help="where to write the highlight images, summary.md and summary.json")
     ap.add_argument("--run-url", help="the workflow run's URL, for the comment's link to the artifact")
+    ap.add_argument("--report-url", help="where report.html was uploaded: the comment starts with a link to it")
+    ap.add_argument("--from-json", type=Path, help="render the comment from this summary.json instead of comparing (with --out, "
+                    "rewrites summary.md there)")
+    ap.add_argument("--report-budget", type=int, default=REPORT_BUDGET, help="the most bytes of report.html")
     ap.add_argument("--max-chars", type=int, default=MAX_COMMENT_CHARS, help="the most characters in the comment")
     ap.add_argument("--repo", type=Path, default=ROOT, help="the repository to read (default: this one)")
     ap.add_argument("--dry-run", action="store_true", help="print the comment instead of writing files")
     args = ap.parse_args(argv)
+    if args.from_json:
+        comment = render(json.loads(args.from_json.read_text()), args.run_url, args.max_chars, args.report_url)
+        if args.out is None or args.dry_run:
+            print(comment)
+        else:
+            (args.out / "summary.md").write_text(comment)
+        return 0
+    if not args.base:
+        ap.error("--base is required (unless --from-json is given)")
     report = diff(args.base, args.head, None if args.dry_run else args.out, args.repo)
-    comment = render(report, args.run_url, args.max_chars)
+    comment = render(report, args.run_url, args.max_chars, args.report_url)
     if args.dry_run or args.out is None:
         print(comment)
     else:
         (args.out / "summary.md").write_text(comment)
         (args.out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
-        print(f"{len(report['files'])} screenshots changed; wrote {args.out}")
+        wrote = f"wrote {args.out}"
+        if report["files"]:
+            page, notes = build_report(report, args.repo, args.report_budget, args.run_url)
+            (args.out / REPORT).write_text(page, encoding="utf-8")
+            wrote += f" (report.html: {len(page) / 2**20:.1f} MB" + ("; " + " ".join(notes) if notes else "") + ")"
+        print(f"{len(report['files'])} screenshots changed; {wrote}")
     return 0
 
 
