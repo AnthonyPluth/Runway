@@ -24,6 +24,7 @@ import os
 import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -200,6 +201,37 @@ class MachineBusy(Exception):
     """Another run held the machine-wide lock for longer than this one would wait."""
 
 
+class LockUnusable(Exception):
+    """The lock path is something other than a regular file (a symlink, a directory, a FIFO) or can't be opened."""
+
+
+# Opened without following a symlink, and without blocking on a FIFO: in a shared /tmp another user could put either at
+# the lock's name, and the holder truncates and writes the file it opens.
+_LOCK_FLAGS = os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+
+
+def _open_lock(path: str) -> int:
+    """The lock file's descriptor: made if missing, readable and writable by every user (each user's run on the machine
+    takes the same lock), and always a regular file at `path` itself. LockUnusable otherwise."""
+    try:
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CREAT | _LOCK_FLAGS, 0o666)   # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- the lock holds only a pid and a path, no data; every user's run must be able to take it; opened O_NOFOLLOW and checked to be a regular file
+            writable = True
+        except PermissionError:   # another user's file, made before the chmod below: flock works on a file opened to read
+            fd, writable = os.open(path, os.O_RDONLY | _LOCK_FLAGS), False
+    except OSError as e:   # ELOOP: a symlink at the path; anything else that keeps it from being opened
+        raise LockUnusable(f"verify: can't use the machine lock {path} ({e.strerror}): it must be a regular file, not a "
+                           "symlink. Remove it, or set RUNWAY_VERIFY_LOCK to another path") from None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise LockUnusable(f"verify: can't use the machine lock {path}: it isn't a regular file (a directory or a FIFO?). "
+                           "Remove it, or set RUNWAY_VERIFY_LOCK to another path")
+    if writable:
+        with contextlib.suppress(OSError):
+            os.fchmod(fd, 0o666)   # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- so another user's run on the machine can take the lock too; it holds only a pid and a path
+    return fd
+
+
 @contextlib.contextmanager
 def machine_lock(path: str | None = None, max_wait: float | None = None, *, say: Callable[[str], None] = print,
                  poll: float = 1.0, now: Callable[[], float] = time.monotonic,
@@ -208,12 +240,7 @@ def machine_lock(path: str | None = None, max_wait: float | None = None, *, say:
     to max_wait seconds, then raises MachineBusy. The holder writes who it is into the file for the next one to read."""
     path = path or LOCK_FILE
     max_wait = LOCK_WAIT if max_wait is None else max_wait
-    try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
-        with contextlib.suppress(OSError):
-            os.fchmod(fd, 0o666)   # so another user's run on the machine can take it too
-    except PermissionError:   # another user's file, made before that: flock works on a file opened to read
-        fd = os.open(path, os.O_RDONLY)
+    fd = _open_lock(path)
     try:
         start, told = now(), None
         while True:
@@ -400,6 +427,9 @@ def run(pages: list[str], twice: bool = False) -> int:
     except MachineBusy as e:
         log.say(str(e), err=True)
         return 3
+    except LockUnusable as e:
+        log.say(str(e), err=True)
+        return 2
     finally:
         log.say(f"verify: log in {log.path}")
         log.close()

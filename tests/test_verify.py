@@ -2,6 +2,7 @@ import contextlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -274,6 +275,48 @@ class MachineLockTests(unittest.TestCase):
         finally:
             holder.kill()
             holder.wait(10)
+
+    def test_a_symlink_at_the_lock_path_is_refused_and_its_target_left_alone(self):
+        """In a shared /tmp another user could put a symlink at the lock's name: the holder writes the file it opens."""
+        target = os.path.join(os.path.dirname(self.path), "someone-elses-file")
+        with open(target, "w") as f:
+            f.write("keep me")
+        os.symlink(target, self.path)
+        with self.assertRaisesRegex(verify.LockUnusable, "must be a regular file, not a symlink"), verify.machine_lock(self.path):
+            self.fail("took a lock through a symlink")
+        with open(target) as f:
+            self.assertEqual(f.read(), "keep me")
+        os.remove(target)   # a dangling symlink: not followed to make the file either
+        with self.assertRaises(verify.LockUnusable), verify.machine_lock(self.path):
+            self.fail("took a lock through a dangling symlink")
+        self.assertFalse(os.path.exists(target))
+
+    def test_a_directory_or_a_fifo_at_the_lock_path_is_refused(self):
+        os.mkdir(self.path)
+        with self.assertRaises(verify.LockUnusable), verify.machine_lock(self.path):
+            self.fail("took a lock on a directory")
+        os.rmdir(self.path)
+        os.mkfifo(self.path)
+        with self.assertRaisesRegex(verify.LockUnusable, "isn't a regular file"), verify.machine_lock(self.path):
+            self.fail("took a lock on a FIFO")
+
+    def test_the_lock_file_is_made_as_a_regular_file_every_user_can_take(self):
+        with verify.machine_lock(self.path):
+            pass
+        st = os.lstat(self.path)
+        self.assertTrue(stat.S_ISREG(st.st_mode))
+        self.assertEqual(stat.S_IMODE(st.st_mode), 0o666)
+
+    def test_a_lock_path_it_cannot_use_exits_2_and_says_why(self):
+        def unusable(**_):
+            raise verify.LockUnusable("verify: can't use the machine lock /tmp/x (Too many levels of symbolic links)")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("os.path.isdir", return_value=True), \
+                mock.patch("os.path.isfile", return_value=True), mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.object(verify, "LOGS", tmp), mock.patch.object(verify, "machine_lock", side_effect=unusable), \
+                mock.patch("builtins.print") as out:
+            self.assertEqual(verify.run([]), 2)
+        self.assertTrue(any("can't use the machine lock" in str(c.args[0]) for c in out.call_args_list))
 
     def test_a_run_that_waited_too_long_exits_3_and_says_why(self):
         def busy(**_):
