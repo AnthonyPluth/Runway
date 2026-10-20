@@ -459,7 +459,9 @@ async function main() {
   const report = { base, attempt, items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
   const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
   save();
-  const browser = await chromium.launch({ executablePath: findChromium() });
+  // One raster thread: tiles rastered in parallel came out a level or two apart at an edge from run to run (a card's rounded corner
+  // behind the emoji picker). The images are otherwise the same, and a busy machine has no cores to spare anyway.
+  const browser = await chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1"] });
 
   async function visit(result, label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
