@@ -76,7 +76,11 @@ function cartaLook() {
 // The token lasts fifteen minutes, and the page swaps in a new one as it loads, so one left over from your last visit
 // is `stale`: there, but no use until the page has renewed it.
 function costcoState(storage) {
-  const get = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
+  const names = (() => { try { return Object.keys(localStorage); } catch (_) { return []; } })();
+  const flat = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
+  // The stored key as Runway named it, or the same name in other letters or punctuation (idToken, id_token).
+  const find = (key) => names.includes(key) ? key : names.find((n) => flat(n) === flat(key)) || key;
+  const get = (key) => { try { return localStorage.getItem(find(key)); } catch (_) { return null; } };
   const entries = Object.values(storage || {});
   const present = entries.every(([key]) => !!get(key));
   const expired = entries.some(([key, prefix]) => {
@@ -87,7 +91,10 @@ function costcoState(storage) {
     } catch (_) { return false; }
   });
   const link = [...document.querySelectorAll('a[href*="ordersandpurchases"]')].map((a) => a.href)[0] || null;
-  return { url: location.href, link, ready: present && !expired, stale: present && expired,
+  // Names only, never values: what the extension tells you when the sign-in can't be found.
+  const missing = entries.filter(([key]) => !get(key)).map(([key]) => key);
+  return { url: location.href, link, ready: present && !expired, stale: present && expired, missing,
+           keys: names.slice(0, 40).map((n) => n.slice(0, 40)),
            signedOut: /\/(LogonForm|LogoffView)|signin\.costco\.com/i.test(location.href) };
 }
 
@@ -99,7 +106,8 @@ async function costcoFetch(url, init, storage) {
     if (u.protocol !== "https:") throw new Error("not an https address");
     const headers = { ...((init && init.headers) || {}) };
     for (const [header, [key, prefix]] of Object.entries(storage || {})) {
-      const value = localStorage.getItem(key);
+      const names = Object.keys(localStorage), flat = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
+      const value = localStorage.getItem(names.includes(key) ? key : names.find((n) => flat(n) === flat(key)) || key);
       if (!value) return { ok: false, status: 0, url, text: "", signedOut: true, error: "not signed in" };
       headers[header] = (prefix || "") + value;
     }

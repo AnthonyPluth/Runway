@@ -37,7 +37,7 @@ function costcoWindows(since, days, today = new Date()) {
 // doesn't renew it, loaded again once). If the page doesn't set anything up by itself, follows its Orders & Purchases
 // link. Signed out ends the import; a hidden frame that never gets a sign-in falls back to a tab.
 async function costcoReady(page, g) {
-  let followed = false, reloaded = false;
+  let followed = false, reloaded = false, last = null;
   for (let waited = 0; waited < COSTCO_READY_MS * 2; waited += 1000) {
     await sleep(1000);
     let state;
@@ -50,6 +50,7 @@ async function costcoReady(page, g) {
       continue;
     }
     if (state.ready) return;
+    last = state;
     if (state.signedOut || costcoSignedOut(state.url)) throw await page.signIn("Costco");
     if (waited >= COSTCO_READY_MS) {
       if (state.stale && !reloaded) {   // a new load makes the page renew its sign-in
@@ -62,8 +63,11 @@ async function costcoReady(page, g) {
     }
   }
   if (page.hidden) throw new HiddenUnavailable("no sign-in for Costco's order service in the hidden page");
+  // Names of what's missing and of what the page does keep (never the values), so a report says what changed.
+  const seen = last && last.missing && last.missing.length
+    ? ` (Missing in the page's storage: ${last.missing.join(", ")}. It keeps: ${(last.keys || []).join(", ") || "nothing"}.)` : "";
   throw new Error("Couldn't find how costco.com signs its order requests. Sign in to costco.com in this browser and open " +
-    "Account → Orders & Purchases once, then import again. If that doesn't help, Runway may need an update for Costco's site.");
+    "Account → Orders & Purchases once, then import again. If that doesn't help, Runway may need an update for Costco's site." + seen);
 }
 
 // One reply from Costco's order service as JSON. Signed out (401/403 twice over, in case the page was still
