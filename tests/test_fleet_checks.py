@@ -136,6 +136,18 @@ class Workflows(unittest.TestCase):
         step = self.GOOD.replace("      - run:", "      - env:\n          OUT: ${{ runner.temp }}/x\n        run:")
         self.assertEqual(fc.check_workflow("x.yml", step), [])
 
+    def test_only_a_context_of_its_own_counts_not_a_property_with_the_same_name(self):
+        def job_env(expression):
+            return self.GOOD.replace("  a:\n", "  a:\n    env:\n      X: " + expression + "\n")
+        for fine in ("${{ matrix.runner.os }}", "${{ needs.job.outputs.x }}", "${{ matrix.env.name }}", "${{ vars.steps.n }}"):
+            with self.subTest(fine=fine):
+                self.assertEqual(fc.check_workflow("x.yml", job_env(fine)), [])
+        for bad, context in (("${{ runner.temp }}/x", "runner"), ("${{ steps.x.outputs.y }}", "steps"), ("${{ job.status }}", "job"),
+                             ("${{ env.X }}", "env"), ("${{ format('{0}/x', runner.temp) }}", "runner"),
+                             ("${{ matrix.a && steps.s.outputs.o }}", "steps")):
+            with self.subTest(bad=bad):
+                self.assertIn(f"`{context}` isn't available", fc.check_workflow("x.yml", job_env(bad))[0])
+
     def test_a_list_read_without_paginate_fails(self):
         self.assertIn("without --paginate", fc.check_workflow("x.yml", self.GOOD.replace("--paginate ", ""))[0])
 

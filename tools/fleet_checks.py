@@ -185,7 +185,8 @@ BASH_DEFAULT = re.compile(r"^defaults:[ \t]*\n[ \t]+run:[ \t]*\n(?:[ \t]{4,}\S.*
 # `secrets`, `inputs`, `needs`, `strategy` and `matrix` only: a `runner`, `steps`, `job` or `env` expression there makes the
 # whole file invalid, so it never runs and shows as a failed run with no jobs. Put it in a step's `env:`.
 EARLY_ENV = re.compile(r"^( {0}| {4})env:[ \t]*\n((?:\1[ ]{2,}\S.*\n)+)", re.MULTILINE)
-STEP_ONLY_CONTEXT = re.compile(r"\$\{\{[^}]*\b(runner|steps|job|env)\.")
+# (not after a word character or a dot: `matrix.runner.os` and `needs.job.outputs.x` are fine; `.*` not `[^}]*`, which a `{0}` in a format() would stop)
+STEP_ONLY_CONTEXT = re.compile(r"\$\{\{.*(?<![\w.])(runner|steps|job|env)\.")
 GH_API_LIST = re.compile(r"\bgh api\b[^\n]*per_page=")
 
 
