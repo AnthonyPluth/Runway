@@ -19,8 +19,10 @@
   // when the transaction leaves `items`.
   // On a phone it starts as one line, "N to review" with Review next and See all; Review next opens the card as it is
   // (`open`, bound by the page so it survives reloads).
-  let { items, total, rows, onsubmit, onmore, open = $bindable(false) }: {
+  let { items, total, rows, onsubmit, onmore, open = $bindable(false), onbar }: {
     open?: boolean;
+    /** Told whether the sticky bar is on screen: the page leaves `--review-bar-h` of room at its end for it. */
+    onbar?: (shown: boolean) => void;
     items: Tx[]; total: number; rows: Tx[]; onsubmit: (t: Tx, category: string) => Promise<boolean>;
     /** Adds the next batch of the queue to `items` (there are more than are loaded). */
     onmore?: () => Promise<void>;
@@ -30,8 +32,20 @@
   let picks = $state<Record<string, string>>({});
   let busy = $state(false);
   let other = $state("");
+  // On a phone, once the card (or its summary line) has scrolled out of view, a bar above the tab bar keeps the counter,
+  // Skip and Accept in reach, with the card's own handlers. It goes when the card is back on screen.
+  let top = $state<HTMLElement>();
+  let inView = $state(true);
+  $effect(() => {
+    if (!top || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((e) => { const last = e.at(-1); if (last) inView = last.isIntersecting; });
+    io.observe(top);
+    return () => { io.disconnect(); inView = true; };
+  });
 
   const t = $derived(items.length ? items[at % items.length] : undefined);
+  const bar = $derived(!!t && viewport.phone && !inView);
+  $effect(() => { onbar?.(bar); return () => onbar?.(false); });
   const chosen = $derived(t ? (picks[t.id] ?? t.category ?? "") : "");
   const options = $derived(t ? [...new Set([t.category ?? "", ...alternatives(t, [...items, ...rows], categories.list), ...(chosen ? [chosen] : [])].filter(Boolean))] : []);
   const shown = $derived(t ? txLogo(t, app.state?.brands) : null);
@@ -50,6 +64,7 @@
   }
 </script>
 
+<div bind:this={top} data-review-top>
 {#if t && viewport.phone}
   <div class="mb-3 flex min-h-11 items-center justify-between gap-3 rounded-xl border bg-card px-4" data-review-summary>
     <p class="text-sm font-medium tabular-nums">{Math.max(total, items.length)} to review</p>
@@ -94,4 +109,13 @@
       <Button size="lg" class="h-12 text-base" disabled={busy || !chosen} onclick={accept}>Accept</Button>
     </div>
   </section>
+{/if}
+</div>
+{#if bar}
+  <div data-review-bar role="group" aria-label="To review"
+    class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-40 box-border flex h-[var(--review-bar-h)] items-center gap-3 border-t bg-popover px-4 supports-[backdrop-filter]:bg-popover/60 supports-[backdrop-filter]:backdrop-blur-[28px] supports-[backdrop-filter]:backdrop-saturate-200 desktop:hidden">
+    <p class="mr-auto text-[13px] font-semibold tracking-wide text-muted-foreground uppercase tabular-nums">{(at % items.length) + 1} of {Math.max(total, items.length)}</p>
+    <Button variant="outline" class="h-11 min-w-24" disabled={busy || items.length < 2} onclick={skip}>Skip</Button>
+    <Button class="h-11 min-w-24" disabled={busy || !chosen} onclick={accept}>Accept</Button>
+  </div>
 {/if}

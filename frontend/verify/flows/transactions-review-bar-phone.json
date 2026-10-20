@@ -1,0 +1,33 @@
+{
+  "name": "transactions-review-bar-phone",
+  "page": "transactions",
+  "viewports": [
+    "phone"
+  ],
+  "steps": [
+    {
+      "goto": "#transactions"
+    },
+    {
+      "wait_for": "[data-review-summary]"
+    },
+    {
+      "wait_for": "[data-tx]"
+    },
+    {
+      "scroll_to": "[data-tx] >> nth=5"
+    },
+    {
+      "wait_for": "[data-review-bar]"
+    },
+    {
+      "expect_text": {
+        "selector": "[data-review-bar]",
+        "text": "Accept"
+      }
+    },
+    {
+      "screenshot": "bar"
+    }
+  ]
+}

@@ -10,6 +10,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
+  import MissedGroup from "$lib/components/recurring/MissedGroup.svelte";
   import RecIcon from "$lib/components/recurring/RecIcon.svelte";
   import RecurringFields from "$lib/components/recurring/RecurringFields.svelte";
   import RecurringItem from "$lib/components/recurring/RecurringItem.svelte";
@@ -96,11 +97,14 @@
   const moneyIn = $derived(items.filter((r) => (r.expected_amount ?? r.amount) > 0).sort(byDue));
   const moneyOut = $derived(items.filter((r) => !((r.expected_amount ?? r.amount) > 0)).sort(byDue));
 
-  // Missed payments, newest first, until you link or skip them (Undo puts one back).
+  // Missed payments until you link or skip them (Undo puts them back), one row per item, each item's newest first: the
+  // items that missed the most first, then the one missed longest ago.
   let cleared = $state<string[]>([]);
-  const attention = $derived(items.flatMap((r) => (r.missed ?? []).filter((m) => !cleared.includes(m.key))
-    .map((m): Missed => ({ ...m, recurring_id: r.id, account_id: r.account_id, account_name: r.account_name ?? undefined })))
-    .sort((a, b) => b.date.localeCompare(a.date)));
+  const attention = $derived(items.map((r) => ({ r, list: (r.missed ?? []).filter((m) => !cleared.includes(m.key))
+    .map((m): Missed => ({ ...m, recurring_id: r.id, account_id: r.account_id, account_name: r.account_name ?? undefined }))
+    .sort((a, b) => b.date.localeCompare(a.date)) }))
+    .filter((g) => g.list.length)
+    .sort((a, b) => b.list.length - a.list.length || a.list.at(-1)!.date.localeCompare(b.list.at(-1)!.date)));
   const missedFor = (r: Item) => (r.missed ?? []).filter((m) => !cleared.includes(m.key)).length;
 
   async function focusForm() { await tick(); form?.querySelector<HTMLInputElement>("input[name=name]")?.focus(); }
@@ -251,8 +255,13 @@
   {#key swapped}
   {#if attention.length}
     <Group title="Needs attention" inset="3.75rem" class="mb-6">
-      {#each attention as m (m.key)}
-        <MissedAlert {m} {today} ondone={(k) => (cleared = [...cleared, k])} onundone={(k) => (cleared = cleared.filter((x) => x !== k))} />
+      {#each attention as { r, list } (r.id)}
+        {#if list.length === 1}
+          <MissedAlert m={list[0]} {today} ondone={(k) => (cleared = [...cleared, k])} onundone={(k) => (cleared = cleared.filter((x) => x !== k))} />
+        {:else}
+          <MissedGroup {r} {list} {today} ondone={(keys) => (cleared = [...cleared, ...keys])} onundone={(keys) => (cleared = cleared.filter((x) => !keys.includes(x)))}
+            onchanged={load} />
+        {/if}
       {/each}
     </Group>
   {/if}

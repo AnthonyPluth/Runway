@@ -53,6 +53,9 @@ export interface RecurringItem {
   /** Its logo: the one you chose, else its last matched transaction's merchant's (null: its category's icon). */
   logo?: string | null;
   missed?: (Missed & { recurring_id: number })[];
+  /** The keys of the missed payments in a row up to its latest, when there are 3 or more and it can be marked as ended
+   *  the day before the first of them (POST /api/recurring/{id}/end); empty otherwise. */
+  missed_run?: string[];
 }
 
 /** GET /api/recurring/suggestions: a payee that shows up on a schedule. */

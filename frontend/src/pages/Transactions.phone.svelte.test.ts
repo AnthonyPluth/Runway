@@ -152,3 +152,60 @@ describe("Transactions on a phone: the review card", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/a/accept", { method: "POST" }));
   });
 });
+
+describe("Transactions on a phone: the review bar", () => {
+  type Observed = { cb: IntersectionObserverCallback; el: Element };
+  let observed: Observed[] = [];
+  beforeEach(() => {
+    observed = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      cb: IntersectionObserverCallback;
+      constructor(cb: IntersectionObserverCallback) { this.cb = cb; }
+      observe(el: Element) { observed.push({ cb: this.cb, el }); }
+      disconnect() { /* the stub keeps nothing to release */ }
+      unobserve() { /* nor to stop */ }
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  /** The card's observer reports it in or out of view. */
+  const scrollCard = (visible: boolean) => {
+    const o = observed.find((x) => x.el.hasAttribute("data-review-top"))!;
+    o.cb([{ isIntersecting: visible, target: o.el } as IntersectionObserverEntry], {} as IntersectionObserver);
+  };
+  const bar = () => document.querySelector<HTMLElement>("[data-review-bar]");
+
+  it("shows the counter, Skip and Accept once the card has scrolled away, and Accept there takes the item out", async () => {
+    let queue = [waiting()[0]];
+    serve([tx({ id: "z", payee: "Zulu" })], 1, (path, o) => {
+      if (path.includes("review=1") && path.includes("limit=20")) return { items: queue, total: queue.length };
+      if (path.endsWith("/accept") && o?.method === "POST") { queue = []; return { ok: true, was: [] }; }
+      return undefined;
+    });
+    render(Transactions);
+    await screen.findByText("1 to review");
+    expect(bar()).toBeNull();
+    await waitFor(() => expect(observed.some((x) => x.el.hasAttribute("data-review-top"))).toBe(true));
+    scrollCard(false);
+    await waitFor(() => expect(bar()).not.toBeNull());
+    const b = within(bar()!);
+    expect(b.getByText("1 of 1")).toBeInTheDocument();
+    expect(b.getByRole("button", { name: "Skip" })).toBeDisabled();
+    expect(document.querySelectorAll("[data-review-bar-clearance]")).toHaveLength(1);
+    scrollCard(true);
+    await waitFor(() => expect(bar()).toBeNull());
+    expect(document.querySelector("[data-review-bar-clearance]")).toBeNull();
+    scrollCard(false);
+    await waitFor(() => expect(bar()).not.toBeNull());
+    await userEvent.click(within(bar()!).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/a/accept", { method: "POST" }));
+    await waitFor(() => expect(screen.queryByText("1 to review")).not.toBeInTheDocument());
+    expect(bar()).toBeNull();
+  });
+
+  it("is not there with nothing to review", async () => {
+    open();
+    render(Transactions);
+    await screen.findByText("Zulu");
+    expect(bar()).toBeNull();
+  });
+});
