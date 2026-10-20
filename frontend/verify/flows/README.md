@@ -28,7 +28,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
   - `{"reload": true}` opens the app again (a launch), not just another route.
   - `{"authenticator": "verified"}` or `"unverified"` (signed-in flows only): the virtual authenticator's Face ID works, or fails.
   - Keyboard: `{"tab": {"count": 16, "shift": false, "stay_in": "[role=dialog]"}}` presses Tab (Shift+Tab with `shift`) `count` times and fails if focus ever leaves `stay_in`; `{"expect_focus": selector}` fails unless the focused element matches it; `{"expect_inert": selector}` fails unless it is inert (itself or an ancestor).
-  - `{"screenshot": "name"}` saves the full page as `flow-<flow name>-<name>-<viewport>.png`.
+  - `{"screenshot": "name"}` saves the full page (the window, when a dialog, a sheet or the To review bar is showing) as `flow-<flow name>-<name>-<viewport>.png`.
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
 - A screenshot waits until nothing on the page is still loading (no skeleton, nothing `aria-busy`, no transition moving), and is retaken until two captures in a row match; one that never settles fails the flow. The `expect_text` and `expect_focus` steps since the last action are checked again after it, so a panel that closes while it's captured fails instead of being kept.
 - A step's `timeout` is for an idle machine: on a busy one every limit stretches with the load. A flow that fails is run again on fresh demo data (three tries in all), so it must not depend on what an earlier run left behind.
