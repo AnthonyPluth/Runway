@@ -70,12 +70,14 @@ describe("Transactions on a phone: filters", () => {
     const button = screen.getByRole("button", { name: "Filters" });
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("searchbox", { name: "Search transactions" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Filter transactions" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Filter transactions" })).not.toBeInTheDocument();   // no Accounts chip above the panel
+    expect(screen.queryByRole("combobox", { name: "Account" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Category" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /More filters/ })).not.toBeInTheDocument();
     await userEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("combobox", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Dates:/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "More filters" })).toBeInTheDocument();
@@ -97,26 +99,51 @@ describe("Transactions on a phone: filters", () => {
     expect(lastList()).not.toMatch(/kind=|min=|category=/);
   });
 
+  it("shows a selected account as a chip with its own ✕, counted in the Filters badge, and the ✕ clears it", async () => {
+    Object.assign(txFilters.transactions, { account: "a1" });
+    open();
+    render(Transactions);
+    await screen.findByText("Zulu");
+    expect(screen.getByRole("button", { name: "Filters (1 on)" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Account" })).not.toBeInTheDocument();
+    expect(screen.getByText("Checking")).toBeInTheDocument();
+    expect(lastList()).toContain("account=a1");
+    await userEvent.click(screen.getByRole("button", { name: "Show every account" }));
+    await waitFor(() => expect(lastList()).not.toContain("account="));
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+  });
+
+  it("counts the account once on Review, and keeps it in the panel", async () => {
+    Object.assign(txFilters.review, { account: "a1", category: "Coffee" });
+    open();
+    render(Transactions, { page: "review" });
+    expect(await screen.findByRole("button", { name: "Filters (2 on)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show every account" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Filters (2 on)" }));
+    expect(screen.getByRole("combobox", { name: "Account" })).toHaveValue("a1");
+  });
+
   it("keeps the desktop layout: the filters in the row, no Filters button", async () => {
     viewport.phone = false;
     open();
     render(Transactions);
     await screen.findByText("Zulu");
+    expect(screen.getByRole("combobox", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Filter transactions" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Category" })).toBeInTheDocument();
   });
 });
 
 describe("Transactions on a phone: simplified", () => {
-  it("has no All, To review or Pending chips, keeps Accounts, and the review card still links to the Review tab", async () => {
+  it("has no All, To review or Pending chips, has Accounts under Filters, and the review card still links to the Review tab", async () => {
     open(waiting(), waiting());
     render(Transactions);
     await screen.findByText("2 to review");
-    const chips = within(document.querySelector<HTMLElement>("[data-chips]")!);
-    expect(chips.getByText("Accounts")).toBeInTheDocument();
+    expect(document.querySelector("[data-chips]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Pending" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
-    expect(chips.queryByRole("link", { name: /^To review/ })).not.toBeInTheDocument();   // the To review tab is not a chip
     expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "#review");
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
   });
