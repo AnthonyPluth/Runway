@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
-  timeScale, unknownPages, unsettled, VIEWPORTS } from "./verify.mjs";
+import { captureOptions, capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
+  STILL, timeScale, TOP, unknownPages, unsettled, VIEWPORTS } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -53,6 +53,16 @@ describe("flowProblems", () => {
   });
 
   it("includes the setup page", () => expect(PAGES).toContain("setup"));
+});
+
+describe("captureOptions", () => {
+  it("takes the full page, but only the window for a page's first screen (top) or with a modal open", () => {
+    expect(captureOptions({ timeout: 5 })).toMatchObject({ fullPage: true, timeout: 5 });
+    expect(captureOptions({ top: true }).fullPage).toBe(false);
+    expect(captureOptions({ modal: true }).fullPage).toBe(false);
+    expect(captureOptions().style).toBe(`${HIDE_TOASTS} ${STILL}`);
+    expect(screenshotFile(`budget-${TOP}`, "phone")).toBe("budget-top-phone.png");
+  });
 });
 
 describe("screenshotFile", () => {

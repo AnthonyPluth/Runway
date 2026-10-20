@@ -92,6 +92,11 @@ export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
  *  README and the docs site's hero images (a full page is too tall for those). tools/fleet_checks.py reads this name. */
 export const TOP = "top";
 
+/** page.screenshot's options for one capture: the full page, except the window as it shows when a modal is open or the
+ *  shot is a page's first screen (`top`). */
+export const captureOptions = ({ modal = false, top = false, timeout } = {}) =>
+  ({ fullPage: !modal && !top, style: `${HIDE_TOASTS} ${STILL}`, timeout });
+
 /** What on the page says it's still loading, [] when nothing does. Run in the page, so it stands alone. A screenshot is
  *  only taken when this is empty, and checked again after: a loading placeholder (the app's skeletons: .animate-pulse blocks),
  *  anything marked aria-busy (a list being refreshed), the Investments page's badge before the live prices arrive (it
@@ -519,7 +524,7 @@ async function main() {
         // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
         // The To review bar is the same: a full-page capture makes the whole card visible again, and the bar goes with it.
         const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible").count();
-        const options = { fullPage: !modal && !top, style: `${HIDE_TOASTS} ${STILL}`, timeout: page.t(30000) };
+        const options = captureOptions({ modal: modal > 0, top, timeout: page.t(30000) });
         await page.evaluate(capturing, true);
         const first = await page.screenshot(options), second = await page.screenshot(options);
         await page.evaluate(capturing, false);
