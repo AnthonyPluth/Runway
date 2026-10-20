@@ -492,6 +492,11 @@ describe("costcoState", () => {
     expect(w.costcoState(STORAGE)).toMatchObject({ ready: true, missing: [] });
   });
 
+  it("prefers the exact key when two names differ only in punctuation", () => {
+    store({ id_token: "not-a-token", idToken: jwt(Date.now() / 1000 + 900), clientID: "x" });
+    expect(w.costcoState(STORAGE)).toMatchObject({ ready: true, stale: false });
+  });
+
   it("is stale when the token is about to run out", () => {
     store({ idToken: jwt(Date.now() / 1000 + 30), clientID: "x" });
     expect(w.costcoState(STORAGE)).toMatchObject({ ready: false, stale: true });
