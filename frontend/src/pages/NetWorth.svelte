@@ -21,6 +21,7 @@
   import { fmt, fmt0, fmtDate, fmtSigned0, nb, pct, shortMoney } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
+  import Calendar from "@lucide/svelte/icons/calendar";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
   import { act, errMsg } from "$lib/act";
@@ -246,7 +247,11 @@
           series={[{ name: "Net worth", values: points.map((h) => h.net), cls: "s-main", area: true }]} />
       </div>
     {:else}
-      <p class="mt-5 text-sm text-muted-foreground" data-testid="nw-no-history">History builds up each day you open Runway</p>
+      <!-- Holds the chart's place (same 220px height) so the missing history doesn't read as a chart that failed to render. -->
+      <div class="mt-5 flex h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground" data-testid="nw-no-history-box">
+        <Calendar class="size-5" aria-hidden="true" />
+        <p data-testid="nw-no-history">History builds up each day you open Runway</p>
+      </div>
     {/if}
   </section>
 

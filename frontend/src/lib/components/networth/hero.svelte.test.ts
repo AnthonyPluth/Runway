@@ -31,6 +31,7 @@ describe("the net worth hero", () => {
     expect(await change()).toBe("+$300 (+6.4%) in the last month");
     expect(screen.getByTestId("nw-change")).toHaveClass("text-good");
     expect(screen.queryByText("Over time")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nw-no-history-box")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "1Y" })).toBeDisabled();
     const chart = () => container.querySelector("svg[role=slider]")!.innerHTML;
     const before = chart();
@@ -64,6 +65,8 @@ describe("the net worth hero", () => {
     serve(nw([{ date: "2026-09-30", net: 5000 }], { "30d": null, "90d": null, "1y": null }));
     const { container } = render(NetWorth);
     expect(await screen.findByTestId("nw-no-history")).toHaveTextContent("History builds up each day you open Runway");
+    expect(screen.getByTestId("nw-no-history-box")).toContainElement(screen.getByTestId("nw-no-history"));
+    expect(screen.getByTestId("nw-no-history-box")).toHaveClass("h-[220px]", "border-dashed");
     expect(container.querySelector("svg[role=slider]")).toBeNull();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.queryByText("Over time")).not.toBeInTheDocument();

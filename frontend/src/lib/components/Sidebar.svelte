@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, route } from "$lib/app.svelte";
-  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavGroup, type NavItem } from "$lib/nav.svelte";
   import { tablet } from "$lib/rail.svelte";
   import SyncButton from "$lib/components/SyncButton.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -36,6 +36,11 @@
     <span class={tip}>{item.label}</span>
     {#if badge}<Badge class="ml-auto tabular-nums rail:absolute rail:top-0 rail:right-0 rail:ml-0 rail:h-4 rail:min-w-4 rail:px-1 rail:text-[10px] rail:leading-4">{badge}</Badge>{/if}
   </a>
+{/snippet}
+
+<!-- A group's small muted label. The rail has no room for it (its divider still marks the split), but the Menu sheet does. -->
+{#snippet groupLabel(g: NavGroup, inRail: boolean)}
+  <p class={cn("px-2 pb-0.5 text-[11px] uppercase tracking-wide text-muted-foreground", !inRail && "rail:hidden")}>{g.label}</p>
 {/snippet}
 
 <!-- A page in the Menu sheet, with its full label. -->
@@ -83,9 +88,11 @@
     {#if s?.version}<span class="text-xs font-normal text-muted-foreground rail:hidden" title={`Runway ${s.version}`}>{s.version}</span>{/if}
   </a>
   <nav class="flex flex-col gap-1 rail:items-center" aria-label="Main">
-    {#each MAIN_NAV as item (item.page)}{@render link(item, item.page === "transactions" ? s?.review_count : undefined)}{/each}
+    {@render groupLabel(MAIN_NAV, false)}
+    {#each MAIN_NAV.items as item (item.page)}{@render link(item, item.page === "transactions" ? s?.review_count : undefined)}{/each}
     <div class="mx-1 my-2 h-px bg-border rail:mx-0 rail:w-8" role="presentation"></div>
-    {#each MONEY_NAV as item (item.page)}{@render link(item)}{/each}
+    {@render groupLabel(MONEY_NAV, false)}
+    {#each MONEY_NAV.items as item (item.page)}{@render link(item)}{/each}
   </nav>
   <div class="flex-1"></div>
   {@render link({ page: "setup", label: "Settings", icon: Settings })}
@@ -107,11 +114,13 @@
         <Sheet.Description class="sr-only">All pages, your account and the sync status.</Sheet.Description>
       </Sheet.Header>
       <nav class="flex flex-col gap-1 px-4" aria-label="All pages">
-        {#each MAIN_NAV as item (item.page)}
+        {@render groupLabel(MAIN_NAV, true)}
+        {#each MAIN_NAV.items as item (item.page)}
           {@render menuLink(item, item.page === "transactions" ? s?.review_count : undefined)}
         {/each}
         <div class="my-2 h-px bg-border" role="presentation"></div>
-        {#each MONEY_NAV as item (item.page)}{@render menuLink(item)}{/each}
+        {@render groupLabel(MONEY_NAV, true)}
+        {#each MONEY_NAV.items as item (item.page)}{@render menuLink(item)}{/each}
         <div class="my-2 h-px bg-border" role="presentation"></div>
         {@render menuLink({ page: "setup", label: "Settings", icon: Settings })}
       </nav>
