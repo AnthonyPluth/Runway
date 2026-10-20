@@ -2,7 +2,7 @@
 title: AI assistants (MCP)
 description: Connect Claude or another assistant to Runway.
 sidebar:
-  order: 3
+  order: 11
 ---
 
 Runway serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so an assistant like Claude can read your accounts, transactions, budget, reports, net worth, orders and credit-card churning (cards, benefits, upcoming fees) and answer questions about them, and, if you allow it, make changes. It never sees your bank connections, settings, API keys or backups.

@@ -60,7 +60,7 @@
         "tests/test_monitoring.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -75,7 +75,7 @@
         "tests/test_http_server.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -87,7 +87,7 @@
         "tests/test_http_pinned.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -102,7 +102,7 @@
         "tests/test_investments.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -119,7 +119,7 @@
         "tests/test_monitoring.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -131,7 +131,7 @@
         "tests/test_http_pinned.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -170,7 +170,7 @@
         "tests/test_server.py"
       ],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -191,7 +191,7 @@
         "tests/test_http_server.py"
       ],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -210,7 +210,7 @@
         "tests/test_statements.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -230,7 +230,7 @@
         "tests/test_networth.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -242,7 +242,7 @@
         "tests/test_brands.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -255,7 +255,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -269,7 +269,7 @@
         "tests/test_statements.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -284,7 +284,7 @@
         "tests/test_statements.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -298,7 +298,7 @@
         "tests/test_deleted_accounts.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -313,7 +313,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -328,7 +328,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -343,7 +343,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -371,7 +371,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "contributing/development"
+        "using/transactions"
       ]
     },
     {
@@ -390,7 +390,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "contributing/development"
+        "using/transactions"
       ]
     },
     {
@@ -415,7 +415,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -432,7 +432,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -445,7 +445,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -464,7 +464,7 @@
         "tests/test_splits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -478,7 +478,7 @@
         "tests/test_rules.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -490,7 +490,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -504,7 +504,7 @@
         "tests/test_categorize.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -521,7 +521,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -535,7 +535,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -552,7 +552,7 @@
         "tests/test_tx_edits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -571,7 +571,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -590,7 +590,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -606,7 +606,7 @@
         "tests/test_notify.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -618,7 +618,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -632,7 +632,7 @@
         "tests/test_notify.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -646,7 +646,7 @@
         "tests/test_notify.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -662,7 +662,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -813,7 +813,7 @@
         "tests/test_splits.py"
       ],
       "docs": [
-        "using/features"
+        "using/budget"
       ]
     },
     {
@@ -835,7 +835,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/budget"
       ]
     },
     {
@@ -850,7 +850,7 @@
         "tests/test_budget_suggest.py"
       ],
       "docs": [
-        "using/features"
+        "using/budget"
       ]
     },
     {
@@ -862,7 +862,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -881,7 +881,7 @@
         "tests/test_rules.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -896,7 +896,7 @@
         "tests/test_api_handlers.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -915,7 +915,7 @@
         "tests/test_server_errors.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -934,7 +934,7 @@
         "tests/test_server_errors.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -948,7 +948,7 @@
         "tests/test_api_validation.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -964,7 +964,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -978,7 +978,7 @@
         "tests/test_api_validation.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -993,7 +993,7 @@
         "tests/test_mcp_protocol.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1007,7 +1007,7 @@
         "tests/test_categories_recurring_pinned.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1024,7 +1024,7 @@
         "tests/test_splits.py"
       ],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -1036,7 +1036,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/overview"
       ]
     },
     {
@@ -1050,7 +1050,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1064,7 +1064,7 @@
         "tests/test_api_validation.py"
       ],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1078,7 +1078,7 @@
         "tests/test_reports.py"
       ],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1092,7 +1092,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1106,7 +1106,7 @@
         "tests/test_api_validation.py"
       ],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1118,7 +1118,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/reports"
       ]
     },
     {
@@ -1134,7 +1134,7 @@
         "tests/test_mcp_protocol.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1151,7 +1151,7 @@
         "tests/test_splits.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1164,7 +1164,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1180,7 +1180,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1195,7 +1195,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1211,7 +1211,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1230,7 +1230,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1249,7 +1249,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1263,7 +1263,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1277,7 +1277,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1291,7 +1291,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1305,7 +1305,7 @@
         "tests/test_recurring_suggestions.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1315,7 +1315,7 @@
       "web": [],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1331,7 +1331,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1345,7 +1345,7 @@
         "tests/test_categories_recurring_pinned.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1360,7 +1360,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1374,7 +1374,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1388,7 +1388,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1403,7 +1403,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1418,7 +1418,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1434,7 +1434,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1451,7 +1451,7 @@
         "tests/test_recurring.py"
       ],
       "docs": [
-        "using/features"
+        "using/recurring"
       ]
     },
     {
@@ -1465,7 +1465,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1481,7 +1481,7 @@
         "tests/test_plaidbank.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1493,7 +1493,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1507,7 +1507,7 @@
         "tests/test_plaidbank.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1521,7 +1521,7 @@
         "tests/test_investments.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1536,7 +1536,7 @@
         "tests/test_plaidbank.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1550,7 +1550,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1564,7 +1564,7 @@
         "tests/test_plaidbank.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1578,7 +1578,7 @@
         "tests/test_plaidbank.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1591,7 +1591,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1606,7 +1606,7 @@
         "tests/test_investments.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1621,7 +1621,7 @@
         "tests/test_investments.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1636,7 +1636,7 @@
         "tests/test_networth.py"
       ],
       "docs": [
-        "contributing/orm"
+        "using/net-worth"
       ]
     },
     {
@@ -1648,7 +1648,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1663,7 +1663,7 @@
         "tests/test_networth.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1675,7 +1675,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1689,7 +1689,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1703,7 +1703,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1718,7 +1718,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1732,7 +1732,7 @@
         "tests/test_finnhub.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1746,7 +1746,7 @@
         "tests/test_merchants.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1758,7 +1758,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1770,7 +1770,7 @@
         "tests/test_api_validation.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1783,7 +1783,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1795,7 +1795,7 @@
         "tests/test_merchants.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1808,7 +1808,7 @@
         "tests/test_merchants.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1822,7 +1822,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     },
     {
@@ -1836,7 +1836,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1848,7 +1848,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1862,7 +1862,7 @@
         "tests/test_simplefin_invest.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1874,7 +1874,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1888,7 +1888,7 @@
         "tests/test_simplefin_invest.py"
       ],
       "docs": [
-        "using/features"
+        "using/investments"
       ]
     },
     {
@@ -1913,7 +1913,7 @@
         "tests/test_security.py"
       ],
       "docs": [
-        "using/features"
+        "using/settings"
       ]
     },
     {
@@ -1926,7 +1926,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1938,7 +1938,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1948,7 +1948,7 @@
       "web": [],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1958,7 +1958,7 @@
       "web": [],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1970,7 +1970,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1982,7 +1982,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -1992,7 +1992,7 @@
       "web": [],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -2007,7 +2007,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2019,7 +2019,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2033,7 +2033,7 @@
         "tests/test_churn_found.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2045,7 +2045,7 @@
         "tests/test_churn_found.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2057,7 +2057,7 @@
         "tests/test_churn_found.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2071,7 +2071,7 @@
         "tests/test_churn_found.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2085,7 +2085,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2100,7 +2100,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2114,7 +2114,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2126,7 +2126,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2138,7 +2138,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2150,7 +2150,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2166,7 +2166,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2180,7 +2180,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2194,7 +2194,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2206,7 +2206,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2218,7 +2218,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2232,7 +2232,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2246,7 +2246,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2260,7 +2260,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2274,7 +2274,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2286,7 +2286,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2298,7 +2298,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2310,7 +2310,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2324,7 +2324,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2339,7 +2339,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2354,7 +2354,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2368,7 +2368,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2382,7 +2382,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2396,7 +2396,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2410,7 +2410,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2424,7 +2424,7 @@
         "tests/test_churning_api.py"
       ],
       "docs": [
-        "using/features"
+        "using/churning"
       ]
     },
     {
@@ -2436,7 +2436,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -2450,7 +2450,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -2465,7 +2465,7 @@
         "tests/test_routes.py"
       ],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -2477,7 +2477,7 @@
       ],
       "tests": [],
       "docs": [
-        "using/features"
+        "using/net-worth"
       ]
     },
     {
@@ -2746,7 +2746,7 @@
         "tests/test_mcp.py"
       ],
       "docs": [
-        "using/features"
+        "using/transactions"
       ]
     }
   ]

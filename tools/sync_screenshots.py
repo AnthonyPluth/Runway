@@ -2,7 +2,8 @@
 
     python tools/sync_screenshots.py
 
-Every page and flow screenshot, at phone and desktop widths, lives there as `<name>-<width>.png`. A pull request that
+Every page and flow screenshot, at phone and desktop widths, lives there as `<name>-<width>.png`, and each page's first screen
+as `<page>-top-<width>.png` (what the README and the docs site show). A pull request that
 changes the UI re-runs `make screenshots` and commits the result, so the screenshots that changed show as image diffs on the
 pull request. Run it after a full `make verify`: files in screenshots/ with no counterpart in artifacts/verify/ are removed.
 Only `make verify`'s made-up demo data is ever copied (the repository is public)."""

@@ -29,16 +29,15 @@ DOCS = ROOT / "docs/src/content/docs"
 
 # The docs page for each area (an address's second segment), for a route no page names.
 AREA_DOCS = {
-    "state": "using/features", "overview": "using/features", "settings": "using/features", "overrides": "using/features",
-    "cashflow": "using/features", "month_pace": "using/features", "accounts": "using/features",
-    "connect": "using/features", "plaid": "using/features", "sync": "using/features", "push": "using/features",
-    "transactions": "using/features", "categories": "using/features", "rules": "using/features",
-    "recurring": "using/features", "ai": "using/features", "recategorize": "using/features",
-    "budget": "using/features", "reports": "using/features", "investments": "using/features",
-    "tracked": "using/features", "finnhub": "using/features", "logodev": "using/features",
-    "merchants": "using/features", "networth": "using/features", "assets": "using/features",
-    "realie": "using/features", "equity": "using/features", "carta": "using/features",
-    "churning": "using/features", "retail": "using/browser-extension", "mcp-settings": "using/mcp",
+    "state": "using/overview", "overview": "using/overview", "overrides": "using/overview", "cashflow": "using/overview",
+    "month_pace": "using/overview", "settings": "using/settings", "accounts": "using/settings", "connect": "using/settings",
+    "plaid": "using/settings", "sync": "using/settings", "push": "using/settings", "transactions": "using/transactions",
+    "categories": "using/transactions", "rules": "using/transactions", "ai": "using/transactions",
+    "recategorize": "using/transactions", "merchants": "using/transactions", "logodev": "using/transactions",
+    "recurring": "using/recurring", "budget": "using/budget", "reports": "using/reports", "investments": "using/investments",
+    "tracked": "using/investments", "finnhub": "using/investments", "networth": "using/net-worth", "assets": "using/net-worth",
+    "realie": "using/net-worth", "equity": "using/net-worth", "carta": "using/net-worth", "churning": "using/churning",
+    "retail": "using/browser-extension", "mcp-settings": "using/mcp",
     "backup": "start/deployment", "restore": "start/deployment", "lock": "start/deployment",
 }
 

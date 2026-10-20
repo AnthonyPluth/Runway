@@ -18,12 +18,12 @@ hero:
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
-import overview from '../../assets/screenshots/overview.png';
-import transactions from '../../assets/screenshots/transactions.png';
-import budget from '../../assets/screenshots/budget.png';
-import reports from '../../assets/screenshots/reports.png';
+import overview from '../../../../screenshots/overview-top-desktop.png';
+import transactions from '../../../../screenshots/transactions-top-phone.png';
+import budget from '../../../../screenshots/budget-top-phone.png';
+import investments from '../../../../screenshots/investments-top-phone.png';
 
-<Image src={overview} alt="Runway's Overview page: an “On track” status for checking over the next 90 days, its $4,820.55 balance, and a projected balance chart" />
+<Image src={overview} alt="Runway's Overview page with demo data: an “On track” status for the forecast account, its balance, the projected balance chart over the next 90 days and what's coming up" />
 
 ## Why Runway
 
@@ -35,13 +35,13 @@ It runs on your own computer or home server, keeps its data in one database you 
 
 <CardGrid>
   <Card title="Cash-flow forecast" icon="seti:line">
-    Your forecast account, day by day for 30 days to 6 months, with the lowest point in plain language. Credit cards come out on their due dates using real statement balances from the issuer, and paydays and payments land on business days.
+    Your account, day by day for 30 days to 6 months, with the lowest point in plain language. Credit cards come out on their due dates from real statement balances, and paydays and payments land on business days.
   </Card>
   <Card title="Bank sync, account by account" icon="random">
     SimpleFIN or Plaid for each account, once a day and on demand. Switching providers keeps your history.
   </Card>
   <Card title="Bills, income and rules" icon="list-format">
-    Paychecks, bills and subscriptions on any schedule, matched automatically. Categories, splits, bulk editing, a review queue and rules, with optional AI categorization through OpenRouter.
+    Paychecks, bills and subscriptions on any schedule, matched automatically. Categories, splits, bulk editing, a review queue and rules, with optional AI categorization.
   </Card>
   <Card title="Store orders" icon="puzzle">
     A browser extension reads your Amazon, Target and Costco orders and splits each card charge by what you bought.
@@ -50,7 +50,7 @@ It runs on your own computer or home server, keeps its data in one database you 
     Monthly budgets with rollover, a cash-flow Sankey, spending over time, merchants, income against spending, and a drill-down breakdown.
   </Card>
   <Card title="Net worth, investments and equity" icon="rocket">
-    Accounts, homes and vehicles minus debts, recorded daily; brokerage performance with live prices; stock options, RSUs and Carta grants.
+    Accounts, homes and vehicles minus debts, recorded daily; brokerage performance with live prices; stock options, RSUs and Carta grants; a retirement planner.
   </Card>
   <Card title="Churning" icon="star">
     Sign-up bonuses, 5/24, annual fees, card benefits, bank bonuses and a plan for the cards you want next.
@@ -62,18 +62,17 @@ It runs on your own computer or home server, keeps its data in one database you 
 
 Push notifications, autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres round it out.
 
-<CardGrid>
-  <Image src={transactions} alt="Transactions page with projected upcoming items, then past transactions grouped by day, each with its merchant, category, account and amount" />
-  <Image src={budget} alt="Budget page for September with a colored progress bar for each budgeted category" />
-</CardGrid>
-
-<Image src={reports} alt="Reports page with September money in, money out and a cash-flow Sankey chart" />
+<div class="phones">
+  <Image src={transactions} alt="The Transactions page on a phone, with demo data" />
+  <Image src={budget} alt="The Budget page on a phone, with demo data" />
+  <Image src={investments} alt="The Investments page on a phone, with demo data" />
+</div>
 
 ## Where to go next
 
 <CardGrid>
   <LinkCard title="Quick start" description="Run it with Docker or from source and connect a bank." href="/Runway/start/quick-start/" />
-  <LinkCard title="Features" description="What each page does and where its settings live." href="/Runway/using/features/" />
+  <LinkCard title="Using Runway" description="One page for each part of the app, starting with the forecast." href="/Runway/using/overview/" />
   <LinkCard title="Configuration" description="Every environment variable." href="/Runway/reference/configuration/" />
-  <LinkCard title="Contributing" description="Running the tests, changing the database, the code layout and releases." href="/Runway/contributing/development/" />
+  <LinkCard title="Contributing" description="Setup, the checks, the database, the code layout and releases." href="/Runway/contributing/development/" />
 </CardGrid>
