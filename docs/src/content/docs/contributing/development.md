@@ -21,7 +21,7 @@ make docs-build            # the documentation site, failing on a broken link be
 
 Python goes through Poetry (Python 3.14): `poetry run python run.py --no-sync` runs Runway without touching your bank, `poetry run python -m unittest tests.test_x` runs one test module, and `poetry add <package>` adds a dependency. For the quick checks on every commit (ruff, whitespace, YAML and TOML syntax, merge markers), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
-**Postgres.** CI runs every test on Postgres 16 too, in parallel, where tests that share the database can trip over each other. Run them yourself for a change to the database, the migrations or the tests, against a throwaway Postgres (its data in memory and nothing waiting for the disk; never settings for a real database):
+**Postgres.** CI runs every test on Postgres 16 too, in parallel, where tests that share the database can trip over each other. Run them yourself for a change to the database, the migrations or the tests, against a throwaway Postgres (its data in memory and nothing waiting for the disk; never settings for a real database). Its `max_connections` needs at least 30 per test process plus 100, and Docker's default 64 MB of shared memory isn't enough for the schemas the tests make:
 
 ```bash
 docker run -d --rm --name runway-test-pg --shm-size=1g --tmpfs /var/lib/postgresql/data -p 5432:5432 \
@@ -67,6 +67,14 @@ npm run lint       # ESLint over the web app, the browser extension and the serv
 npm test           # Vitest
 npm run build      # into runway/static/app/
 ```
+
+### The phone tab bar
+
+On a phone `MobileNav.svelte` draws the navigation as frosted glass: the popover surface at 60% (`bg-popover/60`) over a 28px backdrop blur with `saturate(2)`; a browser without `backdrop-filter` gets the solid surface. `--tabbar-h` in `app.css` is the distance from the screen's bottom to the bar's top.
+
+Both numbers were chosen by measuring, in headless Chromium at 440×956 with the GPU path on (`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, so `backdrop-filter` renders), over every demo page at six scroll positions. The spread of brightness behind a label (text bleeding through the glass) was 4.2 for the first, more transparent version, 2.0 at 50% popover, 1.6 at 60% and 1.3 at 70%; 60% keeps the text behind soft while the blur still shows the page's colours (70% starts to look like a solid bar), and a `brightness(1.1)` boost lifted the bleed, so it is dropped.
+
+The inactive labels use `--nav-inactive` (`#b9bec7` in the dark theme), lighter than the shared `muted-foreground` (`#9aa0aa`), and used by `MobileNav.svelte` only. On the first glass `muted-foreground` measured 3.7:1 at the lowest mean and 3.3:1 at the brightest pixel behind a label, under the 4.5:1 normal text needs; with the 60% surface and `#b9bec7` the labels measure at least 7.4:1 on average and 7.1:1 at the brightest pixel. Content brighter than the demo pages could lower these: repeat the measurements over every page at several scroll positions.
 
 ## The documentation
 
