@@ -66,6 +66,19 @@ class EstimatePartsTests(LedgerCase):
         self.assertEqual(nov10["fees"], [{"name": "Sapphire annual fee", "amount": 95.0}])
         self.assertEqual(nov10["total"], 710.0)
 
+    def test_recurring_charges_in_the_order_the_items_were_made_whatever_order_the_database_reads_them(self):
+        """The items are read in id order: an unordered read follows where the rows happen to sit, which on Postgres
+        (a pooled schema whose old rows' space is reused) isn't the order they were made in. Here the rows are written
+        last made first, and SQLite is told to read an unordered table backwards, so neither gives id order by chance."""
+        if not self.conn.postgres:
+            self.conn.sa.exec_driver_sql("PRAGMA reverse_unordered_selects = ON")
+        self.conn.execute(insert(Recurring).values(id=902, name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30"))
+        self.conn.execute(insert(Recurring).values(id=901, name="Insurance", account_id="cc", amount=-600, frequency="yearly",
+                                                   anchor_date="2025-10-20"))
+        nov10 = self.estimates(days=120)["2026-12-07"]
+        self.assertEqual(nov10["recurring"], [{"name": "Insurance", "amount": 600.0}, {"name": "Streaming", "amount": 15.0}])
+
     def test_paying_the_minimum_with_interest(self):
         self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-450, frequency="monthly",
                                                    anchor_date="2026-09-25"))
