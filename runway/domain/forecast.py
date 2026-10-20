@@ -654,8 +654,10 @@ def project(conn, today: date | None = None, horizon_days: int = 90) -> tuple[di
     cash_ids = {a["id"] for a in cash}
     cards = [a for a in accounts if a["kind"] == "credit"]
     moved = moved_to(conn)
+    # In the order they were made (id): the order of a statement's recurring charges (estimate_parts) and of events on
+    # the same day for the same amount. Unordered, Postgres reads them wherever the rows happen to sit.
     recurring = [dict(r, account_id=moved.get(r["account_id"], r["account_id"]))
-                 for r in db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))]
+                 for r in db.rows(conn.execute(select(Recurring).where(Recurring.active == 1).order_by(Recurring.id)))]
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
     events = recurring_events(conn, recurring, by_id, overrides, today, end)
 
