@@ -7,7 +7,7 @@ sidebar:
 
 Every transaction from your banks, grouped by day, with a **To review** tab for the ones waiting on a category.
 
-![Runway's Transactions page on a desktop, with demo data: the filters, a transaction waiting for review, the projected upcoming ones and the list by day](../../../../../screenshots/transactions-top-desktop.png)
+![Runway's Transactions page on a desktop: the filters, a transaction waiting for review, the projected upcoming ones and the list by day](../../../../../screenshots/transactions-top-desktop.png)
 
 ## The list
 

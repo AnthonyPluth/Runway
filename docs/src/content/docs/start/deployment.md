@@ -11,7 +11,7 @@ Running Runway on a server is in [Install with Docker](/Runway/start/docker/). T
 
 Open Runway in Safari on your iPhone, tap **Share → Add to Home Screen**, and open it from the new icon: it runs full screen like an app. For notifications (iOS 16.4 or later), go to **Settings → Notifications** inside the installed app and tap **Turn on notifications**; on a computer, the same button works in Chrome, Edge, Firefox or Safari. Both need Runway served over `https://`.
 
-![Runway's Overview page on a phone, with demo data](../../../../../screenshots/overview-top-phone.png)
+![Runway's Overview page on a phone](../../../../../screenshots/overview-top-phone.png)
 
 Notifications are sent with Web Push, signed and end-to-end encrypted, straight to your browser's push service (Apple's, Google's or Mozilla's). No third-party notification service is involved.
 

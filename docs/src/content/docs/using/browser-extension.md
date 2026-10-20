@@ -15,20 +15,14 @@ A matched transaction has a **receipt** badge on Transactions: click it to see w
 - **Target:** online orders and in-store purchases linked to your Target account (Target Circle, the Wallet barcode,
   a saved card or your phone number at the register).
 - **Costco:** your warehouse, gas station and car wash receipts, as costco.com's Orders & Purchases page lists them,
-  each with all of its items (instant savings are taken off the items they're for). The extension opens your Costco
-  account page, which sets up its sign-in in the browser's storage, and asks Costco's order service for your receipts
-  from inside that page, 90 days at a time, the way the page does. The sign-in never leaves the page: only the
-  receipts go to Runway. Orders placed on costco.com aren't read yet.
-
+  each with all of its items (instant savings are taken off the items they're for). Orders placed on costco.com
+  aren't read yet.
 - **Carta:** your stock options, RSUs and shares, and each company's latest share price, as carta.com shows them to
-  you. The extension loads Carta out of sight, notes the data requests Carta's own pages make, reads the same
-  addresses again (reads only, carta.com only; never sign-out, exercise, accept or download links) and sends the
-  replies to Runway, which finds your companies and grants in them. Click **Carta** in the extension; once an import
-  has worked, the daily import includes it: every day, or about once a week or month if you
-  choose that in Options (Carta signs you out often, so reading it less often means fewer sign-ins).
+  you. It reads only; it never follows sign-out, exercise, accept or download links. Click **Carta** in the
+  extension; once an import has worked, the daily import includes it, or about once a week or month if you choose
+  that in Options (Carta signs you out often, so reading it less often means fewer sign-ins).
 
-It sends pages only to the Runway address you set, and never sees your passwords. All the reading of those pages
-happens in Runway (the extension just fetches them), so when a store changes its site the fix is a Runway update.
+It sends pages only to the Runway address you set, and never sees your passwords.
 
 ## Install
 
@@ -50,36 +44,23 @@ Tick **Import once a day** in the options to have it run by itself while the bro
 
 ## Out of sight
 
-Each store is read in a hidden frame of its own site (in Chrome, inside the extension's offscreen document; in
-Firefox, inside the extension's background page), so no tab or window opens. For those frames only (requests from no
-tab), the extension drops the stores' "don't show me in a frame" headers, and it puts its small reader (`frame.js`)
-in them for the length of the import. It never runs in a store tab you have open yourself.
-
-If a store won't load in a hidden frame, or looks signed out there, that import is done in a background tab instead,
-and that store keeps to tabs for a week (or until the extension is updated). A tab comes to
-the front only when you need to sign in.
+Each store is read in a hidden frame, so no tab or window opens, and the extension never runs in a store tab you have
+open yourself. If a store won't load in a hidden frame, or looks signed out there, that import runs in a background
+tab instead. A tab comes to the front only when you need to sign in.
 
 ## When a store wants you to sign in
 
 If a store has signed you out (or wants a robot check answered), the import stops for that store and opens its
-sign-in page in a tab, brought to the front. Sign in there and the import carries on by itself: you don't need to
-click **Import** again. The extension waits up to 12 hours, until you close that tab, or until it has started the same
-store again three times in an hour without getting through (then the next import is yours to start).
+sign-in page in a tab, brought to the front. Sign in there and the import carries on by itself. The extension waits up
+to 12 hours, or until you close that tab.
 
-- An import you started yourself brings that browser window to the front too.
-- The daily import may run while you're busy with something else, so it doesn't take the focus: the window only asks
-  for your attention (in the taskbar or Dock), and Runway sends a notification to your devices, if you've turned
-  notifications on (Settings → Notifications → **Browser extension needs a sign-in**). It names only the store. It's
-  sent once per store while the sign-in waits (again after three days if it's still waiting), and once the store's
-  import gets through, the next sign-out is told about again, but not within 12 hours of the last one. With sign-in to
-  Runway, it goes to the devices of the person who made the extension's key, and stops when they can no longer sign in
-  (as the key does). The popup says a notification was sent only when one was delivered.
+The daily import may run while you're busy with something else, so it doesn't take the focus: the window asks for
+your attention in the taskbar or Dock, and Runway sends a notification to your devices if you've turned on
+**Browser extension needs a sign-in** under Settings → Notifications. It names only the store, and is sent once per
+store while the sign-in waits.
 
-This needs no permissions beyond the ones the extension already has: it only sees the addresses of the stores' own
-pages, to tell when the tab is past the sign-in.
-
-It's written to load in Firefox 128 and later as well (`about:debugging` → **This Firefox** → **Load Temporary
-Add-on…**, pick `manifest.json`; Firefox forgets temporary add-ons when it restarts), but it has only been tried in
+The extension also loads in Firefox 128 and later (`about:debugging` → **This Firefox** → **Load Temporary
+Add-on…**, pick `manifest.json`; Firefox forgets temporary add-ons when it restarts), but has only been tried in
 Chromium so far.
 
 ## If Runway is behind a sign-in proxy
@@ -92,21 +73,13 @@ connections.
 
 ## When a store changes its site
 
-Runway reads the pages with the [amazon-orders](https://github.com/alexdlaird/amazon-orders) library's parsers for
-Amazon, and loosely (by field names) for Target, whose order API is undocumented. Runway tells the extension which
-address to read Target's history from (the newer one, 100 orders a page, then the older one if that isn't
-answered); Target says "too many requests" now and then, which the extension
-waits out once (and goes slower after) before it gives up until the next import. Target's replies are kept with each
-order, so if items are missing you can look at what Target sent (it's in the `retail_orders.raw` column) and Runway
-can be taught to read it. When the addresses Runway knows for a Target order's items don't answer, the extension
-loads that order's own page on target.com, reads the addresses the page called for it, and remembers them for the
-next orders. An order whose page can't be read is tried again on the next few imports, then left alone.
+The stores' order pages aren't documented, so an import can stop working when a store changes its site. The extension
+only fetches pages; Runway reads them, so the fix is a Runway update, not a new extension.
 
-For Costco, Runway holds the query to send, the headers to send it with and the address of the account page, and
-reads the replies loosely (by field names); each receipt is kept with its order (`retail_orders.raw`). If the
-extension says it couldn't find how costco.com signs its requests, open Account → Orders & Purchases in that browser
-once and import again; if it still can't, the account page's address or the names of the values the page keeps in
-storage need updating, which is a change in Runway only.
-
-For Carta, whose web app isn't documented either, Runway keeps what the extension read: **Settings → Connections → Browser extension → Carta → Download what the extension
-read** shows why a grant was missed.
+- **Target** says "too many requests" now and then. The extension waits it out and slows down, and gives up until the
+  next import if it keeps happening. An order whose page can't be read is tried again on the next few imports, then
+  left alone.
+- **Costco:** if the extension says it couldn't find how costco.com signs its requests, open Account → Orders &
+  Purchases in that browser once and import again.
+- **Carta:** **Settings → Connections → Browser extension → Carta → Download what the extension read** shows what
+  the extension sent, and why a grant was missed.

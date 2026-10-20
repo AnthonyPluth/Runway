@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/overview-top-desktop.png" alt="Runway's Overview page with demo data: an “On track” status for the forecast account, its balance, the projected balance chart over the next 90 days and what's coming up" width="900">
+  <img src="screenshots/overview-top-desktop.png" alt="Runway's Overview page: an “On track” status for the forecast account, its balance, the projected balance chart over the next 90 days and what's coming up" width="900">
 </p>
 
 <p align="center">
@@ -54,14 +54,12 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **Yours to keep.** Autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres.
 
 <p align="center">
-  <img src="screenshots/transactions-top-phone.png" alt="The Transactions page on a phone, with demo data" width="280">
+  <img src="screenshots/transactions-top-phone.png" alt="The Transactions page on a phone" width="280">
   &nbsp;&nbsp;
-  <img src="screenshots/budget-top-phone.png" alt="The Budget page on a phone, with demo data" width="280">
+  <img src="screenshots/budget-top-phone.png" alt="The Budget page on a phone" width="280">
   &nbsp;&nbsp;
-  <img src="screenshots/investments-top-phone.png" alt="The Investments page on a phone, with demo data" width="280">
+  <img src="screenshots/investments-top-phone.png" alt="The Investments page on a phone" width="280">
 </p>
-
-Every screenshot here and in the documentation is taken by `make verify` on made-up demo data and committed to [`screenshots/`](screenshots/), so they always show the current release.
 
 ## Quick start
 
@@ -76,12 +74,12 @@ The image is `ghcr.io/anthonypluth/runway:latest` (Intel/AMD and ARM). Beyond `l
 
 ## Documentation
 
-**[anthonypluth.github.io/Runway](https://anthonypluth.github.io/Runway/)**, built from [`docs/`](docs/):
+**[anthonypluth.github.io/Runway](https://anthonypluth.github.io/Runway/)**
 
 - **Start here:** [Quick start](https://anthonypluth.github.io/Runway/start/quick-start/), [Install with Docker](https://anthonypluth.github.io/Runway/start/docker/) and [Phone, backups and Postgres](https://anthonypluth.github.io/Runway/start/deployment/).
-- **Using Runway:** one page per part of the app, from the [Overview](https://anthonypluth.github.io/Runway/using/overview/) and its forecast to [Settings](https://anthonypluth.github.io/Runway/using/settings/), plus the [browser extension](https://anthonypluth.github.io/Runway/using/browser-extension/) and [AI assistants (MCP)](https://anthonypluth.github.io/Runway/using/mcp/).
+- **Using Runway:** a page for each part of the app, from the [Overview](https://anthonypluth.github.io/Runway/using/overview/) to [Settings](https://anthonypluth.github.io/Runway/using/settings/), plus the [browser extension](https://anthonypluth.github.io/Runway/using/browser-extension/) and [AI assistants (MCP)](https://anthonypluth.github.io/Runway/using/mcp/).
 - **Reference:** [Configuration](https://anthonypluth.github.io/Runway/reference/configuration/) (every environment variable) and [Architecture](https://anthonypluth.github.io/Runway/reference/architecture/) (data sources, how the forecast works, the stack and the security model).
-- **Contributing:** [Development](https://anthonypluth.github.io/Runway/contributing/development/) (setup, checks, the database, the code layout and releases) and the conventions in [AGENTS.md](AGENTS.md).
+- **Contributing:** [Development](https://anthonypluth.github.io/Runway/contributing/development/).
 
 ## Security and privacy
 
@@ -89,7 +87,7 @@ Your data stays in your own database. Outbound calls go only to the services you
 
 ## Releases
 
-Every push to `main` that passes the tests publishes a new image and a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases). Pin a version (`ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose; database migrations run on start. The running version is under **Settings → Data**.
+Each [release](https://github.com/AnthonyPluth/Runway/releases) publishes the image tagged `latest` and by version (`1.2.3`, `1.2`, `1`). Pin a version (`ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose; database migrations run on start. The running version is under **Settings → Data**.
 
 ## License
 

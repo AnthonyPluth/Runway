@@ -7,7 +7,7 @@ sidebar:
 
 Credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. Tiles for 5/24, annual fees and bonuses sit over four tabs: **Overview** (Upcoming, Planned, Best card for… and Rewards), **Cards**, **Benefits** and **Bank bonuses**.
 
-![Runway's Churning page on a desktop, with demo data: the 5/24, annual fee and bonus tiles over the Overview tab](../../../../../screenshots/churning-desktop.png)
+![Runway's Churning page on a desktop: the 5/24, annual fee and bonus tiles over the Overview tab](../../../../../screenshots/churning-desktop.png)
 
 ## Cards
 

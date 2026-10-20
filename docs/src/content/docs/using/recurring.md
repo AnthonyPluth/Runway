@@ -7,7 +7,7 @@ sidebar:
 
 The items the forecast expects: paychecks and other money in, bills and subscriptions out, on any schedule. It works without a bank too, for items you add by hand.
 
-![Runway's Recurring page on a phone, with demo data: the recurring bills and paychecks and when each is next due](../../../../../screenshots/recurring-phone.png)
+![Runway's Recurring page on a phone: the recurring bills and paychecks and when each is next due](../../../../../screenshots/recurring-phone.png)
 
 ## The list
 

@@ -7,7 +7,7 @@ sidebar:
 
 Three tabs: **Summary**, **Equity** and **Retirement**.
 
-![Runway's Net worth page on a desktop, with demo data: the total, its change, the chart and what makes it up](../../../../../screenshots/networth-desktop.png)
+![Runway's Net worth page on a desktop: the total, its change, the chart and what makes it up](../../../../../screenshots/networth-desktop.png)
 
 ## Summary
 

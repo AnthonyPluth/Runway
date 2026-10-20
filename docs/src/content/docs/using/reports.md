@@ -7,7 +7,7 @@ sidebar:
 
 Five views of where your money went. Categories wear the colours they have on Budget, and anything you click opens its transactions on Transactions, already filtered (on a touch screen the first tap shows the figure and a second opens it).
 
-![Runway's Reports page on a desktop, with demo data: the month's money in and out and the cash-flow Sankey](../../../../../screenshots/reports-desktop.png)
+![Runway's Reports page on a desktop: the month's money in and out and the cash-flow Sankey](../../../../../screenshots/reports-desktop.png)
 
 - **Cash flow:** a Sankey chart of a month's money in, through categories, to money out.
 - **Over time:** spending by category, merchant or account over 6, 12 or 24 months, with each one's change from last month and a year ago. The month under way is drawn faint and marked "so far", compared with the same days of last month ("vs Sep 1–3"); only a month that's over is flagged red for spending more than came in.

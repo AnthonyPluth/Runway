@@ -7,7 +7,7 @@ sidebar:
 
 Settings has six tabs: **Accounts**, **Connections**, **Categories**, **Rules**, **Notifications** and **Data**. Until a bank is connected it opens on Connections.
 
-![Runway's Settings page on a desktop, with demo data: the Connections tab](../../../../../screenshots/setup-desktop.png)
+![Runway's Settings page on a desktop: the Connections tab](../../../../../screenshots/setup-desktop.png)
 
 ## Connections
 

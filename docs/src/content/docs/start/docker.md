@@ -32,7 +32,7 @@ docker compose logs -f runway
 
 Open `RUNWAY_PUBLIC_URL`. You're sent to your provider to sign in, then back to Runway. If a setting is missing, the container stops with a message saying which one. Sign out with the arrow next to your name at the bottom of the sidebar.
 
-The image is `ghcr.io/anthonypluth/runway:latest`, for Intel/AMD and ARM, and public. Every push to `main` that passes the tests publishes it, tagged `latest` and with its version (`1.2.3`, `1.2`, `1`). To stay on a version, set `image: ghcr.io/anthonypluth/runway:1.2` in `docker-compose.yml`; every released version stays in the registry. The running version is under **Settings → Data**.
+The image is `ghcr.io/anthonypluth/runway:latest`, for Intel/AMD and ARM. Each release is also tagged with its version (`1.2.3`, `1.2`, `1`). To stay on a version, set `image: ghcr.io/anthonypluth/runway:1.2` in `docker-compose.yml`; every released version stays in the registry. The running version is under **Settings → Data**.
 
 ## Moving your data from another machine
 
@@ -54,7 +54,7 @@ Runway is built to be reachable from anywhere, set up like this:
 3. **A secret key.** `RUNWAY_SECRET_KEY` (`openssl rand -base64 32`), kept in your password manager. It encrypts your saved bank access and API keys. Without it, the key is `./data/secret.key`: back it up with the database. To change it, put the old one in `RUNWAY_SECRET_KEY_OLD` for one start, and keep it as long as you keep backups made with it.
 4. **Rate limiting at the proxy** (optional): Runway caps how many requests it handles at once, and the proxy can limit requests per address.
 5. **Backups kept private.** They hold your transactions, and your bank access and API keys encrypted with your key.
-6. **Updates.** `docker compose pull && docker compose up -d` (or let Watchtower do it). Each release is tested and its dependencies checked for known vulnerabilities. Migrations run on start; take a backup first if you like to be careful.
+6. **Updates.** `docker compose pull && docker compose up -d` (or let Watchtower do it). Migrations run on start; take a backup first if you like to be careful.
 7. **AI assistants** connect with OAuth at `<RUNWAY_PUBLIC_URL>/mcp` ([AI assistants](/Runway/using/mcp/)). Behind a forward-auth proxy (`RUNWAY_ALLOW_NO_AUTH=1`), exempt `/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke` and `/.well-known/oauth-*` from it, and keep `/oauth/authorize` behind it.
 
 ## Notes
