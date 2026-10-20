@@ -585,12 +585,11 @@ def refresh_all(conn) -> list[str]:
             call(conn, "/transactions/refresh", {"access_token": item["access_token"]})
         except PlaidError as e:
             errors.append(f"{item['institution_name'] or 'Plaid'}: {e}")
-            if e.code and e.code not in NOT_THE_CONNECTION:
-                failures = (item["refresh_failures"] or 0) + 1
-                paused = {"refresh_paused": monitoring.public_text(str(e)), "refresh_paused_at": _now()} \
-                    if failures >= REFRESH_PAUSE_AFTER else {}
-                conn.execute(update(PlaidItem).where(PlaidItem.item_id == item["item_id"])
-                             .values(refresh_failures=failures, **paused))
+            if e.code and e.code not in NOT_THE_CONNECTION:   # counted in the database: the switch may have changed meanwhile
+                mine = PlaidItem.item_id == item["item_id"]
+                conn.execute(update(PlaidItem).where(mine).values(refresh_failures=func.coalesce(PlaidItem.refresh_failures, 0) + 1))
+                conn.execute(update(PlaidItem).where(mine, PlaidItem.refresh_failures >= REFRESH_PAUSE_AFTER)
+                             .values(refresh_paused=monitoring.public_text(str(e)), refresh_paused_at=_now()))
                 conn.commit()
             continue
         if item["refresh_failures"]:

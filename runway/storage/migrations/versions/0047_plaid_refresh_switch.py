@@ -23,7 +23,7 @@ def upgrade() -> None:
     if 'refresh' in {c['name'] for c in sa.inspect(op.get_bind()).get_columns('plaid_items')}:
         return
     op.add_column('plaid_items', sa.Column('refresh', sa.Integer()))
-    op.add_column('plaid_items', sa.Column('refresh_failures', sa.Integer(), server_default=sa.text('0'), nullable=False))
+    op.add_column('plaid_items', sa.Column('refresh_failures', sa.Integer(), server_default=sa.text('0')))
     op.add_column('plaid_items', sa.Column('refresh_paused', sa.Text()))
     op.add_column('plaid_items', sa.Column('refresh_paused_at', sa.Text()))
     op.execute("UPDATE plaid_items SET refresh = CASE WHEN EXISTS (SELECT 1 FROM plaid_accounts a "

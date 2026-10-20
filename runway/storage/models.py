@@ -290,7 +290,7 @@ class PlaidItem(Base):
     inv_last_sync: Mapped[str | None]
     inv_error: Mapped[str | None]
     refresh: Mapped[int | None]
-    refresh_failures: Mapped[int]
+    refresh_failures: Mapped[int | None]
     refresh_paused: Mapped[str | None]
     refresh_paused_at: Mapped[str | None]
 
