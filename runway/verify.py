@@ -86,7 +86,8 @@ def libfaketime_missing_message() -> str:
 def frozen_env(env: dict[str, str], lib: str) -> dict[str, str]:
     """env with the process's wall clock stopped at FROZEN_TIME (a time of day the server prints, like "as of 12:00:18 PM",
     would otherwise change every run). Monotonic clocks keep running, so timeouts and waits still work; file times stay real.
-    verify_site/ comes first on PYTHONPATH, for the timed waits libfaketime breaks."""
+    verify_site/ comes first on PYTHONPATH, for the timed waits libfaketime breaks. Python loads one `sitecustomize`,
+    the first on the path, so it shadows any other (the environment's own); these demo processes have none of their own."""
     path = os.pathsep.join(p for p in (SITE_DIR, env.get("PYTHONPATH", "")) if p)
     return {**env, "LD_PRELOAD": lib, "FAKETIME": FROZEN_TIME, "NO_FAKE_STAT": "1", "DONT_FAKE_MONOTONIC": "1",
             "FAKETIME_DONT_FAKE_MONOTONIC": "1", "PYTHONPATH": path, FROZEN_CLOCK_ENV: "1"}
@@ -511,9 +512,14 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
             log.say(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", err=True)
             return 2
 
+        known: list[str] = []   # every page, flow and check there is (verify.mjs's all_items), for the sync
+
         def run_round(attempt: int, only: list[str] | None, name: str = "") -> dict[str, Any] | None:
             scale = time_scale(max(ratio, load_per_cpu()), attempt)
-            return _round(os.path.join(work, name or f"round-{attempt}"), seed, pages, only, scale, attempt, node, lib, token, log)
+            got = _round(os.path.join(work, name or f"round-{attempt}"), seed, pages, only, scale, attempt, node, lib, token, log)
+            if got and got.get("all_items") and not known:
+                known.extend(got["all_items"])
+            return got
 
         done = retrying(run_round, log.say)
         if done is None:
@@ -535,7 +541,7 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
         failed = {i: item["problems"] for i, (_, item) in results.items() if not item["ok"]}
         ok = not failed and bool(results)
         report = {"ok": ok, "limited": bool(pages), "pages": pages, "items": planned, "failed": failed, "flaky": flaky,
-                  "attempts": ATTEMPTS, "load_per_cpu": round(ratio, 2), "log": log.path}
+                  "attempts": ATTEMPTS, "load_per_cpu": round(ratio, 2), "log": log.path, "all_items": known}
         publish(OUT, results, report, os.path.basename(log.path).removesuffix(".log"))
         for line in summary(failed, flaky, len(planned)):
             log.say(line, err=line.lstrip().startswith(("FAIL", "verify: FAILED")))

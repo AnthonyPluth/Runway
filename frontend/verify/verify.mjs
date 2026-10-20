@@ -457,7 +457,8 @@ async function main() {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   // Rewritten after each item, so a run that dies part way says which items it never reached.
-  const report = { base, attempt, items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
+  // Every item there is (not only this run's), so tools/sync_screenshots.py can tell which item an image belongs to.
+  const report = { base, attempt, all_items: selectItems([], flows).items.map(({ id }) => id), items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
   const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
   save();
   // One raster thread: tiles rastered in parallel came out a level or two apart at an edge from run to run (a card's rounded corner

@@ -106,6 +106,55 @@ class Sync(unittest.TestCase):
                          {"budget-phone.png": png(b"new"), "budget-desktop.png": png(b"new"), "setup-phone.png": png(b"setup"),
                           "flow-budget-edit-usual-phone.png": png(b"flow")})
 
+    ALL = ["page:budget", "page:setup", "flow:transactions-delete", "flow:transactions-delete-details",
+           "flow:transactions-delete-phone", "flow:budget-edit", "device-cache"]
+
+    def test_a_limited_run_removes_the_images_its_own_items_no_longer_write(self):
+        """PAGES="transactions-delete": that flow's screenshot step was renamed, so its old image goes; the flows whose
+        names start with its (transactions-delete-details, -phone) and every other item keep theirs."""
+        self.dest.mkdir()
+        kept = ["flow-transactions-delete-details-confirm-desktop.png", "flow-transactions-delete-phone-confirm-phone.png",
+                "budget-phone.png", "flow-budget-edit-usual-phone.png", "flow-gone-x-phone.png"]
+        for name in [*kept, "flow-transactions-delete-old-step-desktop.png", "flow-transactions-delete-desktop.png"]:
+            self.shot(self.dest, name, b"old")
+        self.shot(self.src, "flow-transactions-delete-desktop.png", b"new")
+        self.shot(self.src, "flow-transactions-delete-new-step-desktop.png", b"new")
+        (self.src / "report.json").write_text(json.dumps({
+            "ok": True, "limited": True, "items": ["flow:transactions-delete"], "all_items": self.ALL,
+            "files": ["flow-transactions-delete-desktop.png", "flow-transactions-delete-new-step-desktop.png"]}))
+        written, removed = sync_screenshots.sync(self.src, self.dest)
+        self.assertEqual(removed, ["flow-transactions-delete-old-step-desktop.png"])
+        self.assertEqual(written, ["flow-transactions-delete-desktop.png", "flow-transactions-delete-new-step-desktop.png"])
+        for name in kept:
+            self.assertEqual((self.dest / name).read_bytes(), png(b"old"), name)
+
+    def test_a_limited_run_s_page_removes_only_that_page_s_images(self):
+        self.dest.mkdir()
+        for name in ("budget-phone.png", "budget-tablet.png", "setup-phone.png", "flow-budget-edit-usual-phone.png"):
+            self.shot(self.dest, name, b"old")
+        self.shot(self.src, "budget-phone.png", b"new")
+        (self.src / "report.json").write_text(json.dumps({"ok": True, "limited": True, "items": ["page:budget"],
+                                                          "all_items": self.ALL, "files": ["budget-phone.png"]}))
+        self.assertEqual(sync_screenshots.sync(self.src, self.dest), (["budget-phone.png"], ["budget-tablet.png"]))
+        self.assertTrue((self.dest / "setup-phone.png").exists())
+        self.assertTrue((self.dest / "flow-budget-edit-usual-phone.png").exists())   # the budget page's flow wasn't run
+
+    def test_a_limited_report_that_does_not_say_which_item_owns_an_image_removes_nothing(self):
+        self.dest.mkdir()
+        self.shot(self.dest, "budget-tablet.png", b"old")
+        self.shot(self.src, "budget-phone.png", b"new")
+        (self.src / "report.json").write_text(json.dumps({"ok": True, "limited": True, "items": ["page:budget"],
+                                                          "files": ["budget-phone.png"]}))
+        self.assertEqual(sync_screenshots.sync(self.src, self.dest), (["budget-phone.png"], []))
+
+    def test_owner_picks_the_longest_flow_name_that_fits(self):
+        self.assertEqual(sync_screenshots.owner("flow-transactions-delete-details-confirm-desktop.png", self.ALL),
+                         "flow:transactions-delete-details")
+        self.assertEqual(sync_screenshots.owner("flow-transactions-delete-review-desktop.png", self.ALL), "flow:transactions-delete")
+        self.assertEqual(sync_screenshots.owner("setup-desktop.png", self.ALL), "page:setup")
+        self.assertIsNone(sync_screenshots.owner("networth-phone.png", self.ALL))
+        self.assertIsNone(sync_screenshots.owner("flow-gone-x-phone.png", self.ALL))
+
     def test_copies_only_the_images_the_report_lists(self):
         """A stray image left in artifacts/verify/ (from another run, or put there by hand) isn't one of this run's."""
         self.shot(self.src, "budget-phone.png", b"a")

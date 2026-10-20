@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -183,6 +184,52 @@ class FrozenClockTests(unittest.TestCase):
             frozen = subprocess.run([sys.executable, "-c", "import datetime; print(datetime.date.today())"], env=env,
                                     capture_output=True, text=True, timeout=60)
             self.assertEqual(frozen.stdout.strip(), verify.FROZEN_DAY)   # and the clock is still stopped
+
+
+class FrozenSiteTests(unittest.TestCase):
+    """verify_site/sitecustomize.py's waits themselves, on the real clock (no libfaketime needed)."""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("verify_sitecustomize", os.path.join(verify.SITE_DIR, "sitecustomize.py"))
+        assert spec and spec.loader
+        self.site = importlib.util.module_from_spec(spec)
+        with mock.patch.dict("os.environ", {verify.FROZEN_CLOCK_ENV: ""}):   # load it without installing it here
+            spec.loader.exec_module(self.site)
+
+    def test_sleep_waits_and_refuses_a_negative_length(self):
+        start = time.monotonic()
+        self.site._sleep(0.15)
+        self.assertGreaterEqual(time.monotonic() - start, 0.15)
+        with self.assertRaises(ValueError):
+            self.site._sleep(-1)
+
+    def test_a_timed_acquire_waits_its_timeout_and_returns_when_released(self):
+        lock = self.site._PollingLock()
+        self.assertTrue(lock.acquire())
+        start = time.monotonic()
+        self.assertFalse(lock.acquire(True, 0.15))   # held: waits, then gives up
+        self.assertGreaterEqual(time.monotonic() - start, 0.15)
+        self.assertFalse(lock.acquire(False))
+        timer = threading.Timer(0.05, lock.release)
+        timer.start()
+        self.assertTrue(lock.acquire(True, 5))   # released by another thread: taken well before the timeout
+        self.assertTrue(lock.locked())
+        lock.release()
+        with lock:
+            self.assertTrue(lock.locked())
+        self.assertFalse(lock.locked())
+
+    def test_installed_it_backs_event_wait_and_time_sleep(self):
+        with mock.patch.object(time, "sleep", time.sleep), mock.patch.object(threading, "_allocate_lock", threading._allocate_lock):
+            self.site.install()
+            self.assertIs(time.sleep, self.site._sleep)
+            start = time.monotonic()
+            self.assertFalse(threading.Event().wait(0.1))
+            self.assertGreaterEqual(time.monotonic() - start, 0.1)
+            e = threading.Event()
+            threading.Timer(0.05, e.set).start()
+            self.assertTrue(e.wait(5))
 
 
 class MachineLockTests(unittest.TestCase):
