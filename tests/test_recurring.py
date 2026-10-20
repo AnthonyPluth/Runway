@@ -7,9 +7,9 @@ from sqlalchemy import insert, select, update
 
 from runway.storage import db
 from runway.domain import forecast, recurring
-from runway.storage.models import Category, Override, Recurring, Transaction
+from runway.storage.models import Category, Merchant, Override, Recurring, Transaction
 from runway.server.common import ApiError
-from tests.shared import TODAY, LedgerCase
+from tests.shared import TODAY, LedgerCase, add_tx
 
 
 class RecurringTests(LedgerCase):
@@ -32,6 +32,40 @@ class RecurringTests(LedgerCase):
                                                   .where(Transaction.recurring_id == self.rid)
                                                   .order_by(Transaction.posted))]
         self.assertEqual(linked, [-91.20, -143.77, -160.02, -118.40])
+
+    def read_backwards_and_add_two_last_made_first(self, **kw):
+        """Two more items on the account, written last made first. SQLite is told to read an unordered table backwards,
+        so neither database reads them in the order they were made by chance."""
+        if not self.conn.postgres:
+            self.conn.sa.exec_driver_sql("PRAGMA reverse_unordered_selects = ON")
+        for rid, name in ((902, "Club"), (901, "Dues")):
+            self.conn.execute(insert(Recurring).values(id=rid, name=name, account_id="chk", amount=-25, frequency="monthly",
+                                                       **kw))
+
+    def test_of_two_items_whose_texts_match_as_closely_the_one_made_first_takes_the_transaction(self):
+        self.tx("chk", "2026-09-12", -25.0, "GYM CLUB DUES")
+        self.read_backwards_and_add_two_last_made_first(anchor_date="2026-09-12", match=None)
+        recurring.auto_match(self.conn)
+        self.assertEqual(self.conn.execute(select(Transaction.recurring_id)
+                                           .where(Transaction.description == "GYM CLUB DUES")).scalar(), 901)
+
+    def test_missed_payments_on_the_same_day_are_listed_in_the_order_their_items_were_made(self):
+        self.read_backwards_and_add_two_last_made_first(anchor_date="2026-08-04")
+        missed = [(m["date"], m["recurring_id"]) for m in recurring.missed(self.conn, TODAY) if m["recurring_id"] > 900]
+        self.assertEqual(missed, [("2026-09-04", 901), ("2026-09-04", 902), ("2026-08-04", 901), ("2026-08-04", 902)])
+
+    def test_an_items_logo_is_its_last_matched_transactions_whatever_order_the_database_reads_two_on_the_same_day(self):
+        """Two matched on the same day: the logo is the one last_matched shows (matched_by_item: by id). The later id is
+        written first here, so reading the rows where they sit would pick it."""
+        from runway.server.api import recurring as api
+        for mid in ("m-a", "m-b"):
+            self.conn.execute(insert(Merchant).values(id=mid, name=mid, logo="cG5n", logo_type="image/png"))
+        for tid, mid in (("t-b", "m-b"), ("t-a", "m-a")):
+            add_tx(self.conn, "chk", "2026-09-20", -120.0, id=tid, description="COMED ELECTRIC PAYMENT", merchant_id=mid,
+                   recurring_id=self.rid)
+        item = {"id": self.rid, "name": "Electric"}
+        self.assertEqual(recurring.matched(self.conn, self.rid)[0]["id"], "t-a")
+        self.assertEqual(api.recurring_logos(self.conn, [item]), {self.rid: "/api/merchants/m-a/logo"})
 
     def test_never_match_is_respected(self):
         recurring.link(self.conn, "chk|0", None)

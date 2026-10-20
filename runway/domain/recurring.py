@@ -101,7 +101,8 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
     q = select(Recurring).where(Recurring.active == 1)
     if recurring_ids:
         q = q.where(Recurring.id.in_(list(recurring_ids)))
-    items = sorted(db.rows(conn.execute(q)), key=lambda r: -max(map(len, match_texts(r)), default=0))  # most specific first
+    # Most specific (longest text) first; of those that tie, the oldest (lowest id). The first to match a transaction takes it.
+    items = sorted(db.rows(conn.execute(q)), key=lambda r: (-max(map(len, match_texts(r)), default=0), r["id"]))
     linked = 0
     t = Transaction
     for item in items:
@@ -378,7 +379,8 @@ def missed_and_runs(conn, today: date | None = None, lookback: int = LOOKBACK_DA
     dismissed = set(conn.execute(select(RecurringDismissed.key)).scalars()) | skipped_keys(conn)
     out = []
     t = Transaction
-    items = db.rows(conn.execute(with_account_name().where(Recurring.active == 1)))
+    # In id order: missed occurrences on the same day are listed in the order their items were made.
+    items = db.rows(conn.execute(with_account_name().where(Recurring.active == 1).order_by(Recurring.id)))
     firsts = first_posted(conn, [i["account_id"] for i in items])
     starts = {}
     for item in items:
