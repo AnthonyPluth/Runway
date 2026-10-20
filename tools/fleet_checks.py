@@ -8,9 +8,9 @@ one a correction that used to live as prose and now fails `make check` and CI in
 - Commits (`--commits BASE..HEAD`, a pull request's): an agent's commit (one with a `Claude-Session:` trailer, or any
   `Co-Authored-By:` trailer naming Claude) carries exactly one `Co-Authored-By: Claude <Model> <version>
   <noreply@anthropic.com>` trailer naming the model that wrote it.
-- Images (`--commits`): a raster image the branch adds or changes is one `make verify` writes to screenshots/ (a page or
-  flow image, `<name>-<phone|desktop>.png`, the names read from frontend/verify/verify.mjs and its flows) or sits where
-  images belong (the extension's icons, the served assets, the docs site's logo and home page images); a hand-made before
+- Images (`--commits`): a raster image the branch adds or changes is one `make verify` writes to screenshots/ (a page, a
+  page's first screen or a flow image, `<name>-<phone|desktop>.png`, the names read from frontend/verify/verify.mjs and its
+  flows) or sits where images belong (the extension's icons, the served assets, the docs site's logo); a hand-made before
   and after image fails.
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
   every action pinned by SHA has its version in a comment; `gh api` with `per_page` paginates; and no `runner`, `steps`, `job` or
@@ -130,11 +130,10 @@ def commits(revision_range: str) -> list[tuple[str, str]]:
 
 IMAGE = re.compile(r"\.(png|jpe?g|gif|webp|avif|ico|heic|bmp|tiff?)$", re.IGNORECASE)
 SCREENSHOTS = "screenshots/"
-# Where an image belongs besides screenshots/: the extension's icons, the served assets (icons, logo), and the docs site's logo
-# and the home page's five hand-taken pictures (docs/src/assets/screenshots/: not `make verify`'s, which are 1440×900 and phone.png at 2x).
+# Where an image belongs besides screenshots/: the extension's icons, the served assets (icons, logo) and the docs site's logo.
+# The docs site and the README take their screenshots from screenshots/, so they never need a picture of their own.
 IMAGE_HOMES = ("extension/icons/", "runway/static/")   # folders: anything under them
-IMAGE_FILES = ("docs/src/assets/logo.png",   # exactly these files
-               *(f"docs/src/assets/screenshots/{n}.png" for n in ("overview", "transactions", "budget", "reports", "phone")))
+IMAGE_FILES = ("docs/src/assets/logo.png",)            # exactly these files
 VERIFY = ROOT / "frontend/verify/verify.mjs"
 FLOWS = ROOT / "frontend/verify/flows"
 
@@ -145,12 +144,13 @@ def _verify_list(text: str, name: str) -> list[str]:
 
 
 def verify_images(text: str | None = None, flows: Path = FLOWS) -> set[str]:
-    """The file names `make verify` can write: `<page>-<width>.png` for each page in verify.mjs's PAGES at its
-    DEFAULT_VIEWPORTS, and for each flow `flow-<name>-<width>.png` plus `flow-<name>-<step>-<width>.png` for each of its
-    `screenshot` steps, at the widths it lists (else the defaults)."""
+    """The file names `make verify` can write: `<page>-<width>.png` and its first screen `<page>-top-<width>.png` for each
+    page in verify.mjs's PAGES at its DEFAULT_VIEWPORTS, and for each flow `flow-<name>-<width>.png` plus
+    `flow-<name>-<step>-<width>.png` for each of its `screenshot` steps, at the widths it lists (else the defaults)."""
     text = VERIFY.read_text() if text is None else text
     pages, widths = _verify_list(text, "PAGES"), _verify_list(text, "DEFAULT_VIEWPORTS")
-    names = {f"{page}-{w}.png" for page in pages for w in widths}
+    top = re.search(r"""export const TOP = ["'](\w+)["']""", text)
+    names = {f"{page}{suffix}-{w}.png" for page in pages for w in widths for suffix in ("", f"-{top.group(1) if top else 'top'}")}
     for path in sorted(flows.glob("*.json")):
         flow = json.loads(path.read_text())
         steps = [s["screenshot"] for s in flow.get("steps", []) if isinstance(s.get("screenshot"), str)]
@@ -169,7 +169,7 @@ def added_images(base: str) -> list[str]:
 def check_images(paths: list[str], made: set[str]) -> list[str]:
     return [f"{path}: the only images a change commits are the ones make verify writes to {SCREENSHOTS} (a page or flow "
             "image named <name>-phone.png or <name>-desktop.png; they are the visual regression baselines), plus the icons and "
-            "logos in extension/icons/, runway/static/ and docs/src/assets/; show a before and after through those images' "
+            "logos in extension/icons/, runway/static/ and docs/src/assets/logo.png; show a before and after through those images' "
             "diff, not a hand-made file"
             for path in paths if not (path.startswith(IMAGE_HOMES) or path in IMAGE_FILES
                                       or (path.startswith(SCREENSHOTS) and path[len(SCREENSHOTS):] in made))]

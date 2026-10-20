@@ -9,3 +9,17 @@
   --sl-color-accent: #0069d9;
   --sl-color-accent-high: #003a78;
 }
+
+/* The home page's phone screenshots, side by side. */
+.phones {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+.phones img {
+  width: calc((100% - 2rem) / 3);
+  max-width: 300px;
+  height: auto;
+  border-radius: 0.75rem;
+}

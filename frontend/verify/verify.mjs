@@ -88,6 +88,9 @@ export const PAGE_STYLE = "*, *::before, *::after { scroll-behavior: auto !impor
 
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
+/** Each page is also saved as its first screen, `<page>-top-<width>.png`: the window as it opens, before any scrolling, for the
+ *  README and the docs site's hero images (a full page is too tall for those). tools/fleet_checks.py reads this name. */
+export const TOP = "top";
 
 /** What on the page says it's still loading, [] when nothing does. Run in the page, so it stands alone. A screenshot is
  *  only taken when this is empty, and checked again after: a loading placeholder (the app's skeletons: .animate-pulse blocks),
@@ -502,7 +505,8 @@ async function main() {
     // A screenshot is taken only once the page has loaded (unsettled() finds nothing) and stopped changing (settle()), then
     // taken again at once: kept when the two are byte for byte the same and nothing started loading meanwhile, retaken
     // otherwise, and a failure after SHOT_TRIES. A flow's checks since its last action must still hold after it (CHECKS).
-    const shot = async (name) => {
+    // `top`: the window as it opens, not the full page (TOP).
+    const shot = async (name, { top = false } = {}) => {
       const file = screenshotFile(name, viewport);
       let why = "";
       for (let i = 1; i <= SHOT_TRIES; i++) {
@@ -515,7 +519,7 @@ async function main() {
         // window, and that sometimes made the dialog lose focus and close before the flow's next step (the transactions-delete flake).
         // The To review bar is the same: a full-page capture makes the whole card visible again, and the bar goes with it.
         const modal = await page.locator("[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible").count();
-        const options = { fullPage: !modal, style: `${HIDE_TOASTS} ${STILL}`, timeout: page.t(30000) };
+        const options = { fullPage: !modal && !top, style: `${HIDE_TOASTS} ${STILL}`, timeout: page.t(30000) };
         await page.evaluate(capturing, true);
         const first = await page.screenshot(options), second = await page.screenshot(options);
         await page.evaluate(capturing, false);
@@ -553,6 +557,7 @@ async function main() {
         await visit(result, item.page, viewport, async (page, shot) => {
           await page.goto(`${base}/#${item.page}`, { waitUntil: "networkidle" });
           await shot(item.page);
+          await shot(`${item.page}-${TOP}`, { top: true });
         });
       }
     } else if (item.flow) {

@@ -108,10 +108,11 @@ docs-build: docs/node_modules
 	cd docs && $(NPM) run build
 
 # Runs the real app on made-up demo data and drives it with Playwright: each page at phone and desktop widths, plus
-# the scripted flows in frontend/verify/flows. Full-page screenshots, console errors and failed requests go to
-# artifacts/verify/ (only when every page and flow passed); it fails on a console error, a 5xx, a failed step or a page
-# that never finished loading, after retrying what failed. One run at a time per machine: a second waits for the first.
-# `make verify PAGES="budget setup budget-edit"` runs only those pages (with the flows that start on them) and flows.
+# the scripted flows in frontend/verify/flows. Full-page screenshots (and each page's first screen), console errors and
+# failed requests go to artifacts/verify/ (only when every page and flow passed); it fails on a console error, a 5xx, a
+# failed step or a page that never finished loading, after retrying what failed. One run at a time per machine: a second
+# waits for the first. `make verify PAGES="budget setup budget-edit"` runs only those pages (with the flows that start
+# on them) and flows.
 verify: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify $(PAGES)
 
@@ -136,9 +137,10 @@ api-contract-check:
 	$(PYTHON) tools/api_contract.py --check
 
 # Runs make verify, then makes screenshots/ (committed: the one directory of every page's and flow's full-page
-# screenshot at each width) match it (tools/sync_screenshots.py). A UI change commits the result, so what changed shows as image
-# diffs on the pull request. Demo data only: the repository is public. Nothing is copied unless every page and flow
-# passed; `make screenshots PAGES="budget budget-edit"` updates only those pages' and flows' images and leaves the rest.
+# screenshot at each width, and each page's first screen, which the README and the docs show) match it
+# (tools/sync_screenshots.py). A UI change commits the result, so what changed shows as image diffs on the pull request.
+# Demo data only: the repository is public. Nothing is copied unless every page and flow passed; `make screenshots
+# PAGES="budget budget-edit"` updates only those pages' and flows' images and leaves the rest.
 screenshots: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify $(PAGES)
 	$(PYTHON) tools/sync_screenshots.py

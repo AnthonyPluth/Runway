@@ -2,7 +2,8 @@
 
     python tools/sync_screenshots.py
 
-Every page and flow screenshot, at phone and desktop widths, lives there as `<name>-<width>.png`. A pull request that
+Every page and flow screenshot, at phone and desktop widths, lives there as `<name>-<width>.png`, and each page's first screen
+as `<page>-top-<width>.png` (what the README and the docs site show). A pull request that
 changes the UI re-runs `make screenshots` and commits the result, so the screenshots that changed show as image diffs on the
 pull request. It copies only from a run that passed whole (artifacts/verify/report.json's "ok"), and only the images that
 report lists; after a failed run it copies nothing and says why. After a full run, files in screenshots/ the run didn't
@@ -33,11 +34,12 @@ def _refuse(why: str) -> SystemExit:
 
 def owner(name: str, items: Sequence[str]) -> str | None:
     """The item (`page:<page>` or `flow:<flow>`, from verify.mjs's all_items) whose image `name` is, or None. A page's
-    images are `<page>-<width>.png`; a flow's start `flow-<flow>-`, and since one flow's name can start another's
-    (transactions-delete, transactions-delete-details), the longest flow name that fits is the one."""
+    images are `<page>-<width>.png` and its first screen `<page>-top-<width>.png` (verify.mjs's TOP); a flow's start
+    `flow-<flow>-`, and since one flow's name can start another's (transactions-delete, transactions-delete-details), the
+    longest flow name that fits is the one."""
     stem = name.removesuffix(".png")
     if not stem.startswith("flow-"):
-        page = f"page:{stem.rsplit('-', 1)[0]}"
+        page = f"page:{stem.rsplit('-', 1)[0].removesuffix('-top')}"
         return page if page in items else None
     flows = [i for i in items if i.startswith("flow:") and stem.startswith(f"flow-{i[5:]}-")]
     return max(flows, key=len) if flows else None

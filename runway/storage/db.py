@@ -3,7 +3,7 @@
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/storage/schema.py) up to date: migrations run
 when Runway starts (a new, empty database is made from schema.py in one step instead: create_fresh). The rest of Runway queries through the small Connection wrapper here, which works the same on
 either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
-models in runway/storage/models.py (docs/src/content/docs/contributing/orm.md), or through its ORM Session (`conn.orm`). SQL
+models in runway/storage/models.py (docs/src/content/docs/contributing/development.md, Queries), or through its ORM Session (`conn.orm`). SQL
 text isn't taken: a statement is compiled for whichever database the connection is on.
 """
 from __future__ import annotations
@@ -250,7 +250,7 @@ class Connection:
     """A database connection and its open transaction: one per request or sync, never shared between threads.
 
     `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see
-    docs/src/content/docs/contributing/orm.md). `orm` is an ORM Session on this same connection and transaction, for
+    docs/src/content/docs/contributing/development.md, Queries). `orm` is an ORM Session on this same connection and transaction, for
     loading and changing model objects. Either way, `commit()` commits everything so far (and is what code calls before
     a slow network request, so the write lock isn't held through it); `rollback()` undoes it. `sa` is the SQLAlchemy
     connection underneath.
@@ -287,7 +287,7 @@ class Connection:
     def execute(self, stmt, params=None) -> Result:
         """Run a SQLAlchemy statement (params: a dict, or a list of dicts for many rows)."""
         if isinstance(stmt, str):
-            raise TypeError("SQL text isn't supported; build a statement (docs/src/content/docs/contributing/orm.md)")
+            raise TypeError("SQL text isn't supported; build a statement (docs/src/content/docs/contributing/development.md, Queries)")
         if isinstance(params, list) and not params:   # no rows: nothing to do (not one row of defaults)
             return Result(rows=[])
         self._before()
@@ -358,7 +358,7 @@ def session(path: str | None = None):
 
 
 # ------------------------------------------------------------------------------------------------ SQL helpers
-# Portable pieces for SQLAlchemy statements (docs/src/content/docs/contributing/orm.md): each works the same on SQLite
+# Portable pieces for SQLAlchemy statements (docs/src/content/docs/contributing/development.md, Queries): each works the same on SQLite
 # and Postgres.
 
 def dialect_insert(conn: Connection, entity):

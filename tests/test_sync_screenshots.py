@@ -152,6 +152,7 @@ class Sync(unittest.TestCase):
                          "flow:transactions-delete-details")
         self.assertEqual(sync_screenshots.owner("flow-transactions-delete-review-desktop.png", self.ALL), "flow:transactions-delete")
         self.assertEqual(sync_screenshots.owner("setup-desktop.png", self.ALL), "page:setup")
+        self.assertEqual(sync_screenshots.owner("setup-top-phone.png", self.ALL), "page:setup")   # the page's first screen
         self.assertIsNone(sync_screenshots.owner("networth-phone.png", self.ALL))
         self.assertIsNone(sync_screenshots.owner("flow-gone-x-phone.png", self.ALL))
 

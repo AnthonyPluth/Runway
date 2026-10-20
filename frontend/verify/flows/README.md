@@ -1,6 +1,6 @@
 # Scripted flows
 
-Each `*.json` file here is a flow that `make verify` runs after visiting the pages, at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths (or the `viewports` it lists). There is no tablet width. A step that fails saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
+Each `*.json` file here is a flow that `make verify` runs after visiting the pages (each saved as a full page, `<page>-<width>.png`, and as its first screen, `<page>-top-<width>.png`), at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths (or the `viewports` it lists). There is no tablet width. A step that fails saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
 
 ```json
 {
