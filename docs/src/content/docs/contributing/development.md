@@ -76,16 +76,31 @@ Link to another page by its address, base included: `[Configuration](/Runway/ref
 
 ## Verifying a change in the real app
 
-Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` makes a temporary database, fills it with the demo data (made-up, never yours), starts Runway and drives it with Playwright: each page at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths, then the scripted flows. It saves a full-page screenshot of each page (`<page>-<width>.png`), the page's first screen (`<page>-top-<width>.png`, for the README and the docs) and each flow's steps, plus `report.json`, to `artifacts/verify/`, and exits non-zero on a console error, an uncaught error, a 5xx or a failed step.
+Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` makes a temporary database, fills it with the demo data (made-up, never yours), starts Runway and drives it with Playwright: each page at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths, then the scripted flows. It saves a full-page screenshot of each page (`<page>-<width>.png`), the page's first screen (`<page>-top-<width>.png`, for the README and the docs) and each flow's steps, plus `report.json`, to `artifacts/verify/`, and exits non-zero on a console error, an uncaught error, a 5xx, a failed step or a page that never finished loading.
 
 ```bash
 make verify                          # every page and flow
 make verify PAGES="budget setup"     # only these pages, and the flows that start on them
+make verify PAGES="budget-edit"      # only this flow (a flow's name is its file's), or device-cache
 ```
+
+Verify the pages you changed with `PAGES`: a full run takes several minutes, a page a minute or two.
 
 A flow is a small JSON file in `frontend/verify/flows/` (the format is in its `README.md`): open a route, click, fill, wait, screenshot. A pull request that changes the UI adds or edits one. A flow marked `signed_in` runs against a second demo server with sign-in on, with Chrome's virtual authenticator standing in for Face ID.
 
 It runs on Linux (the dev container and CI) and needs `libfaketime` (`sudo apt-get install -y libfaketime`): the demo data is built relative to today, so the server and the seed run with the clock frozen at the day in `runway/verify.py`, and the browser's clock is set to the same day. Each shot also stops endless animations, waits for the page to settle, scrolls to the top, moves the pointer off the page and leaves toasts out, so two runs on the same tree write identical images. There is no tablet width: look at the rail layout (768 to 1023 px) by resizing a browser.
+
+A shot is taken only once nothing on the page is still loading (no skeleton placeholder, nothing `aria-busy`, no transition still moving, the Investments page's live prices in) and is then taken a second time: it's kept when the two are byte for byte the same, retaken when not, and fails after four tries, so a half-loaded page is never kept. A flow's `expect_text` and `expect_focus` checks since its last action are made again after the shot. Transitions and the opening of dialogs, sheets and popovers take no time (a sheet that slid in was otherwise drawn a fraction of a pixel off, differently each run), and the app doesn't see the window resizing that Chromium does for a full-page capture (it switched a desktop page to the phone layout for a moment, closing a picker or collapsing a row). `make verify-twice` runs everything twice, on fresh data, and fails on any image that differs.
+
+**On a busy machine** (several agents on one container), `make verify` takes care of itself:
+
+- One run at a time per machine: a second one prints `another verify is running on this machine (…), waiting...` and starts when the first ends (an hour at most, then it exits 3; `RUNWAY_VERIFY_LOCK_WAIT` in seconds). The lock is `/tmp/runway-verify.lock` (`flock`), let go of when its process ends however it ends; a run started under `flock /tmp/runway-verify.lock …` counts it as its own.
+- It waits up to ten minutes for the load to drop below 1.5 per CPU before it starts, and stretches every wait's limit by the load (up to 8 times), since each wait ends as soon as what it waits for is there.
+- A page or flow that fails is run again, alone, on a fresh copy of the demo data, up to three times in all, more patiently each time. One that passed only on a retry is listed as `flaky` in the summary.
+- All or nothing: only a run where every page and flow passed puts its images in `artifacts/verify/`. A failed run leaves its `report.json`, each failed step's `-FAILED-` image and, under `unverified/`, what it did capture, for looking at, not committing.
+- The whole output also goes to its own log, `artifacts/verify-logs/verify-<time>-<pid>.log` (the path is printed first and last), so don't redirect it to a fixed file name another run could share.
+
+A failed run ends with a `FAIL:` line per page or flow, with its first problem (a step that timed out, `never settled` and what was still loading, a check that `no longer held after the screenshot`, a console error or a 5xx); the log has each attempt's full message.
 
 ![A page make verify saved: the Budget page at phone width, with demo data](../../../../../screenshots/budget-phone.png)
 
@@ -97,7 +112,7 @@ It runs on Linux (the dev container and CI) and needs `libfaketime` (`sudo apt-g
 make screenshots
 ```
 
-before its last push and commits what changed. It's a full `make verify` followed by `tools/sync_screenshots.py`, which copies the new images in, leaves identical files untouched and removes the ones whose page or flow is gone. The pull request's **Files changed** then shows each changed screenshot as an image diff, and the **Screenshot diff** workflow (`tools/screenshot_diff.py`) comments the changed pixels, with highlighted images in its artifact; `poetry run python tools/screenshot_diff.py --base origin/main --head HEAD --dry-run` prints the same locally.
+before its last push and commits what changed. It's `make verify` followed by `tools/sync_screenshots.py`, which copies the new images in, leaves identical files untouched and removes the ones whose page or flow is gone. It copies nothing unless the whole run passed; `make screenshots PAGES="budget budget-edit"` updates only those pages' and flows' images (removing those that a page or flow it ran no longer writes) and leaves every other page's and flow's alone. Never copy images into `screenshots/` by hand. The pull request's **Files changed** then shows each changed screenshot as an image diff, and the **Screenshot diff** workflow (`tools/screenshot_diff.py`) comments the changed pixels, with highlighted images in its artifact; `poetry run python tools/screenshot_diff.py --base origin/main --head HEAD --dry-run` prints the same locally.
 
 Commit every change in the directory, including pages you didn't mean to touch: an unexpected diff is a leak, or a nondeterminism bug to report. The only images a change ever commits are these (`make fleet-checks` fails any other raster image, except the icons and logos in `extension/icons/`, `runway/static/` and `docs/src/assets/logo.png`), so a before and after is shown through their diff, never a hand-made comparison. `make verify` captures the dark theme only; check the light theme yourself for a change that depends on it, and say so.
 

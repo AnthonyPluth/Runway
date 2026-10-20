@@ -24,7 +24,7 @@ SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg test-timings fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check \
-	fleet-checks api-contract api-contract-check screenshots pre-push setup
+	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check api-contract-check fleet-checks test-parallel frontend-check docs-build
@@ -108,10 +108,17 @@ docs-build: docs/node_modules
 	cd docs && $(NPM) run build
 
 # Runs the real app on made-up demo data and drives it with Playwright: each page at phone and desktop widths, plus
-# the scripted flows in frontend/verify/flows. Full-page screenshots (and each page's first screen), console errors and failed requests go to
-# artifacts/verify/; it fails on a console error or a 5xx. `make verify PAGES="budget setup"` visits only those pages.
+# the scripted flows in frontend/verify/flows. Full-page screenshots (and each page's first screen), console errors and
+# failed requests go to artifacts/verify/ (only when every page and flow passed); it fails on a console error, a 5xx, a
+# failed step or a page that never finished loading, after retrying what failed. One run at a time per machine: a second
+# waits for the first. `make verify PAGES="budget setup budget-edit"` runs only those pages (with the flows that start
+# on them) and flows.
 verify: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify $(PAGES)
+
+# make verify, run twice on fresh data: fails on any image that isn't byte for byte the same both times (nondeterminism).
+verify-twice: frontend/node_modules frontend-build
+	$(PYTHON) run.py verify --twice $(PAGES)
 
 # The feature map (docs/feature-map.json and its docs page): each route's handler, web app callers, tests and docs.
 # feature-map-check fails when it is out of date or a route has no test (tools/feature_map_allowlist.txt only shrinks).
@@ -129,11 +136,13 @@ api-contract:
 api-contract-check:
 	$(PYTHON) tools/api_contract.py --check
 
-# Runs a full make verify, then makes screenshots/ (committed: the one directory of every page's and flow's full-page
-# screenshot at each width, and each page's first screen, which the README and the docs show) match it (tools/sync_screenshots.py). A UI change commits the result, so what changed shows as image
-# diffs on the pull request. Demo data only: the repository is public.
+# Runs make verify, then makes screenshots/ (committed: the one directory of every page's and flow's full-page
+# screenshot at each width, and each page's first screen, which the README and the docs show) match it
+# (tools/sync_screenshots.py). A UI change commits the result, so what changed shows as image diffs on the pull request.
+# Demo data only: the repository is public. Nothing is copied unless every page and flow passed; `make screenshots
+# PAGES="budget budget-edit"` updates only those pages' and flows' images and leaves the rest.
 screenshots: frontend/node_modules frontend-build
-	$(PYTHON) run.py verify
+	$(PYTHON) run.py verify $(PAGES)
 	$(PYTHON) tools/sync_screenshots.py
 
 # Checks that replaced instructions (tools/fleet_checks.py): one Alembic head, a test for each new migration, the
