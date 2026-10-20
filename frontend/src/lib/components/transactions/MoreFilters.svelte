@@ -4,8 +4,9 @@
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { KINDS, type Kind } from "$lib/filters.svelte";
   import { cn } from "$lib/utils";
-  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
 
+  // The icon is an ellipsis, not the sliders of the phone's Filters button beside it, so the two read as different controls.
   // The filters used less often, behind one button so the row stays one line: the kind (money in, out, transfers) and
   // the amount (either way). The kind applies when picked; an amount when you leave its field or press Enter.
   let { kind, min, max, onchange }: { kind: Kind; min: string; max: string; onchange: (f: { kind?: Kind; min?: string; max?: string }) => void } = $props();
@@ -24,7 +25,7 @@
 <Popover.Root bind:open>
   <Popover.Trigger class={cn("inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm max-sm:flex-[1_1_40%] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 phone:min-h-11",
     count ? "bg-primary/15 text-primary" : "dark:bg-input")} aria-label={count ? `More filters (${count} on)` : "More filters"}>
-    <SlidersHorizontal class="size-4 opacity-70" aria-hidden="true" /><span class="whitespace-nowrap">More{#if count}<span class="ml-1.5 tabular-nums">{count}</span>{/if}</span>
+    <Ellipsis class="size-4 opacity-70" aria-hidden="true" /><span class="whitespace-nowrap">More{#if count}<span class="ml-1.5 tabular-nums">{count}</span>{/if}</span>
   </Popover.Trigger>
   <Popover.Content class="flex w-[22rem] flex-col gap-4">
     <div class="flex flex-col gap-1.5">
