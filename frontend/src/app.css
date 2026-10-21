@@ -28,6 +28,10 @@
 /* The To review bar's height (ReviewCard): it sticks just above the tab bar on a phone, and the Transactions page leaves this much
    room at its end while the bar is shown, so the last row isn't under it. */
 :root { --review-bar-h: 4rem; }
+/* Where the page starts on a phone: under the status bar (the safe-area inset) and 1rem clear of it, plus up to 0.5rem more
+   once there is a status bar at all, so the first line (Overview's date) isn't tight against the clock. The extra is
+   min(inset, 0.5rem): nothing where the inset is 0 (a browser tab, a desktop window), the whole 0.5rem on an iPhone. */
+:root { --page-top: calc(env(safe-area-inset-top) + 1rem + min(env(safe-area-inset-top), 0.5rem)); }
 
 /* shadcn-svelte's default theme (neutral). Runway uses the dark one (index.html sets class="dark"). */
 :root {
