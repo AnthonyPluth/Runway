@@ -167,6 +167,30 @@ class BackupTests(unittest.TestCase):
         self.assertFalse([f for f in os.listdir(self.dir) if f.startswith("runway-before-migration")])
         src.close(); dst.close()
 
+    def test_an_older_backup_doesnt_bring_back_an_extension_key_past_its_90_days(self):
+        # Made at 0047, when the browser extension's key ended 90 days after it was made: restored after 0048, a key
+        # that had passed them stays gone (it had stopped working), as on an update; nothing else in the settings changes.
+        from datetime import timedelta
+        from alembic import command
+        with db.engine(self.a).begin() as c:
+            command.downgrade(db.alembic_config(c), "0047")
+        src = db.connect(self.a)
+        old = (datetime.now() - timedelta(days=91)).isoformat(timespec="seconds")
+        for key, value in ((sk.RETAIL_TOKEN_HASH, "0" * 64), (sk.RETAIL_TOKEN_CREATED, old),
+                           (sk.RETAIL_TOKEN_OWNER, '{"sub": "u1", "email": null}'), (sk.RETAIL_TOKEN_USED, old),
+                           ("retail_last_amazon", "2026-01-01")):
+            db.set_setting(src, key, value)
+        src.commit()
+        data = backup.load(backup.dump(src))
+        self.assertEqual(data["revision"], "0047")
+        dst = db.connect(self.b)
+        backup.restore(dst, data)
+        dst.commit()
+        self.assertEqual(db.get_settings(dst, [sk.RETAIL_TOKEN_HASH, sk.RETAIL_TOKEN_CREATED, sk.RETAIL_TOKEN_OWNER, sk.RETAIL_TOKEN_USED]),
+                         dict.fromkeys([sk.RETAIL_TOKEN_HASH, sk.RETAIL_TOKEN_CREATED, sk.RETAIL_TOKEN_OWNER, sk.RETAIL_TOKEN_USED]))
+        self.assertEqual(db.get_setting(dst, "retail_last_amazon"), "2026-01-01")
+        src.close(); dst.close()
+
     def test_a_backup_from_before_backups_recorded_their_revision(self):
         # Restored as it is (the migrations it may predate don't run), then the ones since run, with a warning.
         src = self.fill(self.a)
