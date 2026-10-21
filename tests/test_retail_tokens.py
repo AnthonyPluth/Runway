@@ -6,7 +6,7 @@ import os
 import threading
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from unittest import mock
 
 from sqlalchemy import select
@@ -29,7 +29,7 @@ class TokenTests(Base):
         self.assertEqual(retail.token_check(self.c, None), "unknown")
         status = retail.status(self.c)
         self.assertIsNotNone(status["token_used"])                                  # noted on a working call
-        self.assertEqual(status["token_expires"][:10], (date.today() + timedelta(days=retail.TOKEN_DAYS)).isoformat())
+        self.assertNotIn("token_expires", status)                                   # it doesn't expire: nothing to promise
         self.assertIsNone(status["token_problem"])
         # taken off the sign-in list, the key they made stops working (like their sessions)
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
@@ -37,20 +37,30 @@ class TokenTests(Base):
             self.assertEqual(retail.status(self.c)["token_problem"], "owner_gone")
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
             self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
-        # and it expires
-        db.set_setting(self.c, "retail_token_created", (datetime.now() - timedelta(days=retail.TOKEN_DAYS)).isoformat(timespec="seconds"))
-        self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "expired")
-        for reason in ("expired", "owner_gone", "unknown"):
-            self.assertIn("Settings", retail.REFUSALS[reason])
+        # it doesn't expire with age: years on, it still works while its maker can sign in
+        db.set_setting(self.c, "retail_token_created", (datetime.now() - timedelta(days=1000)).isoformat(timespec="seconds"))
+        self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
+            self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "owner_gone")   # and still ends with them
+        self.assertEqual(retail.token_check(self.c, "Bearer rwx_other"), "unknown")
+        self.assertEqual(set(retail.REFUSALS), {"owner_gone", "unknown"})            # no reason a key could expire
+        for reason in retail.REFUSALS.values():
+            self.assertIn("Settings → Connections", reason)
+            self.assertNotIn("expire", reason)
         retail.remove_token(self.c)
         self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "unknown")
-        self.assertEqual(retail.status(self.c)["token_expires"], None)
 
-    def test_a_key_made_without_sign_in_only_expires(self):
+    def test_a_key_made_without_sign_in_works_until_replaced_or_removed(self):
         token = retail.new_token(self.c, {"name": None, "email": None, "local": True})
         self.assertIsNone(db.get_setting(self.c, "retail_token_owner"))
+        db.set_setting(self.c, "retail_token_created", "2000-01-01T00:00:00")
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
             self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        again = retail.new_token(self.c, None)
+        self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "unknown")
+        self.assertIsNone(retail.token_check(self.c, f"Bearer {again}"))
+        retail.remove_token(self.c)
+        self.assertEqual(retail.token_check(self.c, f"Bearer {again}"), "unknown")
 
 
 class TokenDetailTests(Base):
@@ -65,8 +75,7 @@ class TokenDetailTests(Base):
         self.assertRegex(made, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")   # local time, to the second, no zone
         self.assertLess(abs((datetime.fromisoformat(made) - datetime.now()).total_seconds()), 5)
         self.assertIsNone(db.get_setting(self.c, "retail_token_used"))
-        self.assertEqual(retail.token_expires(self.c), (datetime.fromisoformat(made) + timedelta(days=90)).isoformat())
-        self.assertEqual(retail.TOKEN_DAYS, 90)
+        self.assertFalse(hasattr(retail, "TOKEN_DAYS") or hasattr(retail, "token_expires"))   # no age limit left
         # a new key replaces the old one, and starts unused
         self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
         again = retail.new_token(self.c, {"sub": "u2"})
@@ -110,23 +119,21 @@ class TokenDetailTests(Base):
         self.assertIsNone(db.get_setting(self.c, "retail_token_used"))
 
     def test_when_it_ends(self):
-        retail.new_token(self.c, {"sub": "u1", "email": "a@example.com"})
-        db.set_setting(self.c, "retail_token_created", "2026-01-01T10:00:00")
-        self.assertEqual(retail.token_expires(self.c), "2026-04-01T10:00:00")
-        self.assertIsNone(retail.token_problem(self.c, datetime(2026, 4, 1, 9, 59, 59)))
-        self.assertEqual(retail.token_problem(self.c, datetime(2026, 4, 1, 10, 0, 0)), "expired")
-        with mock.patch.object(oidc, "access_lapsed", return_value=True) as lapsed:
-            self.assertEqual(retail.token_problem(self.c, datetime(2026, 4, 2)), "expired")   # expired first
-            self.assertEqual(retail.token_problem(self.c, datetime(2026, 1, 2)), "owner_gone")
-        lapsed.assert_called_once_with(self.c, "u1", "a@example.com")
-        for owner in ("not json", "[]", '"u1"', "null"):   # an owner that can't be read: the key only expires
+        token = retail.new_token(self.c, {"sub": "u1", "email": "a@example.com"})
+        for made in ("2026-01-01T10:00:00", "2020-01-01T00:00:00", "garbled", None):   # however old: only its maker decides
+            db.set_setting(self.c, "retail_token_created", made)
+            with mock.patch.object(oidc, "access_lapsed", return_value=False):
+                self.assertIsNone(retail.token_problem(self.c), made)
+                self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"), made)
+            with mock.patch.object(oidc, "access_lapsed", return_value=True) as lapsed:
+                self.assertEqual(retail.token_problem(self.c), "owner_gone", made)
+                self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "owner_gone", made)
+            lapsed.assert_called_with(self.c, "u1", "a@example.com")
+        for owner in ("not json", "[]", '"u1"', "null"):   # an owner that can't be read: replaced or removed, as without one
             db.set_setting(self.c, "retail_token_owner", owner)
             with mock.patch.object(oidc, "access_lapsed", return_value=True) as lapsed:
-                self.assertIsNone(retail.token_problem(self.c, datetime(2026, 1, 2)), owner)
+                self.assertIsNone(retail.token_problem(self.c), owner)
             lapsed.assert_not_called()
-        db.set_setting(self.c, "retail_token_created", "garbled")   # a date it can't read: no expiry
-        self.assertIsNone(retail.token_expires(self.c))
-        self.assertIsNone(retail.token_problem(self.c, datetime(2099, 1, 1)))
 
     def test_removed(self):
         retail.new_token(self.c, {"sub": "u1"})
@@ -136,8 +143,7 @@ class TokenDetailTests(Base):
         for key in ("retail_token_hash", "retail_token_created", "retail_token_owner", "retail_token_used"):
             self.assertIsNone(db.get_setting(self.c, key), key)
         st = retail.status(self.c)
-        self.assertEqual((st["token"], st["token_created"], st["token_used"], st["token_expires"], st["token_problem"]),
-                         (False, None, None, None, None))
+        self.assertEqual((st["token"], st["token_created"], st["token_used"], st["token_problem"]), (False, None, None, None))
         db.set_setting(self.c, "retail_token_created", "2020-01-01T00:00:00")   # without a key there's no problem to show
         self.assertIsNone(retail.status(self.c)["token_problem"])
 
@@ -152,6 +158,9 @@ class ExtensionApiTests(ServerCase):
         code, r = self.req("POST", "/api/retail/token", headers={"X-Runway": "1"})
         self.assertEqual(code, 200)
         key = r["token"]
+        code, st = self.req("GET", "/api/retail")
+        self.assertEqual((code, st["token"], st["token_problem"]), (200, True, None))
+        self.assertNotIn("token_expires", st)   # a key doesn't expire, so Settings promises no date
         ext = {"Authorization": f"Bearer {key}", "Origin": "chrome-extension://abcdef"}
         self.assertEqual(self.req("POST", "/api/ext/ping", {}, {"Origin": "chrome-extension://abcdef"})[0], 401)
         self.assertEqual(self.req("POST", "/api/ext/ping", {}, {"Authorization": "Bearer nope"})[0], 401)

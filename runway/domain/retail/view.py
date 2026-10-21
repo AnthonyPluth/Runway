@@ -11,7 +11,7 @@ from ...storage import settings_keys as sk
 from ...storage.models import Account, RetailCharge, RetailItem, RetailOrder, Transaction
 from .match import unmatched_count
 from .store import NAMES, RETAILERS, RetailError
-from .token import token_expires, token_problem
+from .token import token_problem
 
 
 def _item_count():
@@ -64,7 +64,7 @@ def order_detail(conn, oid: str) -> dict:
 
 def status(conn) -> dict:
     out: dict[str, Any] = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
-           "token_used": db.get_setting(conn, sk.RETAIL_TOKEN_USED), "token_expires": token_expires(conn),
+           "token_used": db.get_setting(conn, sk.RETAIL_TOKEN_USED),
            "token_problem": token_problem(conn) if db.get_setting(conn, sk.RETAIL_TOKEN_HASH) else None,
            "ai": (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1", "stores": {}}
     c, o = RetailCharge, RetailOrder

@@ -2,6 +2,7 @@
 import json
 import os
 import unittest
+from unittest import mock
 
 import sqlalchemy as sa
 from alembic.autogenerate import compare_metadata
@@ -9,6 +10,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import func, insert, select
 
+from runway import oidc
 from runway.storage import db, schema
 from runway.storage.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore,
                                    ChurnTask, ChurnWish, DeletedAccount, DeletedCharge, InvAccount, LoanTerms, ManualStatement,
@@ -550,6 +552,48 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:   # and back down
             command.downgrade(db.alembic_config(c), "0045")
             self.assertNotIn("deleted_charges", sa.inspect(c).get_table_names())
+
+    def test_0048_removes_an_extension_key_already_past_its_90_days_and_keeps_the_rest(self):
+        import hashlib
+        from datetime import datetime, timedelta
+        from alembic import command
+        from runway.domain import retail
+        keys = ("retail_token_hash", "retail_token_created", "retail_token_owner", "retail_token_used")
+        token = "rwx_made-up-key-for-the-test"
+        now = datetime.now()
+        at = lambda days, seconds=0: (now - timedelta(days=days, seconds=seconds)).isoformat(timespec="seconds")
+        db.init(self.path)
+        for made, kept in ((at(90, 5), False),     # had passed its 90 days: it had stopped working, and stays stopped
+                           (at(400), False),
+                           (at(89, -5), True),     # still inside them: it carries on, and no longer expires
+                           (at(0), True),
+                           ("garbled", True),      # a date the older version couldn't read never expired
+                           ("", True),
+                           (None, True)):
+            with self.subTest(made=made):
+                with db.engine(self.path).begin() as c:
+                    command.downgrade(db.alembic_config(c), "0047")
+                    c.execute(sa.delete(Setting).where(Setting.key.in_([*keys, "retail_last_amazon"])))
+                    c.execute(insert(Setting), [{"key": "retail_token_hash", "value": hashlib.sha256(token.encode()).hexdigest()},
+                                                {"key": "retail_token_created", "value": made},
+                                                {"key": "retail_token_owner", "value": '{"sub": "u1", "email": "a@example.com"}'},
+                                                {"key": "retail_token_used", "value": at(1)},
+                                                {"key": "retail_last_amazon", "value": "2026-01-01"}])
+                with db.engine(self.path).begin() as c:
+                    command.upgrade(db.alembic_config(c), "head")
+                with db.session(self.path) as conn:
+                    got = db.get_settings(conn, keys)
+                    self.assertEqual(all(v is None for v in got.values()), not kept, got)
+                    if kept:
+                        self.assertEqual(got["retail_token_created"], made)   # left exactly as it was
+                        self.assertEqual(got["retail_token_used"], at(1))
+                    self.assertEqual(db.get_setting(conn, "retail_last_amazon"), "2026-01-01")   # nothing else changes
+                    with mock.patch.object(oidc, "access_lapsed", return_value=False):
+                        self.assertEqual(retail.token_check(conn, f"Bearer {token}"), None if kept else "unknown")
+        self.assertEqual(drift(self.path), [])
+        with db.engine(self.path).begin() as c:   # and back down, nothing changed
+            command.downgrade(db.alembic_config(c), "0047")
+            self.assertEqual(c.execute(select(func.count()).select_from(Setting).where(Setting.key.in_(keys))).scalar(), 4)
 
     def test_0047_plaid_refresh_switch_from_the_accounts_already_stored(self):
         from alembic import command
