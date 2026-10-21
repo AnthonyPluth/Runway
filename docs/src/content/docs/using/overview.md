@@ -13,7 +13,7 @@ Overview is the forecast: your chosen account's balance, day by day, for the nex
 
 ## The forecast
 
-- **The chart** draws the forecast account's projected balance, with the lowest day marked and the end balance written out. Hover over it (drag sideways on a phone) for a day's balance and what happens that day. From the keyboard, Tab to the chart, then the arrow keys step a day, Home and End go to the first and last day, and Escape puts the readout away. **Lowest balance** under the chart jumps to the lowest day.
+- **The chart** draws the forecast account's projected balance, with the end balance written out. Hover over it (drag sideways on a phone) for a day's balance and what happens that day. From the keyboard, Tab to the chart, then the arrow keys step a day, Home and End go to the first and last day, **L** goes to the lowest day, and Escape puts the readout away. **Lowest point** beside the headline names that day.
 - **The headline** says it in words: an **On track** or **Heads up** chip, the balance, and "Checking stays above $2,084 for the next 120 days". **Next money in** and **Lowest point** sit beside it, and **Forecast details** opens what the forecast counts.
 - **Length:** 1M, 2M, 3M or 6M under the chart. Click the account name above the balance to choose the forecast account and the default length. An account can also be chosen under Settings → Accounts (**Use for the forecast**); it's marked **Forecast** there.
 - **Coming up** lists each day's items under its date, with the projected balance after them. The same list is **Upcoming · projected** at the top of Transactions, in italics so projected rows aren't mistaken for posted ones.
