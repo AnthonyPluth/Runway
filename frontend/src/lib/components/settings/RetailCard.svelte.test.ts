@@ -28,3 +28,23 @@ describe("the browser extension's install steps", () => {
     expect(screen.getByRole("button", { name: "Make a new key" })).toBeInTheDocument();
   });
 });
+
+describe("the browser extension's key", () => {
+  it("says it doesn't expire, and when it ends", async () => {
+    vi.mocked(api).mockResolvedValue({ ...retail(true), token_problem: null } as never);
+    render(RetailCard);
+    const line = (await screen.findByText(/^Key made/)).textContent!;
+    expect(line).toContain("not used yet.");
+    expect(line).toContain("It doesn't expire: it works until you make a new one or remove it, or until whoever made it can no longer sign in.");
+    expect(line).not.toMatch(/works until \w+ \d/);   // no date it runs out
+    expect(screen.queryByText(/expired/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("asks for a new one when its maker can no longer sign in", async () => {
+    vi.mocked(api).mockResolvedValue({ ...retail(true), token_problem: "owner_gone" } as never);
+    render(RetailCard);
+    expect(await screen.findByText("The person who made this key can no longer sign in: make a new one.")).toBeInTheDocument();
+    expect(screen.getByText("New key needed")).toBeInTheDocument();
+  });
+});

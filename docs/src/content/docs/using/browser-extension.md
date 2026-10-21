@@ -29,8 +29,11 @@ It sends pages only to the Runway address you set, and never sees your passwords
 Chrome, Edge, Brave, Arc or any other Chromium browser:
 
 1. In Runway, open **Settings → Connections** (the card that makes the key) and click **Make a key**. Copy it.
-   A key works for 90 days (Settings shows when it runs out, and when the extension last used it), then you make a
-   new one; it also stops working if the person who made it can no longer sign in to Runway.
+   A key doesn't expire: it works until you make a new one (which replaces it) or remove it on that card, or until
+   the person who made it can no longer sign in to Runway. Settings shows when the extension last used it. Treat it
+   like a password: if it may have got out, make a new one. Keys used to last 90 days; one that had already passed
+   its 90 days when you updated Runway was removed then, so make a new one if the extension says Runway doesn't know
+   its key.
 2. Click **Download the extension** on that same card and unzip it. Go to `chrome://extensions`, turn on
    **Developer mode**, click **Load unpacked** and choose the unzipped `runway-orders` folder (or this `extension`
    folder, if you have the repository).

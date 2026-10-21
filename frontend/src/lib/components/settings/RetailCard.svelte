@@ -79,9 +79,10 @@
     {@const r = data}
     {#if r.token}
       <div class={`${helpCls} flex flex-wrap items-center gap-x-2`}>
-        <span>Key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
+        <span>Key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}.
+          It doesn't expire: it works until you make a new one or remove it, or until whoever made it can no longer sign in.</span>
         {#if r.token_problem}
-          <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
+          <span class={warnText}>The person who made this key can no longer sign in: make a new one.</span>
         {/if}
         <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
         <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>

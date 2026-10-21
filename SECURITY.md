@@ -16,7 +16,9 @@ Only the latest release gets security fixes. Update with `docker compose pull &&
 ## Running Runway safely
 
 See [Putting Runway on the internet](https://anthonypluth.github.io/Runway/start/docker/#putting-runway-on-the-internet) in the docs: HTTPS in front, sign-in
-limited to you, a `RUNWAY_SECRET_KEY`, and private backups.
+limited to you, a `RUNWAY_SECRET_KEY`, and private backups. The browser extension's key doesn't expire: it works until
+it's replaced or removed under Settings → Connections, or the person who made it can no longer sign in, so make a new
+one if it may have got out.
 
 ## One household, not one account per person
 
