@@ -573,7 +573,7 @@ class MigrationTests(unittest.TestCase):
             with self.subTest(made=made):
                 with db.engine(self.path).begin() as c:
                     command.downgrade(db.alembic_config(c), "0047")
-                    c.exec_driver_sql("DELETE FROM settings WHERE key LIKE 'retail_token_%' OR key = 'retail_last_amazon'")
+                    c.execute(sa.delete(Setting).where(Setting.key.in_([*keys, "retail_last_amazon"])))
                     c.execute(insert(Setting), [{"key": "retail_token_hash", "value": hashlib.sha256(token.encode()).hexdigest()},
                                                 {"key": "retail_token_created", "value": made},
                                                 {"key": "retail_token_owner", "value": '{"sub": "u1", "email": "a@example.com"}'},
@@ -593,7 +593,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(drift(self.path), [])
         with db.engine(self.path).begin() as c:   # and back down, nothing changed
             command.downgrade(db.alembic_config(c), "0047")
-            self.assertEqual(c.exec_driver_sql("SELECT count(*) FROM settings WHERE key LIKE 'retail_token_%'").scalar(), 4)
+            self.assertEqual(c.execute(select(func.count()).select_from(Setting).where(Setting.key.in_(keys))).scalar(), 4)
 
     def test_0047_plaid_refresh_switch_from_the_accounts_already_stored(self):
         from alembic import command
