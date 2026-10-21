@@ -175,11 +175,10 @@ describe("ForecastChart from the keyboard", () => {
     expect(slider()).toHaveAttribute("aria-valuenow", "0");
   });
 
-  it("puts the readout on the forecast's lowest day with Lowest balance, and the focus on the chart", async () => {
+  it("puts the readout on the forecast's lowest day with L, and steps on from there", async () => {
     const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, -120, -120], low: { date: DATES[1], balance: -120 } }) } });
-    await fireEvent.click(screen.getByRole("button", { name: "Lowest balance" }));
+    await press("l");
     expect(slider()).toHaveAttribute("aria-valuenow", "1");
-    expect(slider()).toHaveFocus();
     expect(readout(container)).toHaveTextContent("Sat, Oct 17");
     expect(readout(container)).toHaveTextContent("-$120.00");
     await press("ArrowRight");
@@ -188,8 +187,24 @@ describe("ForecastChart from the keyboard", () => {
 
   it("finds the lowest day itself when the forecast's low isn't on the chart", async () => {
     render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low: { date: "2027-01-01", balance: 0 } }) } });
-    await fireEvent.click(screen.getByRole("button", { name: "Lowest balance" }));
+    await press("L");
     expect(slider()).toHaveAttribute("aria-valuenow", "1");
+  });
+
+  it("goes to the forecast's own low with L, not the series minimum, when they differ", async () => {
+    render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low: { date: DATES[2], balance: 1300 } }) } });
+    await press("l");
+    expect(slider()).toHaveAttribute("aria-valuenow", "2");
+  });
+
+  it("leaves L with a modifier to the browser, and has no Lowest balance button", async () => {
+    render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low: { date: DATES[1], balance: 900 } }) } });
+    await press("l", { ctrlKey: true });
+    await press("l", { metaKey: true });
+    expect(slider()).toHaveAttribute("aria-valuenow", "0");
+    expect(slider()).toHaveAttribute("aria-keyshortcuts", "L");
+    expect(screen.queryByRole("button", { name: "Lowest balance" })).toBeNull();
+    expect(screen.queryByText("Lowest balance")).toBeNull();
   });
 
   it("puts the readout away when the focus leaves", async () => {
@@ -244,24 +259,11 @@ describe("ForecastChart from the keyboard", () => {
 });
 
 describe("ForecastChart, compact", () => {
-  it("marks the lowest day and writes the last day's balance at the line's end", () => {
+  it("writes the last day's balance at the line's end, with no mark on the lowest day", () => {
     const { container } = render(ForecastChart, { props: { fc: fc({ total: [4000, 1300, 2500] }), compact: true } });
     expect(container.querySelector("svg")).toHaveAttribute("viewBox", expect.stringMatching(/ 120$/));
-    expect(container.querySelectorAll("[data-low]")).toHaveLength(1);
+    expect(container.querySelector("[data-low]")).toBeNull();
     expect(container.querySelector("[data-end]")).toHaveTextContent("$2,500");
-  });
-
-  it("marks the forecast's own low, not the series minimum, when they differ", () => {
-    const mark = (low: Overview["low"]) => {
-      const r = render(ForecastChart, { props: { fc: fc({ total: [4000, 900, 1300], low }), compact: true } });
-      const c = r.container.querySelector("[data-low]")!;
-      const at = { cx: Number(c.getAttribute("cx")), cy: Number(c.getAttribute("cy")) };
-      r.unmount();
-      return at;
-    };
-    const ownLow = mark({ date: DATES[2], balance: 1300 }), seriesMin = mark({ date: DATES[1], balance: 900 });
-    expect(ownLow.cx).toBeGreaterThan(seriesMin.cx);
-    expect(ownLow.cy).toBeLessThan(seriesMin.cy);
   });
 
   it("keeps the value axis on the compact chart", () => {
@@ -269,9 +271,8 @@ describe("ForecastChart, compact", () => {
     expect(container.querySelectorAll("line[stroke='var(--border)']").length).toBeGreaterThan(0);
   });
 
-  it("leaves the marks off the full chart", () => {
+  it("leaves the end label off the full chart", () => {
     const { container } = render(ForecastChart, { props: { fc: fc() } });
-    expect(container.querySelector("[data-low]")).toBeNull();
     expect(container.querySelector("[data-end]")).toBeNull();
   });
 });

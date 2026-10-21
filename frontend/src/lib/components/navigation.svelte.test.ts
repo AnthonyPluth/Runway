@@ -274,6 +274,14 @@ describe("MobileNav", () => {
     expect(readFileSync(resolve(__dirname, "../../app.css"), "utf8")).toMatch(/\.dark \{[^}]*--nav-inactive: #b9bec7;/s);
   });
 
+  it("starts the page below the status bar with a small gap, and adds nothing where there is no inset", () => {
+    const css = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
+    // 1rem under the inset, plus min(inset, 0.5rem): 1rem with no inset, 1.5rem under an iPhone's.
+    expect(css).toMatch(/--page-top:\s*calc\(env\(safe-area-inset-top\) \+ 1rem \+ min\(env\(safe-area-inset-top\), 0\.5rem\)\)/);
+    const shell = readFileSync(resolve(__dirname, "../../App.svelte"), "utf8");
+    expect(shell).toContain("pt-[var(--page-top)]");
+  });
+
   it("is the height app.css calls --tabbar-h, which the page padding and the toasts are measured from", () => {
     const css = readFileSync(resolve(__dirname, "../../app.css"), "utf8");
     // 1px border twice + 56px of tabs + 12px lifted + the inset: 70px with no inset, 104px with an iPhone's 34px.

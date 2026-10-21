@@ -3,13 +3,12 @@
   import YAxis from "../YAxis.svelte";
   import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
   import type { ForecastEvent, Overview } from "$lib/types";
-  import { Button } from "$lib/components/ui/button";
 
   // The projected balance, day by day: what each day brings (hover or drag for a day's readout). The chart is one
   // focus stop, like a slider: the arrow keys step the readout a day (a tenth of the chart with Shift), Home and End go
-  // to the first and last day, Escape puts it away, and "Lowest balance" puts it on the lowest day.
-  // `compact` is the Overview card's version: about 120px tall, the value axis kept, the lowest day marked and the last
-  // day's balance written at the line's end.
+  // to the first and last day, Escape puts it away, and L puts it on the lowest day.
+  // `compact` is the Overview card's version: about 120px tall, the value axis kept and the last day's balance written
+  // at the line's end.
   let { fc, compact = false }: { fc: Overview; compact?: boolean } = $props();
 
   let width = $state(0);
@@ -19,7 +18,7 @@
   const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const series = $derived(fc.total);
   const n = $derived(series.length);
-  // The first day of the lowest balance (the forecast's own low), for the compact chart's mark and "Lowest balance".
+  // The first day of the lowest balance (the forecast's own low), for the L key.
   const lowAt = $derived.by(() => {
     const at = fc.low ? fc.dates.indexOf(fc.low.date) : -1;
     return at >= 0 && at < n ? at : n ? series.indexOf(Math.min(...series)) : 0;
@@ -93,7 +92,8 @@
     const to = e.key === "ArrowLeft" || e.key === "ArrowDown" ? from - (e.shiftKey ? big : 1)
       : e.key === "ArrowRight" || e.key === "ArrowUp" ? from + (e.shiftKey ? big : 1)
       : e.key === "PageDown" ? from - big : e.key === "PageUp" ? from + big
-      : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+      : e.key === "Home" ? 0 : e.key === "End" ? n - 1
+      : e.key.toLowerCase() === "l" && !e.ctrlKey && !e.metaKey && !e.altKey ? lowAt : null;
     if (e.key === "Escape" && hover != null) { e.preventDefault(); pointed = null; return; }
     if (to == null) return;
     e.preventDefault();
@@ -106,13 +106,6 @@
     try { keyboard = svgEl!.matches(":focus-visible"); } catch { /* no :focus-visible (an old browser, jsdom): count it as the keyboard */ }
     if (keyboard) pointed = 0;
   }
-  // "Lowest balance" puts the readout on the lowest day and the focus on the chart, to step on from there.
-  function showLow(e: MouseEvent) {
-    pinned = (e as PointerEvent).pointerType === "touch";
-    pointed = lowAt;
-    svgEl?.focus();
-  }
-
   // What a day holds, the same for the readout and for screen readers: its events, then what the budgets take out that
   // day (in the balance, but not an event of its own).
   function dayRows(i: number) {
@@ -152,7 +145,7 @@
   {:else}
     <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full rounded-md text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-ring"
       role="slider" tabindex="0" aria-label={summary} aria-valuemin={0} aria-valuemax={n - 1} aria-valuenow={at}
-      aria-valuetext={spoken(at)} onkeydown={key} onfocus={focused} onblur={() => (pointed = null)} data-testid="forecast-chart">
+      aria-valuetext={spoken(at)} aria-keyshortcuts="L" onkeydown={key} onfocus={focused} onblur={() => (pointed = null)} data-testid="forecast-chart">
       <defs>
         <linearGradient id="fc-area" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
@@ -169,7 +162,6 @@
       <path d={`M${path(series)} L${x(v1)},${y(y0)} L${x(v0)},${y(y0)} Z`} fill="url(#fc-area)" />
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
       {#if compact}
-        <circle cx={x(lowAt)} cy={y(series[lowAt])} r="4" fill="var(--card)" stroke="var(--chart-1)" stroke-width="2" data-low />
         <text x={x(v1)} y={Math.max(11, y(series[v1]) - 8)} text-anchor="end" fill="var(--foreground)" font-weight="600" data-end>{fmt0(series[v1])}</text>
       {/if}
       {#if hover != null}
@@ -180,9 +172,6 @@
         onmousemove={(e) => mouse(e.clientX)} onmouseleave={() => (pointed = null)}
         use:touched use:sideways={move} />
     </svg>
-    <div class="flex justify-end">
-      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-muted-foreground" onclick={showLow} data-testid="forecast-low">Lowest balance</Button>
-    </div>
     {#if hover != null}
       <!-- A row's name wraps when it's long; its amount always stays whole on one line. The same rows whether the pointer
            or the keyboard chose the day. -->
