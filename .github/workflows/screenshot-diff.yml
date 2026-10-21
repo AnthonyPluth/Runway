@@ -2,10 +2,10 @@ name: Screenshot diff
 
 # Shows which pixels of the committed screenshots (screenshots/) a pull request changed (tools/screenshot_diff.py):
 #   - report.html, one self-contained page (no network, every image inline) with, for each changed screenshot, the tabs
-#     Diff, Reference, Actual and Slider. It is uploaded as an artifact that is not zipped (`archive: false`), and the
-#     sticky comment starts with its link;
-#   - the sticky comment, which also keeps a table (file, change, changed pixels, share of the image, boxes);
-#   - a small zip with the highlight PNGs and summary.json, for pasting an image somewhere.
+#     Reference, Actual and Slider and boxes around what changed. It is uploaded as an artifact that is not zipped
+#     (`archive: false`);
+#   - the sticky comment: the link to that page, one line of counts and a note, no list of screenshots;
+#   - summary.json (the facts for each file), uploaded the same way, for tools that want them.
 # Informational: it never fails a pull request for a diff, and the merge gate ignores it (.github/scripts/merge-gate.sh).
 # Nothing is committed and no image is hosted anywhere: no service, no branch, no Pages. The artifact's link
 # (`artifact-url`) works only for someone logged in to GitHub with access to the repository, so the comment says so.
@@ -88,16 +88,14 @@ jobs:
           archive: false
           retention-days: 14
           if-no-files-found: warn
-      # The raw highlight images and summary.json, zipped, apart from the report.
+      # summary.json, the facts for each file, apart from the report. Nothing reads it today; it is kept for tools that might.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         if: steps.look.outputs.changed == 'true'
         with:
-          name: screenshot-diff
-          path: |
-            ${{ runner.temp }}/screenshot-diff/*.png
-            ${{ runner.temp }}/screenshot-diff/summary.json
+          path: ${{ runner.temp }}/screenshot-diff/summary.json
+          archive: false
           retention-days: 14
-          if-no-files-found: ignore
+          if-no-files-found: warn
       # The comment's link to the report is only known now, so the comment is rendered again from summary.json.
       - name: Put the report's link in the comment
         if: steps.look.outputs.changed == 'true' && steps.report.outputs.artifact-url != ''
