@@ -104,25 +104,36 @@ class Comparing(unittest.TestCase):
         self.assertEqual(mask.histogram()[255], 1)   # the pixel below the old image is not a change
 
 
-class Highlighting(unittest.TestCase):
-    def test_changed_pixels_are_painted_grown_and_boxed_over_a_faded_baseline(self):
-        old = image((100, 80), (0, 0, 0, 255))
-        new = image((100, 80), (0, 0, 0, 255), p_50_40=(255, 255, 255, 255))
-        mask = sd.changed_mask(old, new)
-        out = sd.highlight(old, mask, sd.regions(mask), new.size)
-        self.assertEqual(out.size, (100, 80))
-        self.assertEqual(out.getpixel((50, 40)), sd.CHANGED)
-        self.assertEqual(out.getpixel((52, 42)), sd.CHANGED)      # grown by two pixels
-        self.assertEqual(out.getpixel((53, 40)), sd.OUTLINE)      # the box is drawn around it (4 pixels out, 2 wide)
-        self.assertEqual(out.getpixel((10, 10)), (178, 178, 178))  # black at 30%, over white
-        self.assertEqual(out.getpixel((1, 1)), (178, 178, 178))
+class OverlayBoxes(unittest.TestCase):
+    """What the Actual image is boxed with."""
 
-    def test_a_bigger_new_image_gets_a_bigger_canvas_with_the_extra_area_marked(self):
-        old, new = image((100, 80)), image((100, 120), p_5_5=(255, 0, 0, 255))
-        mask = sd.changed_mask(old, new)
-        out = sd.highlight(old, mask, sd.regions(mask), new.size)
-        self.assertEqual(out.size, (100, 120))
-        self.assertEqual(out.getpixel((50, 110)), sd.BEYOND)
+    def file(self, old, new, boxes=()):
+        return {"error": None, "old_size": old, "new_size": new, "boxes": list(boxes)}
+
+    def test_a_same_size_image_gets_the_boxes_of_its_changes_only(self):
+        f = self.file((100, 80), (100, 80), [(20, 30, 21, 31)])
+        self.assertEqual(sd.overlay_boxes(f), [("change", (20, 30, 21, 31), "")])
+
+    def test_rows_only_the_actual_image_has_are_a_labelled_added_box(self):
+        f = self.file((100, 80), (100, 100), [(1, 1, 2, 2)])
+        self.assertEqual(sd.overlay_boxes(f), [("change", (1, 1, 2, 2), ""),
+                                               ("added", (0, 80, 100, 100), "20 rows only in the actual image")])
+
+    def test_rows_only_the_reference_has_are_a_labelled_removed_box_on_the_actual_canvas(self):
+        f = self.file((100, 80), (100, 50))
+        self.assertEqual(sd.overlay_boxes(f), [("removed", (0, 50, 100, 80), "30 rows only in the reference")])
+
+    def test_columns_only_one_image_has_are_boxed_as_tall_as_the_shorter_one(self):
+        wider = sd.overlay_boxes(self.file((100, 80), (130, 60)))
+        self.assertEqual(wider, [("removed", (0, 60, 100, 80), "20 rows only in the reference"),
+                                 ("added", (100, 0, 130, 60), "30 columns only in the actual image")])
+        narrower = sd.overlay_boxes(self.file((100, 80), (90, 80)))
+        self.assertEqual(narrower, [("removed", (90, 0, 100, 80), "10 columns only in the reference")])
+
+    def test_a_file_that_could_not_be_compared_or_has_one_image_has_no_extra_boxes(self):
+        self.assertEqual(sd.overlay_boxes(self.file((100, 80), None)), [])
+        self.assertEqual(sd.overlay_boxes(self.file(None, (100, 80))), [])
+        self.assertEqual(sd.overlay_boxes({"error": "x", "old_size": None, "new_size": None, "boxes": []}), [])
 
 
 class GitRepository(unittest.TestCase):
@@ -178,41 +189,34 @@ class GitRepository(unittest.TestCase):
 
     def test_added_deleted_modified_and_resized_files(self):
         base, head = self.branch()
-        out = self.repo / "out"
-        report = sd.diff(base, head, out, repo=self.repo)
+        report = sd.diff(base, head, repo=self.repo)
         by_path = {f["path"]: f for f in report["files"]}
         self.assertEqual(sorted(by_path), ["screenshots/edited-phone.png", "screenshots/gone-phone.png",
                                            "screenshots/new-phone.png", "screenshots/taller-phone.png"])
         edited = by_path["screenshots/edited-phone.png"]
         self.assertEqual((edited["status"], edited["changed_pixels"], edited["compared_pixels"]), ("modified", 1, 8000))
         self.assertEqual(edited["boxes"], [(20, 30, 21, 31)])
-        self.assertEqual(edited["highlight"], "edited-phone.diff.png")
         taller = by_path["screenshots/taller-phone.png"]
         self.assertEqual((taller["old_size"], taller["new_size"], taller["changed_pixels"]), ((100, 80), (100, 100), 1))
         self.assertEqual((by_path["screenshots/gone-phone.png"]["status"], by_path["screenshots/gone-phone.png"]["old_size"]),
                          ("deleted", (100, 80)))
         self.assertEqual((by_path["screenshots/new-phone.png"]["status"], by_path["screenshots/new-phone.png"]["new_size"]),
                          ("added", (50, 60)))
-        self.assertEqual(sorted(p.name for p in out.iterdir()), ["edited-phone.diff.png", "taller-phone.diff.png"])
 
-    def test_a_png_with_the_same_pixels_but_other_bytes_is_listed_without_a_highlight(self):
+    def test_a_png_with_the_same_pixels_but_other_bytes_has_no_changed_pixels(self):
         self.git("checkout", "-q", "-b", "pr")
         image().save(self.repo / "screenshots/edited-phone.png", compress_level=0)
         head = self.commit("re-encoded")
-        out = self.repo / "out"
-        report = sd.diff("main", head, out, repo=self.repo)
-        (entry,) = report["files"]
-        self.assertEqual((entry["status"], entry["changed_pixels"], entry["highlight"]), ("modified", 0, None))
-        self.assertEqual(list(out.iterdir()), [])
-        self.assertIn("same pixels (re-encoded)", sd.render(report))
+        (entry,) = sd.diff("main", head, repo=self.repo)["files"]
+        self.assertEqual((entry["status"], entry["changed_pixels"], entry["boxes"]), ("modified", 0, []))
 
     def test_a_file_that_is_not_an_image_is_reported_not_fatal(self):
         self.git("checkout", "-q", "-b", "pr")
         (self.repo / "screenshots/edited-phone.png").write_bytes(b"not a png")
         head = self.commit("broken")
-        (entry,) = sd.diff("main", head, None, repo=self.repo)["files"]
+        (entry,) = sd.diff("main", head, repo=self.repo)["files"]
         self.assertIn("UnidentifiedImageError", entry["error"])
-        self.assertIn("could not be compared", sd.render({"files": [entry]}))
+        self.assertEqual(sd.counts([entry]), "1 could not be compared")
 
     def test_a_ref_that_does_not_exist_is_an_error(self):
         with self.assertRaises(SystemExit):
@@ -226,16 +230,15 @@ class GitRepository(unittest.TestCase):
             code = sd.main(["--base", "main", "--head", head, "--out", str(out), "--dry-run", "--repo", str(self.repo)])
         self.assertEqual(code, 0)
         self.assertTrue(shown.getvalue().startswith(sd.MARKER))
-        self.assertIn("edited-phone.png", shown.getvalue())
+        self.assertIn("2 modified, 1 added, 1 deleted", shown.getvalue())
         self.assertFalse(out.exists())
 
-    def test_the_command_writes_the_images_and_both_summaries(self):
+    def test_the_command_writes_the_comment_the_facts_and_the_report(self):
         _, head = self.branch()
         out = self.repo / "out"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(sd.main(["--base", "main", "--head", head, "--out", str(out), "--run-url", "https://x.invalid/r/1", "--repo", str(self.repo)]), 0)
-        self.assertEqual(sorted(p.name for p in out.iterdir()),
-                         ["edited-phone.diff.png", "report.html", "summary.json", "summary.md", "taller-phone.diff.png"])
+        self.assertEqual(sorted(p.name for p in out.iterdir()), ["report.html", "summary.json", "summary.md"])
         self.assertTrue((out / "summary.md").read_text().startswith(sd.MARKER))
         self.assertIn("https://x.invalid/r/1#artifacts", (out / "summary.md").read_text())
         self.assertTrue(json.loads((out / "summary.json").read_text())["changed"])
@@ -244,60 +247,59 @@ class GitRepository(unittest.TestCase):
 def entry(name, changed_pixels=10, status="modified", **extra):
     base = {"path": f"screenshots/{name}", "status": status, "old_size": [440, 956], "new_size": [440, 956],
             "changed_pixels": changed_pixels, "compared_pixels": 440 * 956, "percent": 100 * changed_pixels / (440 * 956),
-            "boxes": [(1, 2, 11, 12)] if changed_pixels else [], "highlight": name.replace(".png", ".diff.png"), "error": None}
+            "boxes": [(1, 2, 11, 12)] if changed_pixels else [], "error": None}
     return base | extra
 
 
 class Summary(unittest.TestCase):
+    URL = "https://x.invalid/artifacts/7"
+
     def test_no_changes_says_so_and_keeps_the_marker(self):
         text = sd.render({"files": []})
         self.assertTrue(text.startswith(sd.MARKER))
         self.assertIn("No screenshot changes", text)
+        self.assertNotIn("View the visual diff", sd.render({"files": []}, "https://x.invalid/runs/9", self.URL))
 
-    def test_the_table_lists_the_biggest_change_first_with_its_figures(self):
-        text = sd.render({"files": [entry("a-phone.png", 5), entry("b-phone.png", 4400)]}, "https://x.invalid/runs/9")
-        self.assertLess(text.index("b-phone.png"), text.index("a-phone.png"))
-        self.assertIn("| `b-phone.png` | modified | 4,400 | 1.05% | `(1, 2)` 10×10 |", text)
-        self.assertIn("[this run](https://x.invalid/runs/9#artifacts)", text)
-        self.assertIn("leak or a nondeterminism bug", text)
+    def test_the_comment_is_the_link_one_line_of_counts_and_the_note(self):
+        files = [entry(f"page-{i}-phone.png", 5 + i) for i in range(23)]
+        files += [entry(f"new-{i}-phone.png", 0, "added", old_size=None, boxes=[]) for i in range(2)]
+        files += [entry("old-phone.png", 0, "deleted", new_size=None, boxes=[])]
+        text = sd.render({"files": files}, "https://x.invalid/runs/9", self.URL)
+        self.assertEqual(text.splitlines(), [
+            sd.MARKER, "### Screenshot changes", "",
+            f"**View the visual diff: [report.html]({self.URL})**", "",
+            "23 modified, 2 added, 1 deleted.", "",
+            "_Reference, Actual and Slider for each image, with a box around what changed. The link needs you to be logged "
+            "in to GitHub, and the file is kept 14 days._", "",
+            f"_{sd.REMINDER}_"])
 
-    def test_a_tiny_share_is_not_shown_as_zero(self):
-        self.assertEqual(sd._percent(0.0002), "<0.01%")
-        self.assertEqual(sd._percent(12.3456), "12.35%")
+    def test_no_screenshot_is_listed_in_the_comment(self):
+        files = [entry("a-phone.png", 5), entry("b-phone.png", 4400, new_size=[440, 1000]),
+                 entry("new-phone.png", 0, "added", old_size=None, boxes=[]), entry("old-phone.png", 0, "deleted", new_size=None, boxes=[])]
+        text = sd.render({"files": files}, "https://x.invalid/runs/9", self.URL)
+        for needle in ("a-phone", "b-phone", "new-phone", "old-phone", "|", "4,400", "resized"):
+            self.assertNotIn(needle, text)
+        self.assertIn("2 modified, 1 added, 1 deleted.", text)       # a resized one is a modified one
 
-    def test_a_resized_screenshot_shows_both_sizes(self):
-        text = sd.render({"files": [entry("a.png", 7, new_size=[440, 1000])]})
-        self.assertIn("resized 440×956 → 440×1000", text)
+    def test_the_comment_stays_short_for_thousands_of_files(self):
+        files = [entry(f"flow-{i:05d}-with-a-long-name-desktop.png", 50 + i) for i in range(5000)]
+        self.assertLess(len(sd.render({"files": files}, "https://x.invalid/runs/9", self.URL)), 1000)
 
-    def test_added_and_deleted_files_are_listed_with_their_size_only(self):
-        files = [entry("new-phone.png", 0, "added", old_size=None, new_size=[440, 900], boxes=[], highlight=None),
-                 entry("old-phone.png", 0, "deleted", new_size=None, boxes=[], highlight=None)]
-        text = sd.render({"files": files})
-        self.assertIn("**Added**\n\n- `new-phone.png` (440×900)", text)
-        self.assertIn("**Deleted**\n\n- `old-phone.png` (440×956)", text)
-        self.assertNotIn("| `new-phone.png`", text)
-        self.assertNotIn("artifact", text)   # nothing was highlighted: no pointer to images that aren't there
+    def test_counts_leave_out_what_is_zero_and_name_what_could_not_be_compared(self):
+        self.assertEqual(sd.counts([entry("a.png"), entry("b.png")]), "2 modified")
+        self.assertEqual(sd.counts([entry("n.png", 0, "added", old_size=None)]), "1 added")
+        self.assertEqual(sd.counts([entry("o.png", 0, "deleted", new_size=None)]), "1 deleted")
+        self.assertEqual(sd.counts([entry("a.png"), entry("x.png", 0, error="OSError: x")]), "1 modified, 1 could not be compared")
 
-    def test_a_long_list_is_cut_to_the_cap_with_the_biggest_diffs_kept(self):
-        files = [entry(f"page-{i:04d}-phone.png", 100_000 - i) for i in range(2000)]
-        text = sd.render({"files": files}, max_chars=5000)
-        self.assertLessEqual(len(text), 5000)
-        self.assertIn("page-0000-phone.png", text)
-        self.assertNotIn("page-1999-phone.png", text)
-        left = int(text.split("…and ")[1].split(" more modified")[0])
-        self.assertEqual(text.count("| `page-") + left, 2000)
+    def test_without_the_report_link_the_comment_points_at_the_run_artifacts(self):
+        text = sd.render({"files": [entry("a-phone.png", 5)]}, "https://x.invalid/runs/9")
+        self.assertNotIn("View the visual diff", text)
+        self.assertIn("1 modified.", text)
+        self.assertIn("`report.html`, is in the artifacts of [this run](https://x.invalid/runs/9#artifacts)", text)
+        self.assertIn("logged in to GitHub", text)
+        self.assertIn("kept 14 days", text)
         self.assertIn(sd.REMINDER, text)
-
-    def test_the_default_cap_is_well_under_githubs_limit_even_for_thousands_of_files(self):
-        files = [entry(f"flow-{i:05d}-with-a-long-name-desktop.png", 50 + i, boxes=[(0, 0, 9, 9)] * 3) for i in range(5000)]
-        files += [entry(f"new-{i:05d}-phone.png", 0, "added", boxes=[], highlight=None) for i in range(3000)]
-        files += [entry(f"old-{i:05d}-phone.png", 0, "deleted", boxes=[], highlight=None) for i in range(3000)]
-        text = sd.render({"files": files})
-        self.assertLessEqual(len(text), sd.MAX_COMMENT_CHARS)
-        self.assertLess(sd.MAX_COMMENT_CHARS, 65_536 // 2 + 1)
-        self.assertIn("**Added**", text)
-        self.assertIn("**Deleted**", text)
-        self.assertRegex(text, r"…and \d+ more")
+        self.assertIn("artifacts of this workflow run", sd.render({"files": [entry("a-phone.png", 5)]}))
 
 
 def noise(size, seed=1):
@@ -313,6 +315,21 @@ def cards(page):
 
 def tabs(card):
     return re.findall(r'role="tab"[^>]*>([^<]+)<', card)
+
+
+def selected(card):
+    """The tab a card opens on."""
+    return re.search(r'role="tab" id="t-\d+-(\w+)"[^>]*aria-selected="true"', card).group(1)
+
+
+def pane(card, kind):
+    """One tab's panel."""
+    return re.search(rf'<div role="tabpanel" class="pane pane-{kind}".*?(?=<div role="tabpanel"|</article>|$)', card, re.S).group(0)
+
+
+def boxes(markup):
+    """The boxes in some markup, as (kind, label)."""
+    return re.findall(r'<div class="box (\w+)"[^>]*>(?:<b>([^<]*)</b>)?</div>', markup)
 
 
 class Report(GitRepository):
@@ -341,18 +358,92 @@ class Report(GitRepository):
         self.assertEqual(sorted(by), ["screenshots/edited-phone.png", "screenshots/gone-phone.png",
                                       "screenshots/new-phone.png", "screenshots/taller-phone.png"])
         self.assertIn("4 images changed (1 added, 1 deleted, 1 modified, 1 resized)", page)
-        self.assertEqual(tabs(by["screenshots/edited-phone.png"]), ["Diff", "Reference", "Actual", "Slider"])
-        self.assertEqual(tabs(by["screenshots/taller-phone.png"]), ["Diff", "Reference", "Actual", "Slider"])
+        self.assertEqual(tabs(by["screenshots/edited-phone.png"]), ["Reference", "Actual", "Slider"])
+        self.assertEqual(tabs(by["screenshots/taller-phone.png"]), ["Reference", "Actual", "Slider"])
         self.assertEqual(tabs(by["screenshots/new-phone.png"]), ["Actual"])          # added: nothing to compare with
         self.assertEqual(tabs(by["screenshots/gone-phone.png"]), ["Reference"])      # deleted: nothing it became
         self.assertIn("Screenshot does not match the stored reference. 1 pixels (ratio 0.0001) differ.",
                       by["screenshots/edited-phone.png"])
         self.assertIn("New screenshot: there is no stored reference.", by["screenshots/new-phone.png"])
         self.assertIn("Screenshot removed", by["screenshots/gone-phone.png"])
-        self.assertIn('role="tablist"', page)
-        self.assertIn('role="tabpanel"', page)
-        self.assertIn('aria-selected="true"', page)
         self.assertRegex(page, r'<img src="data:image/webp;base64,[^"]+" alt="Actual screenshot screenshots/new-phone.png')
+
+    def test_there_is_no_diff_tab_and_nothing_left_of_it(self):
+        base, head = self.branch()
+        _, page, _ = self.report(base, head)
+        self.assertNotIn(">Diff<", page)
+        self.assertNotIn("pane-diff", page)
+        self.assertNotIn("magenta", page)
+        self.assertNotIn("striped", page)
+        self.assertNotIn("Changed pixels of", page)      # the alt text of the highlight image
+
+    def test_each_card_opens_on_the_tab_that_suits_its_status(self):
+        base, head = self.branch()
+        by = cards(self.report(base, head)[1])
+        self.assertEqual(selected(by["screenshots/edited-phone.png"]), "slider")
+        self.assertEqual(selected(by["screenshots/taller-phone.png"]), "slider")
+        self.assertEqual(selected(by["screenshots/new-phone.png"]), "act")
+        self.assertEqual(selected(by["screenshots/gone-phone.png"]), "ref")
+        card = by["screenshots/edited-phone.png"]
+        self.assertEqual(re.findall(r'role="tab"[^>]*tabindex="(-?\d)"', card), ["-1", "-1", "0"])   # one tab stop: the open one
+
+    def test_tabs_are_an_accessible_tablist_the_arrow_keys_move_along(self):
+        base, head = self.branch()
+        _, page, _ = self.report(base, head)
+        card = cards(page)["screenshots/edited-phone.png"]
+        self.assertRegex(card, r'<div class="tabs" role="tablist" aria-label="Views of screenshots/edited-phone.png">')
+        for kind in ("ref", "act", "slider"):
+            self.assertRegex(card, rf'role="tab" id="t-\d+-{kind}" aria-controls="p-\d+-{kind}"')
+            self.assertRegex(card, rf'role="tabpanel" class="pane pane-{kind}" id="p-\d+-{kind}" aria-labelledby="t-\d+-{kind}"')
+        for needle in ('"ArrowRight"', '"ArrowLeft"', '"Home"', '"End"', "aria-selected", ".focus()", "e.preventDefault()"):
+            self.assertIn(needle, sd.REPORT_JS)
+        self.assertIn('role","slider"', sd.REPORT_JS)         # the slider's handle: keyboard-operable, with its value announced
+        self.assertIn("aria-valuenow", sd.REPORT_JS)
+
+    def test_the_actual_pane_has_the_change_boxes_and_the_reference_pane_has_none(self):
+        base, head = self.branch()
+        card = cards(self.report(base, head)[1])["screenshots/edited-phone.png"]
+        (box,) = re.findall(r'<div class="box change"[^>]*>', pane(card, "act"))
+        self.assertIn('title="Changed region at (20, 30), 1×1"', box)
+        self.assertIn('aria-hidden="true"', box)
+        self.assertEqual(boxes(pane(card, "act")), [("change", "")])
+        self.assertEqual(boxes(pane(card, "ref")), [])
+        # the Slider is built by the script from the Actual windows (its right side) and the Reference ones (its left side)
+        self.assertIn("slider(refWins[i],actWins[i])", sd.REPORT_JS)
+        self.assertIn("base=actWin.cloneNode(true)", sd.REPORT_JS)
+        self.assertEqual(boxes(pane(card, "slider")), [])           # only hosts: the windows come from the other two panes
+
+    def test_a_box_is_placed_by_percentages_of_its_band(self):
+        self.git("checkout", "-q", "-b", "pr")
+        self.save("screenshots/edited-phone.png", image(p_20_30=(255, 0, 0, 255)))
+        head = self.commit("one pixel")
+        card = cards(self.report("main", head)[1])["screenshots/edited-phone.png"]
+        self.assertIn('style="left:20.0000%;top:37.5000%;width:1.0000%;height:1.2500%"', pane(card, "act"))   # (20, 30) of 100×80
+
+    def test_the_toggle_is_a_checkbox_on_by_default_that_hides_the_boxes_and_is_remembered_nowhere(self):
+        base, head = self.branch()
+        by = cards(self.report(base, head)[1])
+        for name in ("edited", "taller"):
+            self.assertIn('<label class="boxtoggle"><input type="checkbox" checked> Show change boxes</label>',
+                          by[f"screenshots/{name}-phone.png"])
+        for name in ("new", "gone"):                    # nothing is boxed on an added or a deleted image
+            self.assertNotIn("Show change boxes", by[f"screenshots/{name}-phone.png"])
+            self.assertEqual(boxes(by[f"screenshots/{name}-phone.png"]), [])
+        self.assertIn(".hide-boxes .box{display:none}", sd.REPORT_CSS)
+        self.assertIn('root.classList.toggle("hide-boxes",!c.checked)', sd.REPORT_JS)
+        self.assertNotIn("localStorage", sd.REPORT_JS)
+        self.assertNotIn("sessionStorage", sd.REPORT_JS)
+
+    def test_the_all_rows_view_gets_the_boxes_from_a_template(self):
+        base = self.on_main("tall", **{"tall-desktop.png": image((120, 3000))})
+        self.git("checkout", "-q", "-b", "change")
+        self.save("screenshots/tall-desktop.png", image((120, 3000), p_5_400=(255, 255, 255, 255)))
+        head = self.commit("one change")
+        card = cards(self.report(base, head)[1])["screenshots/tall-desktop.png"]
+        (template,) = re.findall(r"<template>(.*?)</template>", card)
+        self.assertEqual(boxes(template), [("change", "")])
+        self.assertIn('top:13.3333%', template)                       # y 400 of 3,000 rows
+        self.assertIn('t.content.cloneNode(true)', sd.REPORT_JS)
 
     def test_the_page_is_self_contained(self):
         base, head = self.branch()
@@ -364,7 +455,7 @@ class Report(GitRepository):
         self.assertEqual(len(re.findall(r"<script", page)), 1)      # the one inline script
         self.assertEqual(len(re.findall(r"<style", page)), 1)
 
-    def test_a_resized_image_that_got_shorter_is_marked_on_the_diff_and_shows_reference_and_actual(self):
+    def test_a_resized_image_that_got_shorter_boxes_the_rows_only_the_reference_has(self):
         self.git("checkout", "-q", "-b", "pr")
         self.save("screenshots/taller-phone.png", image((100, 50), p_1_1=(255, 0, 0, 255)))     # 100×80 -> 100×50
         head = self.commit("shorter")
@@ -374,33 +465,38 @@ class Report(GitRepository):
         self.assertIn("Screenshot size changed from 100×80 to 100×50. 1 pixels", card)
         self.assertIn("Dimensions differ: reference 100×80, actual 100×50.", card)
         self.assertIn("The reference has 30 more rows than the actual image.", card)
-        self.assertEqual(tabs(card), ["Diff", "Reference", "Actual", "Slider"])
-        old, new = image((100, 80)), image((100, 50), p_1_1=(255, 0, 0, 255))
-        diff = sd.report_diff(old, new, sd.changed_mask(old, new), [])
-        self.assertEqual(diff.size, (100, 80))
-        stripes = {diff.getpixel((x, y)) for x in range(100) for y in range(50, 80)}
-        self.assertIn(sd.OLD_ONLY, stripes)             # the rows only the reference has are striped amber
-        self.assertNotIn(sd.NEW_ONLY, stripes)
+        self.assertEqual(tabs(card), ["Reference", "Actual", "Slider"])
+        self.assertEqual(boxes(pane(card, "act")), [("change", ""), ("removed", "30 rows only in the reference")])
+        self.assertEqual(boxes(pane(card, "ref")), [])
+        self.assertIn("top:62.5000%;width:100.0000%;height:37.5000%", pane(card, "act"))       # rows 50 to 80 of the 80-row canvas
 
-    def test_a_resized_image_that_got_taller_stripes_the_new_rows_green(self):
+    def test_a_resized_image_that_got_taller_boxes_the_new_rows(self):
         base, head = self.branch()
-        _, page, _ = self.report(base, head)
-        card = cards(page)["screenshots/taller-phone.png"]
+        card = cards(self.report(base, head)[1])["screenshots/taller-phone.png"]
         self.assertIn("The actual image has 20 more rows than the reference.", card)
-        old, new = image((100, 80)), image((100, 100))
-        diff = sd.report_diff(old, new, sd.changed_mask(old, new), [])
-        self.assertIn(sd.NEW_ONLY, {diff.getpixel((x, y)) for x in range(100) for y in range(80, 100)})
-        self.assertNotIn(sd.OLD_ONLY, {diff.getpixel((x, y)) for x in range(100) for y in range(100)})
+        self.assertEqual(boxes(pane(card, "act")), [("change", ""), ("added", "20 rows only in the actual image")])
+        self.assertIn("top:80.0000%;width:100.0000%;height:20.0000%", pane(card, "act"))
+
+    def test_a_band_shows_only_the_boxes_that_reach_into_it(self):
+        base = self.on_main("tall", **{"tall-desktop.png": image((120, 3000))})
+        self.git("checkout", "-q", "-b", "change")
+        self.save("screenshots/tall-desktop.png", image((120, 3000), p_5_400=(255, 255, 255, 255), p_6_2500=(255, 255, 255, 255)))
+        head = self.commit("two changes")
+        card = cards(self.report(base, head, full_budget=0)[1])["screenshots/tall-desktop.png"]
+        windows = re.findall(r'<div class="win".*?</div></div>', pane(card, "act"), re.S)
+        self.assertEqual([len(boxes(w)) for w in windows], [1, 1])
+        self.assertNotIn("<template>", card)                       # no whole image: nothing for the "all rows" view
 
     def test_the_comment_starts_with_the_link_when_the_report_has_a_url(self):
         base, head = self.branch()
         data = sd.diff(base, head, repo=self.repo)
         plain = sd.render(data, "https://x.invalid/runs/9")
         linked = sd.render(data, "https://x.invalid/runs/9", report_url="https://x.invalid/artifacts/7")
-        self.assertEqual(linked.splitlines()[:5], [sd.MARKER, "### Screenshot changes", "",
-                                                   "**View the visual diff: [report.html](https://x.invalid/artifacts/7)**", ""])
+        self.assertEqual(linked.splitlines()[:6], [sd.MARKER, "### Screenshot changes", "",
+                                                   "**View the visual diff: [report.html](https://x.invalid/artifacts/7)**", "",
+                                                   "2 modified, 1 added, 1 deleted."])
         self.assertIn("logged in to GitHub", linked)
-        self.assertIn("| `edited-phone.png` | modified | 1 |", linked)       # the table stays below
+        self.assertNotIn("edited-phone", linked)
         self.assertNotIn("View the visual diff", plain)
 
     def test_only_the_changed_bands_are_embedded_with_their_labels(self):
@@ -415,12 +511,12 @@ class Report(GitRepository):
         self.assertIn("250 unchanged rows (y 0–250) omitted from this report", card)
         self.assertIn("1,799 unchanged rows (y 551–2,350) omitted from this report", card)
         self.assertNotIn('class="allbtn"', card)                                # whole images did not fit the budget given
-        self.assertEqual(len(re.findall(r"data:image/webp", card)), 2 * 3)      # two bands, three images each
+        self.assertEqual(len(re.findall(r"data:image/webp", card)), 2 * 2)      # two bands, two images each (reference, actual)
         _, whole, _ = self.report(base, head)
         card = cards(whole)["screenshots/tall-desktop.png"]
         self.assertIn('class="allbtn"', card)
         self.assertIn("Show all 3,000 rows", card)
-        self.assertEqual(len(re.findall(r"data:image/webp", card)), 3)          # whole images: one per picture, windows onto them
+        self.assertEqual(len(re.findall(r"data:image/webp", card)), 2)          # whole images: one per picture, windows onto them
         self.assertIn("(y 551–2,350) hidden: use “Show all rows”", card)
 
     def test_a_smaller_budget_cuts_context_first_then_scales_down_and_says_so(self):
@@ -474,6 +570,20 @@ class Report(GitRepository):
         page, notes = sd.build_report(data, self.repo, budget=budget // 3, full_budget=0)   # less room still: it keeps degrading
         self.assertLessEqual(len(page.encode()), budget // 3)
         self.assertTrue(any("cut from 150" in n for n in notes))
+
+    def test_the_markup_stays_within_the_share_the_budget_keeps_for_it(self):
+        # build_report reserves 60,000 bytes and 6,500 a file for what is not an image: two views of each image, three bands
+        names = [f"page{n:02d}-desktop.png" for n in range(12)]
+        base = self.on_main("pages", **{name: image((200, 2400)) for name in names})
+        self.git("checkout", "-q", "-b", "change")
+        for name in names:
+            self.save(f"screenshots/{name}", image((200, 2400), p_5_100=(255, 0, 0, 255), p_5_1200=(255, 0, 0, 255), p_5_2300=(255, 0, 0, 255)))
+        head = self.commit("three changes each")
+        with unittest.mock.patch.object(sd, "LEVELS", [(20, 1.0)]):
+            page, _ = sd.build_report(sd.diff(base, head, repo=self.repo), self.repo, full_budget=0)
+        markup = len(re.sub(r"data:image/[a-z]+;base64,[A-Za-z0-9+/=]+", "", page).encode())
+        self.assertLessEqual(markup, 60_000 + 6_500 * len(names))
+        self.assertEqual(len(re.findall(r"data:image/webp", page)), len(names) * 3 * 2)    # three bands, reference and actual
 
     def test_a_budget_nothing_fits_in_leaves_images_out_instead_of_failing(self):
         self.git("checkout", "-q", "-b", "change")
@@ -558,7 +668,17 @@ class Workflow(unittest.TestCase):
         text = (ROOT / ".github/workflows/screenshot-diff.yml").read_text()
         self.assertIn(sd.MARKER, text)
         self.assertIn(f"retention-days: {sd.RETENTION_DAYS}", text)
-        self.assertIn(f"name: {sd.ARTIFACT}", text)
+
+    def test_the_workflow_uploads_the_report_and_summary_json_unzipped_and_no_zip_of_images(self):
+        text = (ROOT / ".github/workflows/screenshot-diff.yml").read_text()
+        uploads = text.split("actions/upload-artifact@")[1:]
+        self.assertEqual(len(uploads), 2)
+        for upload, name in zip(uploads, ("report.html", "summary.json"), strict=True):
+            step = upload.split("\n      - ")[0]
+            self.assertIn(f"screenshot-diff/{name}", step)
+            self.assertIn("archive: false", step)
+            self.assertIn(f"retention-days: {sd.RETENTION_DAYS}", step)
+        self.assertNotIn(".png", text.replace("screenshots/", ""))
 
 
 if __name__ == "__main__":

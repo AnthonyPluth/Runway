@@ -10,16 +10,15 @@ any of the four channels counts, with no tolerance, because the demo data's cloc
 same image twice. Per file it counts the changed pixels and finds up to three boxes around them. With --out it writes, into
 that directory:
 
-- `<name>.diff.png` for each modified screenshot: the old image faded to 30% and gray, every changed pixel in magenta (grown
-  by two pixels so one pixel can be seen) and the boxes outlined in blue. If the size changed, the canvas is the larger of
-  the two, and light blue is where the old image does not reach;
-- `summary.md`, the comment's body (it starts with MARKER, which is how the workflow finds its comment again);
-- `summary.json`, the same facts for a program;
+- `summary.md`, the comment's body (it starts with MARKER, which is how the workflow finds its comment again): a link to the
+  report, one line of counts and a note, no list of files;
+- `summary.json`, the facts for each file for a program;
 - `report.html`, one self-contained page (no network, every image a data URI, vanilla JS and CSS inline) that shows each
-  changed screenshot with the tabs Diff, Reference, Actual and Slider, the way Vitest's browser UI does. Tall images are
-  embedded as the bands of rows around the changes (REPORT_CONTEXT rows of context, unchanged rows left out and labelled)
-  and, when the size allows, whole. The file is kept under REPORT_BUDGET: past it the context shrinks, then the images are
-  scaled down, and the page says so.
+  changed screenshot with the tabs Reference, Actual and Slider, the way Vitest's browser UI does, and thin boxes around
+  what changed over the Actual image and the Slider's right side (a checkbox hides them). Tall images are embedded as the
+  bands of rows around the changes (REPORT_CONTEXT rows of context, unchanged rows left out and labelled) and, when the size
+  allows, whole. The file is kept under REPORT_BUDGET: past it the context shrinks, then the images are scaled down, and the
+  page says so.
 
 `--from-json summary.json --report-url URL` renders the comment again from an earlier run's summary.json, with the link to
 the report at its top (the link is only known once the report has been uploaded).
@@ -39,22 +38,15 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parent.parent
 DIRECTORY = "screenshots/"
 MARKER = "<!-- screenshot-diff -->"
-ARTIFACT = "screenshot-diff"
 RETENTION_DAYS = 14
 MAX_BOXES = 3
 CELL = 16                  # regions are found on a grid of CELL-pixel squares
 JOIN = 2                   # cells this close (in cells) belong to one region
-GROW = 2                   # pixels a changed pixel is grown by in the highlight
-FADE = 0.3                 # how much of the old image shows through in the highlight
-CHANGED = (255, 0, 102)    # changed pixels in the highlight
-OUTLINE = (0, 102, 255)    # the boxes
-BEYOND = (214, 228, 255)   # where the old image doesn't reach, when the size changed
-MAX_COMMENT_CHARS = 30_000   # GitHub's limit is 65,536
 REPORT = "report.html"
 REPORT_BUDGET = 25 * 1024 * 1024      # the most bytes of report.html
 FULL_BUDGET = 12 * 1024 * 1024        # whole images are embedded only while the file stays under this
@@ -64,8 +56,6 @@ MAX_BANDS = 40                        # per image: more are merged, nearest firs
 WEBP_MAX = 16383                      # WebP's limit on one side
 # (context rows, scale) tried in turn until the report fits: first less context, then smaller images.
 LEVELS = [(REPORT_CONTEXT, 1.0), (60, 1.0), (20, 1.0), (0, 1.0), (0, 0.75), (0, 0.5), (0, 0.35), (0, 0.25)]
-NEW_ONLY = (34, 197, 94)              # rows only the new image has (diff of a resized image)
-OLD_ONLY = (245, 158, 11)             # rows only the old image has
 REMINDER = ("An unexpected diff on a page this change doesn't touch is a leak or a nondeterminism bug, "
             "not noise: find out why (AGENTS.md, \"Git and PRs\").")
 
@@ -81,7 +71,6 @@ class FileDiff:
     changed_pixels: int = 0
     compared_pixels: int = 0                      # the area both images have
     boxes: list[Box] = field(default_factory=list)
-    highlight: str | None = None                  # the file name in the output directory
     error: str | None = None
 
     @property
@@ -195,28 +184,8 @@ def regions(mask: Image.Image, limit: int = MAX_BOXES) -> list[Box]:
         gap = max(gap * 2, CELL)
 
 
-def highlight(old: Image.Image, mask: Image.Image, boxes: list[Box], new_size: tuple[int, int]) -> Image.Image:
-    """The old image faded and gray, the changed pixels grown by GROW and painted, the boxes outlined."""
-    size = (max(old.width, new_size[0]), max(old.height, new_size[1]))
-    canvas = Image.new("RGB", size, BEYOND if size != old.size else (255, 255, 255))
-    flat = Image.alpha_composite(Image.new("RGBA", old.size, (255, 255, 255, 255)), old).convert("L").convert("RGB")
-    canvas.paste(Image.blend(Image.new("RGB", old.size, (255, 255, 255)), flat, FADE), (0, 0))
-    bbox = mask.getbbox()
-    if bbox is not None:
-        pad = GROW + 1
-        area = (max(bbox[0] - pad, 0), max(bbox[1] - pad, 0), min(bbox[2] + pad, mask.width), min(bbox[3] + pad, mask.height))
-        grown = Image.new("L", mask.size, 0)
-        grown.paste(mask.crop(area).filter(ImageFilter.MaxFilter(2 * GROW + 1)), area[:2])
-        canvas.paste(Image.new("RGB", mask.size, CHANGED), (0, 0), grown)
-    draw = ImageDraw.Draw(canvas)
-    for left, top, right, bottom in boxes:
-        draw.rectangle((left - 4, top - 4, right + 3, bottom + 3), outline=OUTLINE, width=2)
-    return canvas
-
-
-def compare(base: str, head: str, status: str, path: str, out: Path | None, repo: Path = ROOT) -> FileDiff:
-    """One file's FileDiff; with `out`, a modified file's highlight image is written there. A file that can't be read as an
-    image is reported with `error` rather than stopping the run."""
+def compare(base: str, head: str, status: str, path: str, repo: Path = ROOT) -> FileDiff:
+    """One file's FileDiff. A file that can't be read as an image is reported with `error` rather than stopping the run."""
     entry = FileDiff(path=path, status=status)
     try:
         old = blob(base, path, repo) if status != "added" else None
@@ -228,22 +197,16 @@ def compare(base: str, head: str, status: str, path: str, out: Path | None, repo
             entry.compared_pixels = mask.width * mask.height
             entry.changed_pixels = mask.histogram()[255]
             entry.boxes = regions(mask)
-            if entry.changed_pixels and out is not None:
-                name = Path(path).relative_to(DIRECTORY).with_suffix("").as_posix().replace("/", "__") + ".diff.png"
-                highlight(old, mask, entry.boxes, new.size).save(out / name)
-                entry.highlight = name
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         entry.error = f"{type(e).__name__}: {e}"
     return entry
 
 
-def diff(base: str, head: str, out: Path | None = None, repo: Path = ROOT) -> dict:
+def diff(base: str, head: str, repo: Path = ROOT) -> dict:
     """Everything changed under screenshots/ from the merge base of base..head to head, as the summary.json dictionary."""
     merge_base, found = changed_files(base, head, repo)
     status = {"A": "added", "D": "deleted", "M": "modified"}
-    if out is not None:
-        out.mkdir(parents=True, exist_ok=True)
-    files = [compare(merge_base, head, status[s], p, out, repo) for s, p in found]
+    files = [compare(merge_base, head, status[s], p, repo) for s, p in found]
     return {"base": base, "head": head, "merge_base": merge_base, "changed": bool(files),
             "files": [asdict(f) | {"percent": f.percent} for f in files]}
 
@@ -254,86 +217,39 @@ def _size(s: list[int] | tuple[int, int] | None) -> str:
     return f"{s[0]}×{s[1]}" if s else "?"
 
 
-def _percent(p: float) -> str:
-    return "<0.01%" if 0 < p < 0.01 else f"{p:.2f}%"
+def counts(files: list[dict]) -> str:
+    """"23 modified, 2 added, 1 deleted": a resized screenshot is a modified one; zero counts are left out."""
+    parts = [(sum(f["status"] == k and not f["error"] for f in files), k) for k in ("modified", "added", "deleted")]
+    parts.append((sum(bool(f["error"]) for f in files), "could not be compared"))
+    return ", ".join(f"{n} {k}" for n, k in parts if n)
 
 
-def _boxes(boxes: list) -> str:
-    return "<br>".join(f"`({b[0]}, {b[1]})` {b[2] - b[0]}×{b[3] - b[1]}" for b in boxes) or "–"
-
-
-def _row(f: dict) -> str:
-    if f["error"]:
-        status, count, percent, where = f"could not be compared (`{f['error'][:80]}`)", "–", "–", "–"
-    else:
-        status = f"resized {_size(f['old_size'])} → {_size(f['new_size'])}" if f["old_size"] != f["new_size"] else "modified"
-        if not f["changed_pixels"]:
-            status += ", same pixels (re-encoded)"
-        count, percent, where = f"{f['changed_pixels']:,}", _percent(f["percent"]), _boxes(f["boxes"])
-    return f"| `{Path(f['path']).name}` | {status} | {count} | {percent} | {where} |"
-
-
-def _take(lines: list[str], room: int) -> tuple[list[str], int]:
-    """The lines that fit in `room` characters, and how many were left out."""
-    kept, used = [], 0
-    for line in lines:
-        if used + len(line) + 1 > room:
-            break
-        kept.append(line)
-        used += len(line) + 1
-    return kept, len(lines) - len(kept)
-
-
-def render(report: dict, run_url: str | None = None, max_chars: int = MAX_COMMENT_CHARS,
-           report_url: str | None = None) -> str:
-    """The comment: MARKER first, then (with a report_url) the link to report.html, then a table of the modified screenshots
-    (biggest change first) and the added and deleted ones. Lines that would take it past max_chars are left out, and it
-    says how many."""
+def render(report: dict, run_url: str | None = None, report_url: str | None = None) -> str:
+    """The comment: MARKER first, then the link to report.html (or, until it is known, where to find it), one line of counts
+    and a note. It names no screenshot: the report does."""
     files = report["files"]
     if not files:
         return f"{MARKER}\n### Screenshot changes\n\nNo screenshot changes in this pull request.\n"
-    modified = sorted((f for f in files if f["status"] == "modified"), key=lambda f: (-f["changed_pixels"], f["path"]))
-    added = [f for f in files if f["status"] == "added"]
-    deleted = [f for f in files if f["status"] == "deleted"]
-    counts = [f"{len(modified)} modified", f"{len(added)} added", f"{len(deleted)} deleted"]
-    head = [MARKER, "### Screenshot changes", "",
-            f"{', '.join(c for c in counts if not c.startswith('0 '))} (compared pixel by pixel against the merge base)."]
+    head = [MARKER, "### Screenshot changes", ""]
     if report_url:
         # Only people logged in to GitHub with access to the repository can open the artifact's link.
-        head.insert(3, f"**View the visual diff: [{REPORT}]({report_url})**")
-        head.insert(4, "")
-        head += ["", "_One HTML page with the tabs Diff, Reference, Actual and Slider for each image. The link needs you to be "
-                     f"logged in to GitHub, and the file is kept {RETENTION_DAYS} days._"]
-    elif any(f["highlight"] for f in modified):
-        head += ["", f"The changed pixels are highlighted in magenta, with the boxes in blue, in the `{ARTIFACT}` artifact"
-                    + (f" of [this run]({run_url}#artifacts)" if run_url else "")
-                    + f" (kept {RETENTION_DAYS} days): one `<name>.diff.png` per modified screenshot."]
-    tail = ["", f"_{REMINDER}_", ""]
-    room = max_chars - sum(len(x) + 1 for x in head + tail) - 600   # 600: the headers and the "left out" notes below
-    table_head = ["", "| Screenshot | Change | Changed pixels | Of the image | Where: `(x, y)` width×height |",
-                  "|---|---|--:|--:|---|"]
-    rows, left = _take([_row(f) for f in modified], room // 2 if added or deleted else room)
-    body = (table_head + rows) if modified else []
-    if left:
-        body += ["", f"…and {left} more modified screenshots with smaller changes (all of them are in `summary.json` in the "
-                     "artifact)."]
-    used = sum(len(x) + 1 for x in body)
-    for title, group in (("Added", added), ("Deleted", deleted)):
-        if group:
-            items, more = _take([f"- `{Path(f['path']).name}` ({_size(f['new_size'] or f['old_size'])})" for f in group],
-                                max(room - used, 0) // (2 if title == "Added" and deleted else 1))
-            body += ["", f"**{title}**", ""] + items + ([f"- …and {more} more"] if more else [])
-            used = sum(len(x) + 1 for x in body)
-    return "\n".join(head + body + tail)
+        head += [f"**View the visual diff: [{REPORT}]({report_url})**", "", f"{counts(files)}.", "",
+                 "_Reference, Actual and Slider for each image, with a box around what changed. The link needs you to be "
+                 f"logged in to GitHub, and the file is kept {RETENTION_DAYS} days._"]
+    else:
+        where = f"[this run]({run_url}#artifacts)" if run_url else "this workflow run"
+        head += [f"{counts(files)}.", "", f"The visual diff, `{REPORT}`, is in the artifacts of {where} (you need to be logged "
+                 f"in to GitHub; kept {RETENTION_DAYS} days)."]
+    return "\n".join([*head, "", f"_{REMINDER}_", ""])
 
 
 REPORT_CSS = r"""
 :root{color-scheme:dark light;--bg:#0d1117;--panel:#161b22;--raised:#1f2630;--border:#30363d;--text:#e6edf3;--muted:#9da7b3;
 --accent:#58a6ff;--accent-ink:#0d1117;--s-modified:#d29922;--s-resized:#db6d28;--s-added:#3fb950;--s-deleted:#f85149;--s-error:#f85149;
---hatch:#2a313a}
+--hatch:#2a313a;--box:#ff2d87}
 @media (prefers-color-scheme:light){:root{--bg:#ffffff;--panel:#f6f8fa;--raised:#eaeef2;--border:#d0d7de;--text:#1f2328;
 --muted:#59636e;--accent:#0969da;--accent-ink:#ffffff;--s-modified:#9a6700;--s-resized:#bc4c00;--s-added:#1a7f37;
---s-deleted:#cf222e;--s-error:#cf222e;--hatch:#dde3ea}}
+--s-deleted:#cf222e;--s-error:#cf222e;--hatch:#dde3ea;--box:#e0006b}}
 *{box-sizing:border-box}
 html{background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -361,16 +277,14 @@ background:var(--panel);border:1px solid var(--border);border-radius:8px;max-hei
 .verdict{margin:8px 0 4px;font-weight:600}
 .meta{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 12px;color:var(--muted);font-size:.9rem}
 .note{margin:8px 0;color:var(--muted);font-size:.9rem}
-.tools{margin:0 0 8px}
+.tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0 0 8px}
+.boxtoggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.boxtoggle input{min-width:0;margin:0;padding:0;width:18px;height:18px;accent-color:var(--accent)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);overflow-x:auto}
 .tabs [role=tab]{border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:none;color:var(--muted);padding:8px 14px}
 .tabs [role=tab][aria-selected=true]{color:var(--text);border-bottom-color:var(--accent);background:var(--raised)}
 .pane{padding:12px 0 0}
 .js .pane[hidden]{display:none}
-.legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 8px;font-size:.85rem;color:var(--muted)}
-.sw{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;border-radius:2px}
-.hatch-new{background:repeating-linear-gradient(135deg,#22c55e 0 3px,transparent 3px 7px)}
-.hatch-old{background:repeating-linear-gradient(135deg,#f59e0b 0 3px,transparent 3px 7px)}
 .seg{margin:0 0 4px}
 figcaption{margin:8px 0 4px;color:var(--muted);font-size:.85rem}
 .gap{margin:8px 0;padding:6px;text-align:center;color:var(--muted);font-size:.85rem;border:1px dashed var(--border);border-radius:6px}
@@ -378,6 +292,11 @@ figcaption{margin:8px 0 4px;color:var(--muted);font-size:.85rem}
 outline:1px solid var(--border)}
 .win img{position:absolute;left:0;display:block;max-width:none}
 .win.none{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.85rem;padding:8px}
+.box{position:absolute;pointer-events:none;outline:2px solid var(--box);outline-offset:3px}
+.box.added,.box.removed{outline:0;border:2px dashed var(--box-x);background:color-mix(in srgb,var(--box-x) 14%,transparent)}
+.box.added{--box-x:#22c55e}.box.removed{--box-x:#f59e0b}
+.box b{position:absolute;right:0;top:0;padding:0 6px;background:var(--box-x);color:#000;font:600 .75rem/1.5 system-ui,sans-serif;white-space:nowrap}
+.hide-boxes .box{display:none}
 .allview{display:none}
 .card.all .allview{display:block}
 .card.all .bands{display:none}
@@ -447,6 +366,10 @@ function wholeWindow(card,pane){
   win.style.aspectRatio=w+"/"+h;
   c.style.top="0";c.style.height=(+img.dataset.ih/h*100)+"%";c.style.width=(+img.dataset.iw/w*100)+"%";c.setAttribute("loading","lazy");
   win.append(c);
+  if(pane.classList.contains("pane-act")){
+    var t=pane.querySelector("template");
+    if(t)win.append(t.content.cloneNode(true));
+  }
   return win;
 }
 function fill(view,win,title){var f=el("figure","seg");f.append(el("figcaption","",title),win);view.append(f);}
@@ -464,7 +387,7 @@ all(".card").forEach(function(card){
     if(focus)tabs[i].focus();
   }
   if(tabs.length){
-    select(0,false);
+    select(Math.max(0,tabs.findIndex(function(t){return t.getAttribute("aria-selected")==="true";})),false);
     tabs.forEach(function(t,i){
       t.addEventListener("click",function(){select(i,false);});
       t.addEventListener("keydown",function(e){
@@ -480,6 +403,12 @@ all(".card").forEach(function(card){
     var refWins=all(".bands .win",refPane),actWins=all(".bands .win",actPane);
     all(".host",sl).forEach(function(h,i){h.replaceWith(slider(refWins[i],actWins[i]));});
   }
+  all(".boxtoggle input",card).forEach(function(c){
+    c.addEventListener("change",function(){
+      root.classList.toggle("hide-boxes",!c.checked);
+      all(".boxtoggle input").forEach(function(o){o.checked=c.checked;});
+    });
+  });
   var btn=card.querySelector(".allbtn");
   if(btn){
     var built=false;
@@ -554,7 +483,7 @@ class Plan:
     f: dict
     canvas: tuple[int, int] = (0, 0)
     bands: list[tuple[int, int]] = field(default_factory=list)
-    pieces: dict[str, list[Piece]] = field(default_factory=dict)    # "ref", "act", "diff"
+    pieces: dict[str, list[Piece]] = field(default_factory=dict)    # "ref", "act"
     whole: bool = False        # the pieces are whole images (so every row can be shown)
     omitted: bool = False      # left without images: the size budget was used up
 
@@ -606,24 +535,6 @@ def make_bands(runs: list[tuple[int, int]], height: int, context: int) -> list[t
     return bands
 
 
-def report_diff(old: Image.Image, new: Image.Image, mask: Image.Image, boxes: list) -> Image.Image:
-    """The highlight, plus, when the sizes differ, diagonal stripes over the rows and columns only one image has: green
-    where only the new image reaches, amber where only the old one does."""
-    canvas = highlight(old, mask, [tuple(b) for b in boxes], new.size)
-    if old.size == new.size:
-        return canvas
-    stripes = Image.new("L", canvas.size, 0)
-    draw = ImageDraw.Draw(stripes)
-    for k in range(-canvas.height, canvas.width, 12):
-        draw.line((k, 0, k + canvas.height, canvas.height), fill=255, width=3)
-    for keep, drop, color in ((new, old, NEW_ONLY), (old, new, OLD_ONLY)):
-        only = Image.new("L", canvas.size, 0)
-        only.paste(255, (0, 0, keep.width, keep.height))
-        only.paste(0, (0, 0, drop.width, drop.height))
-        canvas.paste(Image.new("RGB", canvas.size, color), (0, 0), ImageChops.multiply(only, stripes))
-    return canvas
-
-
 def encode(img: Image.Image, scale: float) -> tuple[str, bytes]:
     """Lossless WebP (every browser reads it, and flat screenshots shrink a lot), PNG past WebP's size limit."""
     if scale < 1:
@@ -665,7 +576,7 @@ def build_plan(f: dict, merge_base: str, head: str, repo: Path, context: int, sc
         if not runs:
             return plan
         plan.bands = make_bands(runs, height, context)
-        images = {"diff": report_diff(old, new, mask, f["boxes"]), "ref": old, "act": new}
+        images = {"ref": old, "act": new}
     else:
         plan.bands = [(0, height)]
         images = {"ref": old} if old is not None else {"act": new}   # type: ignore[dict-item]
@@ -718,6 +629,40 @@ def _find(pieces: list[Piece], y: int) -> Piece | None:
     return next((p for p in pieces if p.y0 <= y < p.y1), None)
 
 
+def overlay_boxes(f: dict) -> list[tuple[str, Box, str]]:
+    """What the Actual image is boxed with, as (kind, box, label) in the canvas's pixels: the regions that changed ("change",
+    from the comparison) and, when the size differs, the rows and columns only one image has, labelled ("added": only the
+    actual image reaches them; "removed": only the reference does, so they are empty in the actual one)."""
+    out: list[tuple[str, Box, str]] = [("change", (b[0], b[1], b[2], b[3]), "") for b in f["boxes"]]
+    if f["error"] or not (f["old_size"] and f["new_size"]) or f["old_size"] == f["new_size"]:
+        return out
+    (ow, oh), (nw, nh) = f["old_size"], f["new_size"]
+    if nh > oh:
+        out.append(("added", (0, oh, nw, nh), f"{_n(nh - oh)} rows only in the actual image"))
+    elif oh > nh:
+        out.append(("removed", (0, nh, ow, oh), f"{_n(oh - nh)} rows only in the reference"))
+    if nw > ow:
+        out.append(("added", (ow, 0, nw, min(nh, oh)), f"{_n(nw - ow)} columns only in the actual image"))
+    elif ow > nw:
+        out.append(("removed", (nw, 0, ow, min(nh, oh)), f"{_n(ow - nw)} columns only in the reference"))
+    return out
+
+
+def _overlay(plan: Plan, band: tuple[int, int]) -> str:
+    """The boxes that reach into the band, placed over its window by percentages of the band (the window clips them)."""
+    width, (y0, y1) = plan.canvas[0], band
+    out = []
+    for kind, (left, top, right, bottom), label in overlay_boxes(plan.f):
+        if bottom <= y0 or top >= y1:
+            continue
+        style = (f"left:{left / width * 100:.4f}%;top:{(top - y0) / (y1 - y0) * 100:.4f}%;"
+                 f"width:{(right - left) / width * 100:.4f}%;height:{(bottom - top) / (y1 - y0) * 100:.4f}%")
+        title = html.escape(label or f"Changed region at ({left}, {top}), {right - left}×{bottom - top}")
+        out.append(f'<div class="box {kind}" style="{style}" title="{title}" aria-hidden="true">'
+                   + (f"<b>{html.escape(label)}</b>" if label else "") + "</div>")
+    return "".join(out)
+
+
 def _window(plan: Plan, kind: str, label: str, band: tuple[int, int], eager: bool, seen: set[int]) -> str:
     """The band's rows of one image, in a box with the band's proportions: the image is placed in it by percentages, so
     one embedded image serves every band that shows a part of it. Its bytes are written once: the later windows onto the
@@ -727,17 +672,18 @@ def _window(plan: Plan, kind: str, label: str, band: tuple[int, int], eager: boo
     piece = _find(plan.pieces.get(kind, []), y0)
     style = f"aspect-ratio:{width}/{y1 - y0}"
     if piece is None:
-        return f'<div class="win none" style="{style}"><span>No rows here: the {label} image is shorter.</span></div>'
+        return (f'<div class="win none" style="{style}"><span>No rows here: the {label} image is shorter.</span>'
+                f'{_overlay(plan, band) if kind == "act" else ""}</div>')
     top, tall = -(y0 - piece.y0) / (y1 - y0) * 100, (piece.y1 - piece.y0) / (y1 - y0) * 100
-    alt = {"ref": f"Reference screenshot {plan.f['path']}", "act": f"Actual screenshot {plan.f['path']}",
-           "diff": f"Changed pixels of {plan.f['path']}, in magenta over the faded reference"}[kind]
+    alt = {"ref": f"Reference screenshot {plan.f['path']}", "act": f"Actual screenshot {plan.f['path']}"}[kind]
     if (y0, y1) != (0, plan.canvas[1]):
         alt += f", rows {y0} to {y1}"
     source = 'data-reuse="" ' if id(piece) in seen else f'src="{piece.src}" '
     seen.add(id(piece))
     return (f'<div class="win" style="{style}"><img {source}alt="{html.escape(alt)}" '
             f'loading="{"eager" if eager else "lazy"}" decoding="async" data-iw="{piece.width}" data-ih="{piece.y1 - piece.y0}" '
-            f'style="top:{top:.4f}%;height:{tall:.4f}%;width:{piece.width / width * 100:.4f}%"></div>')
+            f'style="top:{top:.4f}%;height:{tall:.4f}%;width:{piece.width / width * 100:.4f}%">'
+            f'{_overlay(plan, band) if kind == "act" else ""}</div>')
 
 
 def _gap(plan: Plan, y0: int, y1: int) -> str:
@@ -764,24 +710,20 @@ def _pane(plan: Plan, kind: str, label: str, eager: bool) -> str:
     if end < height:
         out.append(_gap(plan, end, height))
     out.append('</div><div class="allview"></div>')
+    whole_boxes = _overlay(plan, (0, height)) if kind == "act" and plan.whole and plan.bands != [(0, height)] else ""
+    if whole_boxes:          # the "all rows" view's window is built by the script: it takes its boxes from here
+        out.append(f"<template>{whole_boxes}</template>")
     return "".join(out)
 
 
-def _legend(plan: Plan) -> str:
-    f = plan.f
-    parts = ['<span><i class="sw" style="background:#ff0066"></i>changed pixel (grown 2 px)</span>',
-             '<span><i class="sw" style="border:2px solid #0066ff"></i>region around changes</span>',
-             '<span><i class="sw" style="background:#b2b2b2"></i>reference, faded</span>']
-    note = ""
-    if _status(f) == "resized":
-        (ow, oh), (nw, nh) = f["old_size"], f["new_size"]
-        parts += ['<span><i class="sw hatch-new"></i>only in actual</span>', '<span><i class="sw hatch-old"></i>only in reference</span>']
-        extra = (f" The reference has {_n(oh - nh)} more rows than the actual image." if oh > nh
-                 else f" The actual image has {_n(nh - oh)} more rows than the reference." if nh > oh else "")
-        note = (f'<p class="note">Dimensions differ: reference {_size(f["old_size"])}, actual {_size(f["new_size"])}. The diff '
-                f"compares the {min(ow, nw)}×{min(oh, nh)} area both images have (top-aligned).{extra} The rows and columns "
-                "only one of them has are striped (green: only in actual, amber: only in reference).</p>")
-    return f'<p class="legend">{"".join(parts)}</p>{note}'
+def _resized_note(f: dict) -> str:
+    (ow, oh), (nw, nh) = f["old_size"], f["new_size"]
+    extra = (f" The reference has {_n(oh - nh)} more rows than the actual image." if oh > nh
+             else f" The actual image has {_n(nh - oh)} more rows than the reference." if nh > oh else "")
+    return (f'<p class="note">Dimensions differ: reference {_size(f["old_size"])}, actual {_size(f["new_size"])}. The changed '
+            f"pixels are counted in the {min(ow, nw)}×{min(oh, nh)} area both images have (top-aligned).{extra} The Actual image "
+            "marks the rows and columns only one of them has with a labelled box (green: only in actual, amber: only in the "
+            "reference).</p>")
 
 
 def _card(i: int, plan: Plan) -> str:
@@ -797,11 +739,12 @@ def _card(i: int, plan: Plan) -> str:
         meta += [f"<span>{_n(f['changed_pixels'])} changed pixels</span>", f"<span>ratio {_ratio(_share(f))}</span>"]
         if f["boxes"]:
             meta.append("<span>" + "; ".join(f"({b[0]}, {b[1]}) {b[2] - b[0]}×{b[3] - b[1]}" for b in f["boxes"]) + "</span>")
-    tabs = [("diff", "Diff"), ("ref", "Reference"), ("act", "Actual"), ("slider", "Slider")]
+    tabs = [("ref", "Reference"), ("act", "Actual"), ("slider", "Slider")]
+    shown = "slider"           # what opens first: the two images together, the change boxed on the right
     if status == "added":
-        tabs = [("act", "Actual")]
+        tabs, shown = [("act", "Actual")], "act"
     elif status == "deleted":
-        tabs = [("ref", "Reference")]
+        tabs, shown = [("ref", "Reference")], "ref"
     elif not plan.pieces:
         tabs = []
     out = [f'<article class="card" id="img-{i}" data-status="{status}" data-name="{name.lower()}" data-w="{width}" '
@@ -812,18 +755,24 @@ def _card(i: int, plan: Plan) -> str:
         out.append('<p class="note">The images of this file are left out: the report would have gone past its size budget.</p>')
     if not tabs:
         return "".join(out) + "</article>"
+    if status == "resized":
+        out.append(_resized_note(f))
+    tools = []
+    if any(kind == "act" for kind, _ in tabs) and overlay_boxes(f):
+        tools.append('<label class="boxtoggle"><input type="checkbox" checked> Show change boxes</label>')
     if plan.whole and plan.bands != [(0, height)]:
-        out.append(f'<p class="tools"><button type="button" class="allbtn" aria-pressed="false">Show all {_n(height)} rows</button></p>')
+        tools.append(f'<button type="button" class="allbtn" aria-pressed="false">Show all {_n(height)} rows</button>')
+    if tools:
+        out.append(f'<p class="tools">{"".join(tools)}</p>')
     out.append(f'<div class="tabs" role="tablist" aria-label="Views of {name}">')
-    for k, (kind, label) in enumerate(tabs):
+    for kind, label in tabs:
+        on = kind == shown
         out.append(f'<button type="button" role="tab" id="t-{i}-{kind}" aria-controls="p-{i}-{kind}" '
-                   f'aria-selected="{"true" if k == 0 else "false"}" tabindex="{0 if k == 0 else -1}">{label}</button>')
+                   f'aria-selected="{"true" if on else "false"}" tabindex="{0 if on else -1}">{label}</button>')
     out.append("</div>")
     for kind, _label in tabs:
         extra = ""
-        if kind == "diff":
-            extra = _legend(plan)
-        elif kind == "slider":
+        if kind == "slider":
             extra = '<p class="note">Drag the handle, or focus it and use the arrow keys: reference on the left, actual on the right.</p>'
         out.append(f'<div role="tabpanel" class="pane pane-{kind}" id="p-{i}-{kind}" aria-labelledby="t-{i}-{kind}" tabindex="0">'
                    f'{extra}{_pane(plan, kind, "actual" if kind == "act" else "reference", i < 2)}</div>')
@@ -871,7 +820,9 @@ def build_report(report: dict, repo: Path = ROOT, budget: int = REPORT_BUDGET, r
     order = {"modified": 0, "added": 1, "deleted": 2}
     files = sorted(report["files"], key=lambda f: (order[f["status"]], -f["changed_pixels"], f["path"]))
     merge_base, head = report["merge_base"], report["head"]
-    room = max(budget - (60_000 + 9_000 * len(files)), 0)    # the images' share: the rest is the script, style and markup
+    # The images' share: the rest is the script, style and markup, about 6 KB a file (two views of each image, not three). It is an
+    # estimate: the exact size is checked below, and a page that is over gets less context or smaller images.
+    room = max(budget - (60_000 + 6_500 * len(files)), 0)
 
     def notes_for(context: int, scale: float, plans: list[Plan]) -> list[str]:
         notes: list[str] = []
@@ -940,18 +891,17 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--base", help="the pull request's base (a ref or sha)")
     ap.add_argument("--head", default="HEAD", help="the pull request's head (a ref or sha)")
-    ap.add_argument("--out", type=Path, help="where to write the highlight images, summary.md and summary.json")
+    ap.add_argument("--out", type=Path, help="where to write summary.md, summary.json and report.html")
     ap.add_argument("--run-url", help="the workflow run's URL, for the comment's link to the artifact")
     ap.add_argument("--report-url", help="where report.html was uploaded: the comment starts with a link to it")
     ap.add_argument("--from-json", type=Path, help="render the comment from this summary.json instead of comparing (with --out, "
                     "rewrites summary.md there)")
     ap.add_argument("--report-budget", type=int, default=REPORT_BUDGET, help="the most bytes of report.html")
-    ap.add_argument("--max-chars", type=int, default=MAX_COMMENT_CHARS, help="the most characters in the comment")
     ap.add_argument("--repo", type=Path, default=ROOT, help="the repository to read (default: this one)")
     ap.add_argument("--dry-run", action="store_true", help="print the comment instead of writing files")
     args = ap.parse_args(argv)
     if args.from_json:
-        comment = render(json.loads(args.from_json.read_text()), args.run_url, args.max_chars, args.report_url)
+        comment = render(json.loads(args.from_json.read_text()), args.run_url, args.report_url)
         if args.out is None or args.dry_run:
             print(comment)
         else:
@@ -959,11 +909,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.base:
         ap.error("--base is required (unless --from-json is given)")
-    report = diff(args.base, args.head, None if args.dry_run else args.out, args.repo)
-    comment = render(report, args.run_url, args.max_chars, args.report_url)
+    report = diff(args.base, args.head, args.repo)
+    comment = render(report, args.run_url, args.report_url)
     if args.dry_run or args.out is None:
         print(comment)
     else:
+        args.out.mkdir(parents=True, exist_ok=True)
         (args.out / "summary.md").write_text(comment)
         (args.out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
         wrote = f"wrote {args.out}"
