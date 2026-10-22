@@ -131,6 +131,14 @@ describe("the JSON error shape", () => {
   });
 });
 
+describe("screenshot numbers", () => {
+  it("go on from the highest one there, so a gap never leads to an overwrite", () => {
+    expect(c.lastShotNumber([])).toBe(0);
+    expect(c.lastShotNumber(["002-budget-phone.png"])).toBe(2);
+    expect(c.lastShotNumber(["001-a.png", "010-b.png", "003-c-UNSETTLED.png", "before.png"])).toBe(10);
+  });
+});
+
 describe("the session's reply", () => {
   it("is the command's data when it worked", () => {
     expect(c.replyData({ ok: true, route: "/#budget", settled: true })).toEqual({ route: "/#budget", settled: true });

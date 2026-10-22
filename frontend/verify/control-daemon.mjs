@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } 
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ARTIFACTS, ControlError, PROG, ROOT, closest, errorResult, jsExpression, parseTarget, readState, rel, removeState, routeUrl, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
+import { ARTIFACTS, ControlError, PROG, ROOT, closest, errorResult, jsExpression, lastShotNumber, parseTarget, readState, rel, removeState, routeUrl, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
 import { startServer } from "./jobs.mjs";
 import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
 
@@ -401,11 +401,12 @@ async function main() {
 
   async function handle(request) {
     if (!sameToken(request.token)) return errorResult(request.command, new ControlError("forbidden", "wrong token: this isn't the session's caller", `use ${PROG}, which reads the token from the state file`));
-    touch();
     if (request.command === "stop") { setTimeout(() => shutdown("stop"), 50); return { ok: true, stopping: true }; }
     const handler = handlers[request.command];
-    if (!handler) return errorResult(request.command, new ControlError("usage", `the session has no command ${request.command}`, `\`${PROG} --help\``, 2));
+    if (!handler) { touch(); return errorResult(request.command, new ControlError("usage", `the session has no command ${request.command}`, `\`${PROG} --help\``, 2)); }
     log(`${request.command}`);
+    // Not idle while a command runs (a long flow can outlast a short --idle-minutes): the clock starts again when it ends.
+    clearTimeout(idle);
     try {
       const reply = await handler({ args: request.args ?? [], options: request.options ?? {}, path: request.path });
       const away = offsite.splice(0);
@@ -413,6 +414,8 @@ async function main() {
     } catch (e) {
       const err = bad(e);
       return { ...errorResult(request.command, err), ...(e.data ?? {}) };
+    } finally {
+      touch();
     }
   }
 
@@ -433,7 +436,7 @@ async function main() {
   await new Promise((resolve, reject) => { listener.once("error", reject); listener.listen(socket, resolve); });
   chmodSync(socket, 0o600);
   // Screenshots are numbered on from what's already there, so a new session doesn't overwrite the last one's.
-  try { shots = readdirSync(join(dir, "shots")).filter((f) => /^\d{3}-/.test(f)).length; } catch { shots = 0; /* no screenshots yet */ }
+  try { shots = lastShotNumber(readdirSync(join(dir, "shots"))); } catch { shots = 0; /* no screenshots yet */ }
   touch();
   save({ status: "ready", base, port: server.port, route: route(), clock: { frozenDay: opt.day, browser: await page.evaluate(() => new Date().toString()) } });
   log(`ready at ${base}`);

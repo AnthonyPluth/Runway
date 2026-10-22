@@ -425,6 +425,10 @@ export function jsExpression(code) {
 /** A route as part of a screenshot's file name: `#setup/categories` → setup-categories. */
 export const shotName = (route) => route.replace(/^\/?#?/, "").replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "overview";
 
+/** The highest number among numbered screenshots (`007-budget-phone.png`), 0 for none: a new one takes the next, so it
+ *  never overwrites one that's there, gaps or not. */
+export const lastShotNumber = (names) => names.reduce((max, n) => Math.max(max, /^(\d{3,})-/.exec(n)?.[1] ?? 0), 0);
+
 // --- The state file -------------------------------------------------------------------------------------------------
 // artifacts/control/state.json: the session's daemon (pid), its socket and token, its server and what it was seeded with.
 // The daemon writes it (status "starting", then "ready" or "failed") and removes it when it stops. One whose daemon is gone
