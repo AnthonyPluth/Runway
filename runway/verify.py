@@ -1,13 +1,17 @@
 """`python run.py verify [page or flow…]`: run the real app on made-up data and capture proof that it works.
 
-Makes a temporary database, fills it with demo.seed (as `run.py demo` does), starts the server on a free port, and runs
-frontend/verify/verify.mjs (Playwright) against it. Pages are visited, and screenshotted, at phone (an iPhone 17 Pro Max,
-440×956) and desktop widths. Never touches your own data: the server gets its own folder and SQLite database, and none of
-your Postgres, sign-in, bank or error-report settings.
+Makes a temporary database, fills it with demo.seed (as `run.py demo` does), and runs frontend/verify/verify.mjs
+(Playwright), which gives every page, flow and check a demo server of its own (`serve` below) on a fresh copy of that
+data, so what one shows never depends on what another did: a partial run (`PAGES=...`) writes the same images a full
+one does. VERIFY_JOBS of them run at once (workers; default the CPU count, at most MAX_JOBS, fewer on a busy machine;
+1 runs them one at a time). Pages are visited, and screenshotted, at phone (an iPhone 17 Pro Max, 440×956) and desktop
+widths. Never touches your own data: each server gets its own folder and SQLite database, and none of your Postgres,
+sign-in, bank or error-report settings.
 
 Built to give the same answer on a busy machine as on an idle one:
 - One run at a time per machine (machine_lock): a second waits for the first rather than both racing for the CPU.
-- It waits (a while) for the machine's load to drop before it starts, and scales its waits with the load it finds.
+- It waits (a while) for the machine's load to drop before it starts, scales its waits with the load it finds, and runs
+  fewer workers the busier the machine already is (worker_count).
 - A page or flow that fails is run again, on a fresh copy of the demo data, up to ATTEMPTS times in all.
 - All or nothing: artifacts/verify/ gets the images only when every page and flow passed (report.json's "ok"); after a
   failure it holds the report, the failed steps' images and, under unverified/, what was captured, never as a result.
@@ -17,24 +21,23 @@ run held the machine for too long.
 """
 from __future__ import annotations
 
+import argparse
 import contextlib
+import ctypes
 import fcntl
 import json
+import math
 import os
 import secrets
 import shutil
-import socket
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any, TextIO
-
-from . import tls
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "artifacts", "verify")
@@ -65,6 +68,9 @@ BUSY = 1.5
 LOAD_WAIT = float(os.environ.get("RUNWAY_VERIFY_LOAD_WAIT", 10 * 60))
 MAX_SCALE = 8.0   # the most the load stretches a wait by (times the attempt)
 ATTEMPTS = 3      # a page or flow that fails is run this many times in all before the run fails
+# Workers: how many pages and flows run at once, each a browser of its own and each item a demo server of its own.
+JOBS_ENV = "VERIFY_JOBS"
+MAX_JOBS = 4
 
 
 def find_libfaketime(exists=os.path.isfile, platform: str = sys.platform) -> str | None:
@@ -133,24 +139,68 @@ def server_command(port: int) -> list[str]:
     return [sys.executable, os.path.join(ROOT, "run.py"), "--host", "127.0.0.1", "--port", str(port), "--no-sync"]
 
 
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+_PR_SET_PDEATHSIG = 1
 
 
-def wait_ready(url: str, server: subprocess.Popen, timeout: float = 60) -> None:
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if server.poll() is not None:
-            raise RuntimeError(f"the server exited with code {server.returncode} before it was ready")
-        try:
-            # No proxy: the server is on this machine, and a system HTTP proxy that doesn't exempt 127.0.0.1 would never reach it.
-            with tls.urlopen(url, 2, allow_http=True, handlers=(urllib.request.ProxyHandler({}),)):
-                return
-        except (urllib.error.URLError, OSError):
-            time.sleep(0.2)
-    raise RuntimeError(f"the server wasn't answering at {url} after {timeout:.0f} seconds")
+def die_with_parent(parent: int | None = None, sig: int = signal.SIGTERM) -> None:
+    """Asks Linux to send this process `sig` when the process that started it ends, however it ends (killed included), so
+    a demo server (or the browser run) never outlives the run that started it. Kept across exec. Best effort elsewhere.
+    Called first thing in the child. `parent`: the pid that started it, taken before it did: when that process already
+    ended (before the request was made, which then watches whoever took the child in), the child is sent `sig` now."""
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL(None, use_errno=True).prctl(_PR_SET_PDEATHSIG, int(sig))
+    if parent is not None and os.getppid() != parent:
+        os.kill(os.getpid(), sig)
+
+
+def server_env(data: str, port: int, lib: str, signed_in: bool, base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment of an item's demo server on `data`: clean_env, under the frozen clock, and for a signed-in one the
+    sign-in at its own address (localhost: the browser keeps its session cookie there). Never the session's token."""
+    env = frozen_env(clean_env(data, {k: v for k, v in (os.environ if base is None else base).items() if k != SESSION_ENV}), lib)
+    return signed_in_env(env, f"http://localhost:{port}") if signed_in else env
+
+
+def serve(argv: list[str]) -> int:
+    """`python -m runway.verify serve --parent PID --seed S --data D --port P [--signed-in]`: what verify.mjs (PID) runs for
+    each page, flow and check. Copies the seeded data S into D, a new folder (one that exists is refused: no item shares
+    another's data), and becomes the demo server on it (exec), on port P, its output in D/server.log. It ends when
+    verify.mjs does (die_with_parent, asked for before anything else, so even one killed while this copies); ended
+    before the exec, it removes the copy it made."""
+    p = argparse.ArgumentParser(prog="python -m runway.verify serve")
+    p.add_argument("--parent", type=int, required=True)
+    p.add_argument("--seed", required=True)
+    p.add_argument("--data", required=True)
+    p.add_argument("--port", type=int, required=True)
+    p.add_argument("--signed-in", action="store_true")
+    a = p.parse_args(argv)
+    made = [False]   # D is this process's own copy (not a folder that was already there)
+
+    def ended(signum: int, _frame: object) -> None:   # until the exec, which puts the default back
+        if made[0]:
+            shutil.rmtree(a.data, ignore_errors=True)
+        os._exit(128 + signum)
+    signal.signal(signal.SIGTERM, ended)
+    die_with_parent(a.parent)
+    lib = find_libfaketime()
+    if not lib:
+        print(libfaketime_missing_message(), file=sys.stderr)
+        return 2
+    try:
+        made[0] = not os.path.lexists(a.data)
+        shutil.copytree(a.seed, a.data)   # FileExistsError for a folder that's already there
+    except OSError as e:
+        if made[0]:
+            shutil.rmtree(a.data, ignore_errors=True)
+        print(f"verify: couldn't copy the demo data into {a.data}: {e.strerror or e}", file=sys.stderr)
+        return 2
+    log = os.open(os.path.join(a.data, "server.log"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.dup2(log, 1)
+    os.dup2(log, 2)
+    os.close(log)
+    os.chdir(ROOT)
+    command = server_command(a.port)
+    os.execve(command[0], command, server_env(a.data, a.port, lib, a.signed_in))
+    return 1   # (execve doesn't return)
 
 
 # --- Sharing the machine -------------------------------------------------------------------------------------------
@@ -292,6 +342,28 @@ def load_per_cpu(load: Callable[[], tuple[float, float, float]] = os.getloadavg,
         return 0.0
 
 
+def _running(path: str = "/proc/loadavg") -> int:
+    """The tasks running or ready to run this moment, from /proc/loadavg's "running/total" (counting this one)."""
+    with open(path) as f:
+        return int(f.read().split()[3].split("/")[0])
+
+
+def busy_now(samples: int = 20, every: float = 0.1, *, running: Callable[[], int] = _running, cpus: Callable[[], int] = cpu_count,
+             sleep: Callable[[float], None] = time.sleep) -> float:
+    """The CPUs other work keeps busy now, per CPU: the tasks ready to run (not counting this one), averaged over a couple
+    of seconds. Not the minute's load average, which still counts a run that ended a minute ago (a `make verify` right
+    after another would see its own last run and take fewer workers). The minute's average where this can't be read."""
+    try:
+        counts = []
+        for i in range(samples):
+            counts.append(max(0, running() - 1))
+            if i < samples - 1:
+                sleep(every)
+        return sum(counts) / len(counts) / max(1, cpus())
+    except (OSError, ValueError, IndexError):
+        return load_per_cpu(cpus=cpus)
+
+
 def wait_for_quiet(max_wait: float | None = None, *, busy: float = BUSY, say: Callable[[str], None] = print,
                    load: Callable[[], float] = load_per_cpu, poll: float = 5.0, now: Callable[[], float] = time.monotonic,
                    sleep: Callable[[float], None] = time.sleep) -> float:
@@ -314,6 +386,34 @@ def time_scale(ratio: float, attempt: int = 1) -> float:
     """How much longer than on an idle machine each wait may take: the load per CPU (at least 1, at most MAX_SCALE),
     times the attempt, so a retry is also more patient."""
     return round(min(MAX_SCALE, max(1.0, ratio)) * attempt, 2)
+
+
+def requested_jobs(env: Mapping[str, str] | None = None) -> int | None:
+    """VERIFY_JOBS: the number of workers asked for, or None for the default. ValueError for anything but a whole number
+    of 1 or more."""
+    text = (os.environ if env is None else env).get(JOBS_ENV, "").strip()
+    if not text:
+        return None
+    if not text.isdigit() or int(text) < 1:
+        raise ValueError(f"verify: {JOBS_ENV} is a whole number of workers, 1 or more (1 runs one page or flow at a time), not {text!r}")
+    return int(text)
+
+
+def worker_count(requested: int | None, ratio: float, cpus: int) -> int:
+    """How many workers run at once. Asked for (VERIFY_JOBS): that many. Otherwise one per CPU the machine has to spare,
+    at most MAX_JOBS: each worker keeps about a CPU busy (its browser and its demo server), so the work already on the
+    machine (`ratio`, per CPU: busy_now) takes its share of the CPUs first, and a busy machine runs one at a time. A worker the
+    machine has no CPU for would only make every page slower, and the slow ones time out."""
+    if requested is not None:
+        return requested
+    spare = math.floor(cpus * (1 - ratio) + 0.5)   # the CPUs the load leaves, rounded: 4 CPUs at 0.3 per CPU leave 3
+    return max(1, min(MAX_JOBS, cpus, spare))
+
+
+def load_with(ratio: float, jobs: int, cpus: int) -> float:
+    """The load per CPU a run should expect once its own workers are running: what's there now plus a CPU per worker
+    (each one's browser and server), for scaling its waits (time_scale)."""
+    return ratio + jobs / max(1, cpus)
 
 
 # --- A run -----------------------------------------------------------------------------------------------------------
@@ -419,12 +519,18 @@ def run(pages: list[str], twice: bool = False) -> int:
     if not lib:
         print(libfaketime_missing_message(), file=sys.stderr)
         return 2
+    try:
+        requested = requested_jobs()
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     log = RunLog()
     log.say(f"verify: this run's log is {log.path}")
     try:
         with machine_lock(say=log.say):
             ratio = wait_for_quiet(say=log.say)
-            return _run(pages, twice, node, lib, ratio, log)
+            jobs = worker_count(requested, busy_now() if requested is None else 0.0, cpu_count())
+            return _run(pages, twice, node, lib, ratio, jobs, log)
     except MachineBusy as e:
         log.say(str(e), err=True)
         return 3
@@ -434,38 +540,6 @@ def run(pages: list[str], twice: bool = False) -> int:
     finally:
         log.say(f"verify: log in {log.path}")
         log.close()
-
-
-class _Servers:
-    """The demo server and the signed-in one, on a copy of the seeded data, for one round."""
-
-    def __init__(self, data: str, frozen: dict[str, str], scale: float):
-        self.data, self.frozen, self.scale = data, frozen, scale
-        self.procs: list[subprocess.Popen] = []
-        port, signed_in_port = free_port(), free_port()
-        self.url, self.signed_in_url = f"http://127.0.0.1:{port}", f"http://localhost:{signed_in_port}"
-        self.ports = (("server", port, frozen), ("signed-in server", signed_in_port, signed_in_env(frozen, self.signed_in_url)))
-
-    def start(self) -> str | None:
-        """Starts both, and returns what went wrong (with the server's log), or None."""
-        for name, p, server_env in self.ports:
-            log_path = os.path.join(self.data, f"{name.replace(' ', '-')}.log")
-            with open(log_path, "w") as log:
-                self.procs.append(subprocess.Popen(server_command(p), env=server_env, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT))
-            try:
-                wait_ready(f"http://127.0.0.1:{p}/healthz", self.procs[-1], timeout=60 * self.scale)
-            except RuntimeError as e:
-                with open(log_path) as f:
-                    return f"the {name}: {e}\n{f.read()[-2000:]}"
-        return None
-
-    def stop(self) -> None:
-        for server in self.procs:
-            server.terminate()
-            try:
-                server.wait(10)
-            except subprocess.TimeoutExpired:
-                server.kill()
 
 
 def retrying(run_round: Callable[[int, list[str] | None], dict[str, Any] | None], say: Callable[[str], None] = print,
@@ -499,7 +573,7 @@ def retrying(run_round: Callable[[int, list[str] | None], dict[str, Any] | None]
     return results, flaky, planned
 
 
-def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: RunLog) -> int:
+def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, jobs: int, log: RunLog) -> int:
     work = tempfile.mkdtemp(prefix="runway-verify-")
     seed = os.path.join(work, "seed")
     os.makedirs(seed)
@@ -514,9 +588,10 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
 
         known: list[str] = []   # every page, flow and check there is (verify.mjs's all_items), for the sync
 
-        def run_round(attempt: int, only: list[str] | None, name: str = "") -> dict[str, Any] | None:
-            scale = time_scale(max(ratio, load_per_cpu()), attempt)
-            got = _round(os.path.join(work, name or f"round-{attempt}"), seed, pages, only, scale, attempt, node, lib, token, log)
+        def run_round(attempt: int, only: list[str] | None, name: str = "", workers: int = jobs, reverse: bool = False) -> dict[str, Any] | None:
+            scale = time_scale(load_with(max(ratio, load_per_cpu()), workers, cpu_count()), attempt)
+            got = _round(os.path.join(work, name or f"round-{attempt}"), seed, pages, only, scale, attempt, node, token, log,
+                         workers, reverse)
             if got and got.get("all_items") and not known:
                 known.extend(got["all_items"])
             return got
@@ -526,8 +601,11 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
             return 2
         results, flaky, planned = done
         if twice and all(item["ok"] for _, item in results.values()):
-            log.say("verify: --twice: everything again, on fresh data, to check each image comes out byte for byte the same")
-            again = run_round(2, None, "again")
+            # One at a time and in the opposite order, whatever the first run did: an image that depends on the number of
+            # workers, on the order or on what ran before it differs.
+            log.say("verify: --twice: everything again, on fresh data, one at a time and in reverse order, to check each image "
+                    "comes out byte for byte the same")
+            again = run_round(2, None, "again", workers=1, reverse=True)
             if again is None:
                 return 2
             for item in again["items"]:
@@ -541,7 +619,7 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, log: 
         failed = {i: item["problems"] for i, (_, item) in results.items() if not item["ok"]}
         ok = not failed and bool(results)
         report = {"ok": ok, "limited": bool(pages), "pages": pages, "items": planned, "failed": failed, "flaky": flaky,
-                  "attempts": ATTEMPTS, "load_per_cpu": round(ratio, 2), "log": log.path, "all_items": known}
+                  "attempts": ATTEMPTS, "load_per_cpu": round(ratio, 2), "jobs": jobs, "log": log.path, "all_items": known}
         publish(OUT, results, report, os.path.basename(log.path).removesuffix(".log"))
         for line in summary(failed, flaky, len(planned)):
             log.say(line, err=line.lstrip().startswith(("FAIL", "verify: FAILED")))
@@ -565,34 +643,42 @@ def differing(first: str, second: str, files: list[str]) -> list[str]:
     return out
 
 
-def _round(folder: str, seed: str, pages: list[str], only: list[str] | None, scale: float, attempt: int, node: str, lib: str,
-           token: str, log: RunLog) -> dict[str, Any] | None:
-    """One pass of the browser over the pages and flows (`only` those items, when given) on a fresh copy of the seeded
-    data and fresh servers. Returns verify.mjs's report, or None for a run that can't work (a malformed flow, an unknown
-    page); a run that crashed reports its unfinished items as failed, to be tried again."""
-    data = os.path.join(folder, "data")
+def round_command(node: str, seed: str, folder: str, out: str, pages: list[str], only: list[str] | None, scale: float,
+                  attempt: int, workers: int, reverse: bool = False) -> list[str]:
+    """verify.mjs's command line for a round: every item on a demo server of its own (`serve`, run by this Python) on a
+    copy of `seed` made under `folder`, `workers` at once."""
+    return [node, os.path.join(ROOT, "frontend", "verify", "verify.mjs"), "--seed", seed, "--work", folder, "--python", sys.executable,
+            "--out", out, "--jobs", str(workers), "--day", FROZEN_DAY, "--time-scale", str(scale), "--attempt", str(attempt),
+            *(["--reverse"] if reverse else []), *(["--only", ",".join(only)] if only else []), *pages]
+
+
+def _round(folder: str, seed: str, pages: list[str], only: list[str] | None, scale: float, attempt: int, node: str, token: str,
+           log: RunLog, workers: int = 1, reverse: bool = False) -> dict[str, Any] | None:
+    """One pass of the browser over the pages and flows (`only` those items, when given), each on a demo server and a
+    fresh copy of the seeded data of its own, `workers` at once. Returns verify.mjs's report, or None for a run that can't
+    work (a malformed flow, an unknown page); a run that crashed reports its unfinished items as failed, to be tried again."""
+    servers = os.path.join(folder, "servers")
     out = os.path.join(folder, "out")
-    shutil.copytree(seed, data)
-    servers = _Servers(data, frozen_env(clean_env(data), lib), scale)
+    os.makedirs(servers)
+    log.say(f"verify: attempt {attempt}: {'one page or flow at a time' if workers == 1 else f'{workers} pages and flows at a time'}, "
+            f"each on a demo server and a fresh copy of the demo data of its own; waits up to {scale}x as long as on an idle machine")
+    # The browser run ends with this one (die_with_parent), and its servers with it, should this process be killed.
+    me = os.getpid()
+    browser = subprocess.Popen(round_command(node, seed, servers, out, pages, only, scale, attempt, workers, reverse),
+                               cwd=os.path.join(ROOT, "frontend"), env={**clean_env(seed), SESSION_ENV: token},
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                               preexec_fn=lambda: die_with_parent(me))   # (single-threaded here; a prctl call and a check)
     try:
-        problem = servers.start()
-        if problem:
-            log.say(f"verify: {problem}", err=True)
-            return _crashed(only, f"the demo server didn't start: {problem.splitlines()[0]}")
-        log.say(f"verify: attempt {attempt}: demo data served at {servers.url} (and signed in, for the flows that need it, "
-                f"at {servers.signed_in_url}); waits up to {scale}x as long as on an idle machine")
-        args = [node, os.path.join(ROOT, "frontend", "verify", "verify.mjs"), "--url", servers.url, "--out", out,
-                "--signed-in-url", servers.signed_in_url, "--day", FROZEN_DAY, "--time-scale", str(scale),
-                "--attempt", str(attempt), *(["--only", ",".join(only)] if only else []), *pages]
-        env = {**clean_env(data), SESSION_ENV: token}
-        with subprocess.Popen(args, cwd=os.path.join(ROOT, "frontend"), env=env, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True, bufsize=1) as browser:
-            assert browser.stdout is not None
-            for line in browser.stdout:
-                log.say(line.rstrip("\n"))
-        code = browser.returncode
+        assert browser.stdout is not None
+        for line in browser.stdout:
+            log.say(line.rstrip("\n"))
+        code = browser.wait()
     finally:
-        servers.stop()
+        if browser.poll() is None:   # this process was interrupted: the browser run and its servers go too
+            browser.kill()
+            browser.wait()
+        if browser.stdout:
+            browser.stdout.close()
     try:
         with open(os.path.join(out, "report.json")) as f:
             report: dict[str, Any] = json.load(f)
@@ -609,3 +695,9 @@ def _round(folder: str, seed: str, pages: list[str], only: list[str] | None, sca
 
 def _crashed(only: list[str] | None, why: str) -> dict[str, Any]:
     return {"out": "", "items": [{"id": i, "ok": False, "files": [], "problems": [why]} for i in (only or ["run"])]}
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] != ["serve"]:
+        sys.exit("usage: python -m runway.verify serve --seed S --data D --port P [--signed-in] (make verify runs it)")
+    sys.exit(serve(sys.argv[2:]))

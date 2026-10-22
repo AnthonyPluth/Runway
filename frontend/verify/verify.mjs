@@ -1,19 +1,25 @@
 // Drives the running app with Playwright and collects proof: a full-page screenshot of each page at phone and desktop
-// widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which owns the
-// demo database and the servers, retries what failed and decides what's kept; run alone it needs a server that already
-// has the demo data.
+// widths, plus console errors and failed requests. Started by `python run.py verify` (runway/verify.py), which makes the
+// seeded demo data, retries what failed and decides what's kept.
 //
-//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [--time-scale 2] [--only page:budget,flow:x] [page or flow…]
+//   node verify/verify.mjs --seed <seeded data folder> --work <folder> --python <python> --out ../artifacts/verify [--jobs 4]
+//        [--time-scale 2] [--only page:budget,flow:x] [--reverse] [page or flow…]
+//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page or flow…]   (by hand, on a server already
+//        running: one item at a time on it; the signed-in flows and the device cache check are skipped)
 //
-// Each page, flow and the device cache check is an item; report.json says, item by item, whether it passed and what it
-// wrote (rewritten after each one, so a crash leaves the items it didn't reach marked as not run). An item fails on a
-// console error, an uncaught page error, a 5xx response, a failed scripted step or a screenshot that never settled.
+// Each page, flow and the device cache check is an item. With --seed every item gets a demo server and a copy of the
+// seeded data of its own (runway/verify.py's `serve`), started for it and stopped after it, so what an item shows never
+// depends on what another did; --jobs items run at once, each worker a browser of its own (jobs.mjs). With --url every
+// item uses that one server, one at a time. report.json says, item by item, whether it passed and what it wrote
+// (rewritten after each one, so a crash leaves the items it didn't reach marked as not run). An item fails on a console
+// error, an uncaught page error, a 5xx response, a failed scripted step or a screenshot that never settled.
 // Exits 1 when one failed, 2 when the run can't start (a malformed flow, an unknown page).
 import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
 // tools/fleet_checks.py reads to know the names of the images `make verify` writes.
@@ -188,6 +194,9 @@ export function selectItems(names, flows, only) {
   if (all || names.includes("transactions") || names.includes(DEVICE_CACHE)) items.push({ id: DEVICE_CACHE });
   return { items: only ? items.filter((i) => only.includes(i.id)) : items };
 }
+
+/** Whether an item runs signed in (on the signed-in demo server): a flow with "signed_in": true, and the device cache check. */
+export const signedInItem = (item) => (item.flow ? !!item.flow.signed_in : !item.page);
 
 // A flow's steps that check what's on screen, whose check is made again after a screenshot taken since the last action:
 // a state that falls apart while it's captured (a panel that closes again) fails the screenshot instead of being kept.
@@ -364,8 +373,8 @@ async function until(test, what, timeout = 10000) {
 /** The encrypted cache on the device (#379), end to end, with a passkey that gives a PRF secret: after an unlock the
  *  Transactions list is kept sealed (none of its text readable in IndexedDB); a cold start (a reload, then the unlock)
  *  paints it from the device before the server's list arrives (held back here), then the server's replaces it; past the
- *  72-hour window it isn't painted (it's wiped at launch); signing out leaves nothing in IndexedDB. It signs the shared
- *  session out at the end, so it runs after every flow. */
+ *  72-hour window it isn't painted (it's wiped at launch); signing out leaves nothing in IndexedDB. It signs the session
+ *  out at the end: on a server and data of its own, like every item, so no flow is left signed out. */
 async function cacheCheck(page, base) {
   const HOLD_MS = page.t(60000);
   // The lock screen offers the unlock on its own; should the browser want a tap first, the button.
@@ -436,8 +445,7 @@ async function main() {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = opt("--out", join(here, "../../artifacts/verify"));
   const flowsDir = opt("--flows", join(here, "flows"));
-  // The signed-in demo server (runway/verify.py), for flows with "signed_in": true, and its session's token.
-  const signedInUrl = opt("--signed-in-url", process.env.RUNWAY_VERIFY_SIGNED_IN_URL);
+  // The signed-in demo session's token (runway/verify.py), for flows with "signed_in": true and the device cache check.
   const session = process.env.RUNWAY_VERIFY_SESSION;
   // The day runway/verify.py froze the server and the demo seed at (libfaketime): the browser's clock is set to it too, so
   // the dates a page shows, and so its image, don't depend on the day it was taken. Run alone, with no --day, the clock is real.
@@ -445,9 +453,16 @@ async function main() {
   // How much to stretch every wait's limit (runway/verify.py: the machine's load, times the attempt), and which attempt.
   const baseScale = Number(opt("--time-scale", "1")), attempt = Number(opt("--attempt", "1"));
   const only = opt("--only", undefined)?.split(",").filter(Boolean);
+  // A server of its own for each item (runway/verify.py): the seeded data each one copies, the folder the copies go in and
+  // the Python that runs `serve`; how many items run at once, and whether the queue runs backwards (make verify-twice's second run).
+  const seed = opt("--seed", undefined), workDir = opt("--work", undefined), python = opt("--python", undefined);
+  const jobs = Number(opt("--jobs", "1"));
+  const reverse = args.includes("--reverse") && !!args.splice(args.indexOf("--reverse"), 1);
   if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) { console.error(`verify: --day is YYYY-MM-DD, not ${day}`); process.exit(2); }
   if (!(baseScale >= 1) || !(attempt >= 1)) { console.error("verify: --time-scale and --attempt are numbers, at least 1"); process.exit(2); }
-  if (!base) { console.error("verify: no server address (--url or RUNWAY_VERIFY_URL)"); process.exit(2); }
+  if (!Number.isInteger(jobs) || jobs < 1) { console.error("verify: --jobs is a whole number, at least 1"); process.exit(2); }
+  if (seed && !(workDir && python)) { console.error("verify: --seed needs --work and --python"); process.exit(2); }
+  if (!base && !seed) { console.error("verify: no server (--seed, or the address of one already running: --url or RUNWAY_VERIFY_URL)"); process.exit(2); }
 
   const flows = existsSync(flowsDir) ? readdirSync(flowsDir).filter((f) => f.endsWith(".json")).sort().map((f) => {
     let flow;
@@ -466,14 +481,11 @@ async function main() {
   mkdirSync(out, { recursive: true });
   // Rewritten after each item, so a run that dies part way says which items it never reached.
   // Every item there is (not only this run's), so tools/sync_screenshots.py can tell which item an image belongs to.
-  const report = { base, attempt, all_items: selectItems([], flows).items.map(({ id }) => id), items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
+  const report = { base: seed ? "a server of its own for each item" : base, attempt, jobs: seed ? jobs : 1, all_items: selectItems([], flows).items.map(({ id }) => id), items: items.map(({ id }) => ({ id, ok: false, files: [], failed_files: [], problems: ["not run (the run ended first)"], notes: [] })) };
   const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
   save();
-  // One raster thread: tiles rastered in parallel came out a level or two apart at an edge from run to run (a card's rounded corner
-  // behind the emoji picker). The images are otherwise the same, and a busy machine has no cores to spare anyway.
-  const browser = await chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1"] });
 
-  async function visit(result, label, viewport, work, signedIn = false, authenticator = {}) {
+  async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     // The device cache check moves the clock itself (setSystemTime), so it gets a running one; every other visit's clock is
     // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
@@ -500,7 +512,7 @@ async function main() {
     page.setDefaultTimeout(page.t(30000));
     page.setDefaultNavigationTimeout(page.t(30000));
     page.frozen = !!day && moves;
-    if (signedIn) await signIn(ctx, page, signedInUrl, session, authenticator);
+    if (signedIn) await signIn(ctx, page, urls.signedIn, session, authenticator);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
@@ -554,48 +566,96 @@ async function main() {
     await ctx.close();
   }
 
-  for (const item of items) {
-    const result = report.items.find((r) => r.id === item.id);
-    result.problems = [];
+  /** One item's visits (each width a new browser context), against `urls`: { base, signedIn } (the one that applies to it). */
+  async function runItem(browser, urls, item, result) {
     if (item.page) {
       for (const viewport of DEFAULT_VIEWPORTS) {
-        await visit(result, item.page, viewport, async (page, shot) => {
-          await page.goto(`${base}/#${item.page}`, { waitUntil: "networkidle" });
+        await visit(browser, urls, result, item.page, viewport, async (page, shot) => {
+          await page.goto(`${urls.base}/#${item.page}`, { waitUntil: "networkidle" });
           await shot(item.page);
           await shot(`${item.page}-${TOP}`, { top: true });
         });
       }
     } else if (item.flow) {
       const flow = item.flow;
-      if (flow.signed_in && !(signedInUrl && session)) result.notes.push(`flow ${flow.name}: skipped (no signed-in server: run it with make verify)`);
-      else {
-        for (const viewport of flow.viewports ?? DEFAULT_VIEWPORTS) {
-          await visit(result, `flow ${flow.name}`, viewport, async (page, shot) => {
-            await page.goto(`${flow.signed_in ? signedInUrl : base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
-            await waitSettled(page, page.t(15000));   // loaded before the first step picks something on it (a screenshot insists)
-            page.checks = [];
-            for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
-            await shot(`flow-${flow.name}`);
-          }, !!flow.signed_in);
+      for (const viewport of flow.viewports ?? DEFAULT_VIEWPORTS) {
+        await visit(browser, urls, result, `flow ${flow.name}`, viewport, async (page, shot) => {
+          await page.goto(`${flow.signed_in ? urls.signedIn : urls.base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
+          await waitSettled(page, page.t(15000));   // loaded before the first step picks something on it (a screenshot insists)
+          page.checks = [];
+          for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
+          await shot(`flow-${flow.name}`);
+        }, !!flow.signed_in);
+      }
+    } else {
+      await visit(browser, urls, result, DEVICE_CACHE, "desktop", (page) => cacheCheck(page, urls.signedIn), true, { prf: true });
+    }
+  }
+
+  const scale = timeScale(baseScale, attempt);
+  let started = 0;   // each server's folder is numbered, so no two are ever the same
+
+  /** Runs one item on a worker's browser: on a server and a copy of the data of its own (--seed), started for it and
+   *  stopped after, or on the one server it was given (--url). Its result goes into the report, which is saved. */
+  async function runOne(item, browser) {
+    const result = report.items.find((r) => r.id === item.id);
+    result.problems = [];
+    const signedIn = signedInItem(item);
+    if (signedIn && !session) result.notes.push(`${item.id}: skipped (no signed-in session: run it with make verify)`);
+    else if (signedIn && !seed) result.notes.push(`${item.id}: skipped (it needs a signed-in server of its own: run it with make verify)`);
+    else if (!seed) await runItem(browser, { base }, item, result);
+    else {
+      let server;
+      try {
+        server = await startServer({
+          command: (port, dir) => [python, "-m", "runway.verify", "serve", "--parent", String(process.pid), "--seed", seed, "--data", dir, "--port", String(port), ...(signedIn ? ["--signed-in"] : [])],
+          folder: join(workDir, `server-${++started}`), timeout: 60000 * scale, cwd: join(here, "../.."),
+        });
+      } catch (e) {
+        result.problems.push(`${item.id}: ${String(e.message).split("\n")[0]}`);
+        console.error(`${item.id}: ${e.message}`);   // with the end of the server's log
+      }
+      if (server) {
+        // The signed-in server is reached at localhost (its sign-in's public address), the other at the loopback address.
+        const url = `http://${signedIn ? "localhost" : "127.0.0.1"}:${server.port}`;
+        try {
+          await runItem(browser, signedIn ? { signedIn: url } : { base: url }, item, result);
+        } finally {
+          await server.stop();
         }
       }
-    } else if (signedInUrl && session) {   // the device cache check: last (selectItems), as it signs the shared session out
-      await visit(result, DEVICE_CACHE, "desktop", (page) => cacheCheck(page, signedInUrl), true, { prf: true });
-    } else {
-      result.notes.push(`${DEVICE_CACHE}: skipped (no signed-in server: run it with make verify)`);
     }
     result.ok = !result.problems.length;
     save();
     console.log(`  ${result.ok ? "ok  " : "FAIL"} ${item.id}${result.files.length ? ` (${result.files.length} image${result.files.length === 1 ? "" : "s"})` : ""}`);
     for (const n of result.notes) console.log(`       note: ${n}`);
     for (const p of result.problems) console.error(`       ${p}`);
+    return {};
   }
-  await browser.close();
+
+  // Each worker is a browser of its own. One raster thread: tiles rastered in parallel came out a level or two apart at an
+  // edge from run to run (a card's rounded corner behind the emoji picker). The images are otherwise the same, and a busy
+  // machine has no cores to spare anyway. With --url, one item at a time: they share that server.
+  const { outcomes, failures } = await runPool({
+    items, workers: seed ? jobs : 1, reverse,
+    prepare: () => chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1"] }),
+    work: runOne,
+    release: (browser) => browser.close(),
+  });
+  for (const f of failures) console.error(`verify: worker ${f.worker + 1} ${f.reason}`);
+  // What never ran, or what a worker stopped on (its browser gone): failed, saying why.
+  for (const o of outcomes.filter((x) => x.worker === null || x.problems?.length)) {
+    const result = report.items.find((r) => r.id === o.item.id);
+    result.problems = [...result.problems.filter((p) => !p.startsWith("not run")), ...o.problems];
+    result.ok = false;
+    console.error(`  FAIL ${o.item.id}: ${o.problems[0]}`);
+  }
+  save();
 
   const failed = report.items.filter((r) => !r.ok);
   const shots = report.items.reduce((n, r) => n + r.files.length, 0);
-  console.log(`verify: attempt ${attempt}: ${report.items.length} pages and flows, ${shots} screenshots in ${out}; ` +
-    (failed.length ? `FAILED: ${failed.map((r) => r.id).join(", ")}` : "all passed"));
+  console.log(`verify: attempt ${attempt}: ${report.items.length} pages and flows, ${shots} screenshots in ${out}` +
+    `${seed && jobs > 1 ? `, ${jobs} at a time` : ""}; ${failed.length ? `FAILED: ${failed.map((r) => r.id).join(", ")}` : "all passed"}`);
   process.exit(failed.length ? 1 : 0);
 }
 
