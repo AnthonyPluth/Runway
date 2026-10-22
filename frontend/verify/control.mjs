@@ -671,6 +671,12 @@ const tail = (file, n = 15) => { try { return readFileSync(file, "utf8").trim().
 
 async function start(options) {
   mkdirSync(CONTROL_DIR, { recursive: true });
+  // The lock first, then the look at the state: two starts at once can't both find no session and both launch one.
+  const release = takeStartLock();
+  try { return await startLocked(options); } finally { release(); }
+}
+
+async function startLocked(options) {
   const before = readState();
   const was = sessionStatus(before);
   if (was === "ready" || was === "starting") {
@@ -693,33 +699,28 @@ async function start(options) {
   }
   if (status.busy) notes.push(`the machine is busy (${status.busy_per_cpu} per CPU): waits are stretched`);
   if (status.verify_running) notes.push(`make verify is running (${status.verify_running}); this session doesn't touch it`);
-  const release = takeStartLock();
-  try {
-    const seed = seedOptions(options);
-    const log = openSync(join(CONTROL_DIR, "daemon.log"), "w", 0o600);
-    const child = spawn(process.execPath, [DAEMON, "--dir", CONTROL_DIR, "--python", python, "--day", status.frozen_day, "--viewport", options.viewport,
-      "--idle-minutes", String(options["idle-minutes"]), "--seed", seed.join(","), ...(options["signed-in"] ? ["--signed-in"] : [])],
-    { cwd: ROOT, detached: true, stdio: ["ignore", log, log] });
-    closeSync(log);
-    child.unref();
-    const end = Date.now() + 180000;
-    for (;;) {
-      await sleep(250);
-      const state = readState();
-      if (state?.pid === child.pid && state.status === "ready") {
-        return { started: true, url: state.base, route: state.route, viewport: state.viewport, seed: state.seed, signedIn: state.signedIn, clock: state.clock,
-          pid: state.pid, idleMinutes: state.idleMinutes, notes, next: [`${PROG} snapshot --text`, `${PROG} screenshot`, `${PROG} goto <route>`, `${PROG} stop`] };
-      }
-      const gone = !processAlive(child.pid);
-      if (state?.status === "failed" || gone || Date.now() > end) {
-        if (!gone) { try { process.kill(child.pid, "SIGTERM"); } catch { /* ended meanwhile */ } await waitGone(child.pid, 10000); }
-        await applyCleanup(cleanupPlan({ processes: controlProcesses() }));
-        throw new ControlError("start_failed", `the session didn't start: ${state?.error ?? (gone ? "its process ended" : "it wasn't ready after 3 minutes")}`,
-          `${tail(join(CONTROL_DIR, "daemon.log"), 8).replace(/\n/g, " | ")} — run \`${PROG} doctor\``);
-      }
+  const seed = seedOptions(options);
+  const log = openSync(join(CONTROL_DIR, "daemon.log"), "w", 0o600);
+  const child = spawn(process.execPath, [DAEMON, "--dir", CONTROL_DIR, "--python", python, "--day", status.frozen_day, "--viewport", options.viewport,
+    "--idle-minutes", String(options["idle-minutes"]), "--seed", seed.join(","), ...(options["signed-in"] ? ["--signed-in"] : [])],
+  { cwd: ROOT, detached: true, stdio: ["ignore", log, log] });
+  closeSync(log);
+  child.unref();
+  const end = Date.now() + 180000;
+  for (;;) {
+    await sleep(250);
+    const state = readState();
+    if (state?.pid === child.pid && state.status === "ready") {
+      return { started: true, url: state.base, route: state.route, viewport: state.viewport, seed: state.seed, signedIn: state.signedIn, clock: state.clock,
+        pid: state.pid, idleMinutes: state.idleMinutes, notes, next: [`${PROG} snapshot --text`, `${PROG} screenshot`, `${PROG} goto <route>`, `${PROG} stop`] };
     }
-  } finally {
-    release();
+    const gone = !processAlive(child.pid);
+    if (state?.status === "failed" || gone || Date.now() > end) {
+      if (!gone) { try { process.kill(child.pid, "SIGTERM"); } catch { /* ended meanwhile */ } await waitGone(child.pid, 10000); }
+      await applyCleanup(cleanupPlan({ processes: controlProcesses() }));
+      throw new ControlError("start_failed", `the session didn't start: ${state?.error ?? (gone ? "its process ended" : "it wasn't ready after 3 minutes")}`,
+        `${tail(join(CONTROL_DIR, "daemon.log"), 8).replace(/\n/g, " | ")} — run \`${PROG} doctor\``);
+    }
   }
 }
 

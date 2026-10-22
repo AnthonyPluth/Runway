@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARTIFACTS, ControlError, PROG, ROOT, closest, errorResult, jsExpression, lastShotNumber, parseTarget, readState, rel, removeState, routeUrl, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
 import { startServer } from "./jobs.mjs";
-import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
+import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, recheck, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MODAL = "[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible";
@@ -186,7 +186,8 @@ async function main() {
   }
 
   /** A screenshot taken as make verify takes one (verify.mjs's visit: settled, two matching captures), written to `path`. */
-  async function capture(path, { top = false, keepScroll = false } = {}) {
+  /** `checks`: a flow's shot, after which its expect_text and expect_focus steps must still hold, as make verify insists. */
+  async function capture(path, { top = false, keepScroll = false, checks = false } = {}) {
     let why = "";
     mkdirSync(dirname(path), { recursive: true });
     for (let i = 1; i <= SHOT_TRIES; i++) {
@@ -203,6 +204,8 @@ async function main() {
       const after = await page.evaluate(unsettled);
       if (after.length) { why = `started loading again: ${after.join("; ")}`; continue; }
       if (!first.equals(second)) { why = "still changing (two captures in a row differed)"; continue; }
+      const lost = checks ? await recheck(page) : null;
+      if (lost) throw new ControlError("check_lost", lost, "taking the screenshot changed the page (a panel closed, focus moved): make verify fails the flow the same way");
       writeFileSync(path, first);
       return { path: rel(path), fullPage: opts.fullPage, modal, tries: i };
     }
@@ -368,7 +371,7 @@ async function main() {
     const files = [], steps = [], problems = [];
     const out = join(dir, "flows");
     // Named as make verify names them (flow-<name>-<step>-<width>.png, and flow-<name>-<width>.png at the end), in artifacts/control/flows/.
-    const shotAs = async (file) => { files.push((await capture(join(out, screenshotFile(file, vp)), { keepScroll: !!page.scrolledByFlow })).path); };
+    const shotAs = async (file) => { files.push((await capture(join(out, screenshotFile(file, vp)), { keepScroll: !!page.scrolledByFlow, checks: true })).path); };
     page.checks = [];
     page.scrolledByFlow = false;
     await page.goto(`${base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });

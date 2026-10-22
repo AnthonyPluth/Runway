@@ -265,8 +265,8 @@ export async function runStep(page, step, shot) {
   if ("goto" in step || "reload" in step) await waitSettled(page, page.t(15000));   // (best effort: a screenshot insists)
 }
 
-/** Checks a flow's CHECKS steps again (after a screenshot); the first that no longer holds, or null. */
-async function recheck(page) {
+/** Checks a flow's CHECKS steps again (after a screenshot); the first that no longer holds, or null. (control.mjs's flows too.) */
+export async function recheck(page) {
   for (const step of page.checks ?? []) {
     try {
       await doStep(page, step, null, page.t(2000));
