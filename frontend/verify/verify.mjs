@@ -44,9 +44,12 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   return undefined;
 }
 
-/** How a worker's browser is launched (control.mjs's session's too). One raster thread: tiles rastered in parallel came
- *  out a level or two apart at an edge from run to run (a card's rounded corner behind the emoji picker). */
-export const launchOptions = () => ({ executablePath: findChromium(), args: ["--num-raster-threads=1"] });
+/** How a worker's browser is launched (control.mjs's session's too). No partial raster: with it, a tile that changed is
+ *  rastered again only where it was invalidated and keeps the rest from an earlier frame, so an edge across that boundary
+ *  (a card's rounded corner behind the emoji picker) came out a level or two apart depending on which frames were drawn:
+ *  15 to 45% of the emoji picker's captures, against none of 152 without it (whatever the number of raster threads, which
+ *  on its own changed nothing). One raster thread: a busy machine has no cores to spare anyway. */
+export const launchOptions = () => ({ executablePath: findChromium(), args: ["--num-raster-threads=1", "--disable-partial-raster"] });
 
 /** The moment the browser's clock starts at for a run frozen at `day` (YYYY-MM-DD): noon local time, as runway/verify.py's
  *  FROZEN_TIME is for the server (both read in the machine's time zone). The browser keeps it fixed for every visit but the device cache check, which installs a running clock from it so it can jump ahead. */
@@ -661,9 +664,7 @@ async function main() {
     return {};
   }
 
-  // Each worker is a browser of its own. One raster thread: tiles rastered in parallel came out a level or two apart at an
-  // edge from run to run (a card's rounded corner behind the emoji picker). The images are otherwise the same, and a busy
-  // machine has no cores to spare anyway. With --url, one item at a time: they share that server.
+  // Each worker is a browser of its own (launchOptions). With --url, one item at a time: they share that server.
   const { outcomes, failures } = await runPool({
     items, workers: seed ? jobs : 1, reverse,
     prepare: () => chromium.launch(launchOptions()),
