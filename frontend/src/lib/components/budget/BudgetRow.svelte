@@ -81,7 +81,7 @@
 
   const uid = $props.id();
   const title = $derived(`Edit ${c.name} budget`);
-  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : income && !sub ? "not set (Expected)" : "not set"}`
+  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : income && !sub ? "Expected, not set" : "not set"}`
     + (c.budget == null ? "" : canMonth && ownMonth ? `, ${monthName} only` : ", usual monthly amount"));
   const fieldCls = "inline-flex h-9 min-w-[5.25rem] cursor-pointer items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50 sm:h-7 sm:min-w-24 dark:bg-input/30";
 
