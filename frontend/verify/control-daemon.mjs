@@ -66,7 +66,8 @@ async function main() {
   const consoleBuffer = [], requests = [], offsite = [];
   let shots = 0;
 
-  async function shutdown(reason, code = 0) {
+  /** `keepState`: a start that failed leaves its state ("failed", and why) for `start` to read, which then removes it. */
+  async function shutdown(reason, code = 0, { keepState = false } = {}) {
     if (ending) return;
     ending = true;
     log(`stopping: ${reason}`);
@@ -76,7 +77,7 @@ async function main() {
     if (browser) await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 10000))]).catch(() => { /* gone already */ });
     if (server) await server.stop().catch((e) => log(`stopping the demo server: ${firstLine(e)}`));
     rmSync(sessionDir, { recursive: true, force: true });
-    if (readState(dir)?.pid === process.pid) removeState(dir);
+    if (!keepState && readState(dir)?.pid === process.pid) removeState(dir);
     process.exit(code);
   }
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => shutdown(`signal ${sig}`));
@@ -137,7 +138,7 @@ async function main() {
   } catch (e) {
     log(`start failed: ${e.stack ?? e}`);
     save({ status: "failed", error: firstLine(e) });
-    await shutdown("it failed to start", 1);
+    await shutdown("it failed to start", 1, { keepState: true });
     return;
   }
 
