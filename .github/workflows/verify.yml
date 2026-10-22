@@ -69,3 +69,8 @@ jobs:
       # 5xx, and prints each as a FAIL line naming the flow and the width.
       - name: Run the pages and flows
         run: poetry run python run.py verify
+      # tools/control (the session agents drive the app with) end to end on the same demo data and frozen clock: doctor,
+      # start, snapshot, screenshot, a flow, reset, stop, and nothing left running (frontend/verify/control-smoke.mjs).
+      - name: Drive the app with tools/control
+        if: ${{ !cancelled() }}
+        run: RUNWAY_PYTHON="$(poetry run python -c 'import sys; print(sys.executable)')" node frontend/verify/control-smoke.mjs
