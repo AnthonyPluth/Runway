@@ -633,12 +633,14 @@ async function main() {
     return {};
   }
 
-  // Each worker is a browser of its own. One raster thread: tiles rastered in parallel came out a level or two apart at an
-  // edge from run to run (a card's rounded corner behind the emoji picker). The images are otherwise the same, and a busy
-  // machine has no cores to spare anyway. With --url, one item at a time: they share that server.
+  // Each worker is a browser of its own. No partial raster: with it, a tile that changed is rastered again only where it
+  // was invalidated and keeps the rest from an earlier frame, so an edge across that boundary (a card's rounded corner
+  // behind the emoji picker) came out a level or two apart depending on which frames were drawn: about half the captures
+  // of the emoji picker, against none of 72 without it. One raster thread: a busy machine has no cores to spare anyway.
+  // With --url, one item at a time: they share that server.
   const { outcomes, failures } = await runPool({
     items, workers: seed ? jobs : 1, reverse,
-    prepare: () => chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1"] }),
+    prepare: () => chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1", "--disable-partial-raster"] }),
     work: runOne,
     release: (browser) => browser.close(),
   });
