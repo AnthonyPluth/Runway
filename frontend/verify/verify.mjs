@@ -4,7 +4,8 @@
 //
 //   node verify/verify.mjs --seed <seeded data folder> --work <folder> --python <python> --out ../artifacts/verify [--jobs 4]
 //        [--time-scale 2] [--only page:budget,flow:x] [--reverse] [page or flow…]
-//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page or flow…]   (a server already running)
+//   node verify/verify.mjs --url http://127.0.0.1:8765 --out ../artifacts/verify [page or flow…]   (by hand, on a server already
+//        running: one item at a time on it; the signed-in flows and the device cache check are skipped)
 //
 // Each page, flow and the device cache check is an item. With --seed every item gets a demo server and a copy of the
 // seeded data of its own (runway/verify.py's `serve`), started for it and stopped after it, so what an item shows never
@@ -444,8 +445,7 @@ async function main() {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = opt("--out", join(here, "../../artifacts/verify"));
   const flowsDir = opt("--flows", join(here, "flows"));
-  // The signed-in demo server (runway/verify.py), for flows with "signed_in": true, and its session's token.
-  const signedInUrl = opt("--signed-in-url", process.env.RUNWAY_VERIFY_SIGNED_IN_URL);
+  // The signed-in demo session's token (runway/verify.py), for flows with "signed_in": true and the device cache check.
   const session = process.env.RUNWAY_VERIFY_SESSION;
   // The day runway/verify.py froze the server and the demo seed at (libfaketime): the browser's clock is set to it too, so
   // the dates a page shows, and so its image, don't depend on the day it was taken. Run alone, with no --day, the clock is real.
@@ -602,13 +602,13 @@ async function main() {
     result.problems = [];
     const signedIn = signedInItem(item);
     if (signedIn && !session) result.notes.push(`${item.id}: skipped (no signed-in session: run it with make verify)`);
-    else if (signedIn && !seed && !signedInUrl) result.notes.push(`${item.id}: skipped (no signed-in server: run it with make verify)`);
-    else if (!seed) await runItem(browser, { base, signedIn: signedInUrl }, item, result);
+    else if (signedIn && !seed) result.notes.push(`${item.id}: skipped (it needs a signed-in server of its own: run it with make verify)`);
+    else if (!seed) await runItem(browser, { base }, item, result);
     else {
       let server;
       try {
         server = await startServer({
-          command: (port, dir) => [python, "-m", "runway.verify", "serve", "--seed", seed, "--data", dir, "--port", String(port), ...(signedIn ? ["--signed-in"] : [])],
+          command: (port, dir) => [python, "-m", "runway.verify", "serve", "--parent", String(process.pid), "--seed", seed, "--data", dir, "--port", String(port), ...(signedIn ? ["--signed-in"] : [])],
           folder: join(workDir, `server-${++started}`), timeout: 60000 * scale, cwd: join(here, "../.."),
         });
       } catch (e) {

@@ -142,11 +142,15 @@ def server_command(port: int) -> list[str]:
 _PR_SET_PDEATHSIG = 1
 
 
-def die_with_parent(sig: int = signal.SIGTERM) -> None:
+def die_with_parent(parent: int | None = None, sig: int = signal.SIGTERM) -> None:
     """Asks Linux to send this process `sig` when the process that started it ends, however it ends (killed included), so
-    a demo server (or the browser run) never outlives the run that started it. Kept across exec. Best effort elsewhere."""
+    a demo server (or the browser run) never outlives the run that started it. Kept across exec. Best effort elsewhere.
+    Called first thing in the child. `parent`: the pid that started it, taken before it did: when that process already
+    ended (before the request was made, which then watches whoever took the child in), the child is sent `sig` now."""
     with contextlib.suppress(OSError, AttributeError):
         ctypes.CDLL(None, use_errno=True).prctl(_PR_SET_PDEATHSIG, int(sig))
+    if parent is not None and os.getppid() != parent:
+        os.kill(os.getpid(), sig)
 
 
 def server_env(data: str, port: int, lib: str, signed_in: bool, base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -157,23 +161,36 @@ def server_env(data: str, port: int, lib: str, signed_in: bool, base: Mapping[st
 
 
 def serve(argv: list[str]) -> int:
-    """`python -m runway.verify serve --seed S --data D --port P [--signed-in]`: what verify.mjs runs for each page, flow
-    and check. Copies the seeded data S into D, a new folder (one that exists is refused: no item shares another's
-    data), and becomes the demo server on it (exec), on port P, its output in D/server.log. It ends when verify.mjs, its
-    parent, does (die_with_parent)."""
+    """`python -m runway.verify serve --parent PID --seed S --data D --port P [--signed-in]`: what verify.mjs (PID) runs for
+    each page, flow and check. Copies the seeded data S into D, a new folder (one that exists is refused: no item shares
+    another's data), and becomes the demo server on it (exec), on port P, its output in D/server.log. It ends when
+    verify.mjs does (die_with_parent, asked for before anything else, so even one killed while this copies); ended
+    before the exec, it removes the copy it made."""
     p = argparse.ArgumentParser(prog="python -m runway.verify serve")
+    p.add_argument("--parent", type=int, required=True)
     p.add_argument("--seed", required=True)
     p.add_argument("--data", required=True)
     p.add_argument("--port", type=int, required=True)
     p.add_argument("--signed-in", action="store_true")
     a = p.parse_args(argv)
+    made = [False]   # D is this process's own copy (not a folder that was already there)
+
+    def ended(signum: int, _frame: object) -> None:   # until the exec, which puts the default back
+        if made[0]:
+            shutil.rmtree(a.data, ignore_errors=True)
+        os._exit(128 + signum)
+    signal.signal(signal.SIGTERM, ended)
+    die_with_parent(a.parent)
     lib = find_libfaketime()
     if not lib:
         print(libfaketime_missing_message(), file=sys.stderr)
         return 2
     try:
+        made[0] = not os.path.lexists(a.data)
         shutil.copytree(a.seed, a.data)   # FileExistsError for a folder that's already there
     except OSError as e:
+        if made[0]:
+            shutil.rmtree(a.data, ignore_errors=True)
         print(f"verify: couldn't copy the demo data into {a.data}: {e.strerror or e}", file=sys.stderr)
         return 2
     log = os.open(os.path.join(a.data, "server.log"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -181,7 +198,6 @@ def serve(argv: list[str]) -> int:
     os.dup2(log, 2)
     os.close(log)
     os.chdir(ROOT)
-    die_with_parent()
     command = server_command(a.port)
     os.execve(command[0], command, server_env(a.data, a.port, lib, a.signed_in))
     return 1   # (execve doesn't return)
@@ -647,10 +663,11 @@ def _round(folder: str, seed: str, pages: list[str], only: list[str] | None, sca
     log.say(f"verify: attempt {attempt}: {'one page or flow at a time' if workers == 1 else f'{workers} pages and flows at a time'}, "
             f"each on a demo server and a fresh copy of the demo data of its own; waits up to {scale}x as long as on an idle machine")
     # The browser run ends with this one (die_with_parent), and its servers with it, should this process be killed.
+    me = os.getpid()
     browser = subprocess.Popen(round_command(node, seed, servers, out, pages, only, scale, attempt, workers, reverse),
                                cwd=os.path.join(ROOT, "frontend"), env={**clean_env(seed), SESSION_ENV: token},
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-                               preexec_fn=die_with_parent)   # (single-threaded here, and only a prctl call)
+                               preexec_fn=lambda: die_with_parent(me))   # (single-threaded here; a prctl call and a check)
     try:
         assert browser.stdout is not None
         for line in browser.stdout:

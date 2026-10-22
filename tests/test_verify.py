@@ -2,6 +2,7 @@ import contextlib
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -76,19 +77,29 @@ class ServeTests(unittest.TestCase):
         with open(os.path.join(self.seed, "runway.db"), "w") as f:
             f.write("seeded")
 
-    def serve(self, data, *extra, env=None):
-        """Runs serve() up to the exec, which it records: (program, argv, env), or the exit code when it stops first."""
-        with mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
-                mock.patch.object(verify, "die_with_parent") as died, mock.patch("os.dup2"), mock.patch("os.chdir") as moved, \
-                mock.patch("os.execve", side_effect=Exec) as execve, \
+    def serve(self, data, *extra, env=None, lib="/lib/libfaketime.so.1"):
+        """Runs serve() up to the exec, which it records: (program, argv, env), or the exit code when it stops first.
+        Its parent-death request is made first, before any copying, with verify.mjs's pid (here 4242)."""
+        order = []
+        real_copytree = shutil.copytree
+
+        def copytree(*args, **kwargs):
+            order.append("copy")
+            return real_copytree(*args, **kwargs)
+        with mock.patch.object(verify, "find_libfaketime", return_value=lib), \
+                mock.patch.object(verify, "die_with_parent", side_effect=lambda parent: order.append(("die_with_parent", parent))), \
+                mock.patch("signal.signal") as handled, mock.patch("shutil.copytree", copytree), \
+                mock.patch("os.dup2"), mock.patch("os.chdir") as moved, mock.patch("os.execve", side_effect=Exec) as execve, \
                 mock.patch.dict("os.environ", {"PATH": "/bin", verify.SESSION_ENV: "secret-token", **(env or {})}), \
                 mock.patch("sys.stderr"):
             try:
-                code = verify.serve(["--seed", self.seed, "--data", data, "--port", "8123", *extra])
+                code = verify.serve(["--parent", "4242", "--seed", self.seed, "--data", data, "--port", "8123", *extra])
             except Exec:
-                died.assert_called_once()
+                self.assertEqual(order, [("die_with_parent", 4242), "copy"])
+                self.assertEqual(handled.call_args.args[0], signal.SIGTERM)   # set before die_with_parent could fire
                 moved.assert_called_once_with(verify.ROOT)
                 return execve.call_args.args
+            self.assertEqual(order[0], ("die_with_parent", 4242))
             execve.assert_not_called()
             return code
 
@@ -127,18 +138,54 @@ class ServeTests(unittest.TestCase):
 
     def test_without_libfaketime_it_refuses_and_copies_nothing(self):
         data = os.path.join(self.tmp, "item")
-        with mock.patch.object(verify, "find_libfaketime", return_value=None), mock.patch("os.execve") as execve, \
-                mock.patch("sys.stderr"):
-            self.assertEqual(verify.serve(["--seed", self.seed, "--data", data, "--port", "1"]), 2)
+        self.assertEqual(self.serve(data, lib=None), 2)
+        self.assertFalse(os.path.exists(data))
+
+    def test_ended_while_it_copies_it_removes_its_copy_and_never_starts_the_server(self):
+        """verify.mjs killed while this copies the data: die_with_parent's SIGTERM arrives part way through the copy."""
+        data = os.path.join(self.tmp, "item")
+        handlers = {}
+
+        def copytree(src, dst):
+            os.makedirs(dst)
+            with open(os.path.join(dst, "runway.db"), "w") as f:
+                f.write("half")
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+        with mock.patch.object(verify, "die_with_parent"), mock.patch("signal.signal", side_effect=handlers.__setitem__), \
+                mock.patch("shutil.copytree", copytree), mock.patch("os._exit", side_effect=Exec) as exited, \
+                mock.patch("os.execve") as execve, mock.patch.object(verify, "find_libfaketime", return_value="/lib/x.so"):
+            with self.assertRaises(Exec):
+                verify.serve(["--parent", "1", "--seed", self.seed, "--data", data, "--port", "1"])
+        exited.assert_called_once_with(128 + signal.SIGTERM)
         execve.assert_not_called()
+        self.assertFalse(os.path.exists(data))
+        # A folder that was already there (refused) is never removed by it.
+        os.makedirs(data)
+        with mock.patch.object(verify, "die_with_parent"), mock.patch("signal.signal", side_effect=handlers.__setitem__), \
+                mock.patch("os._exit", side_effect=Exec), mock.patch("sys.stderr"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/x.so"):
+            self.assertEqual(verify.serve(["--parent", "1", "--seed", self.seed, "--data", data, "--port", "1"]), 2)
+            with self.assertRaises(Exec):
+                handlers[signal.SIGTERM](signal.SIGTERM, None)
+        self.assertTrue(os.path.isdir(data))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "prctl is Linux's")
+    def test_a_server_whose_parent_ended_before_it_asked_ends_at_once_having_copied_nothing(self):
+        """The window before the request: verify.mjs gone already, the child taken in by another process. serve() sees
+        its parent isn't the pid it was given and ends, before copying anything or starting a server."""
+        data = os.path.join(self.tmp, "item")
+        done = subprocess.run([sys.executable, "-m", "runway.verify", "serve", "--parent", "1", "--seed", self.seed, "--data", data,
+                               "--port", "1"], cwd=verify.ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 128 + signal.SIGTERM, done.stderr)
         self.assertFalse(os.path.exists(data))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "prctl is Linux's")
     def test_a_server_ends_when_the_run_that_started_it_is_killed(self):
         """die_with_parent: a demo server (or the browser run) never outlives what started it, even one killed outright."""
-        code = ("import subprocess, sys, time\n"
+        code = ("import os, subprocess, sys, time\n"
                 "from runway import verify\n"
-                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], preexec_fn=verify.die_with_parent)\n"
+                "me = os.getpid()\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], preexec_fn=lambda: verify.die_with_parent(me))\n"
                 "print(child.pid, flush=True)\n"
                 "time.sleep(60)\n")
         parent = subprocess.Popen([sys.executable, "-c", code], cwd=verify.ROOT, stdout=subprocess.PIPE, text=True)
