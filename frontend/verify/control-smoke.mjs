@@ -3,7 +3,7 @@
 // running. It uses a control folder of its own (artifacts/control-smoke/), so it never touches a session you have open.
 // Prints each command and its answer; exits 1 on the first that isn't what it should be.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,9 +12,11 @@ const root = join(here, "../..");
 const dir = join(root, "artifacts", "control-smoke");
 const env = { ...process.env, RUNWAY_CONTROL_DIR: dir };
 
-function control(...args) {
+function control(...args) { return controlWith(env, ...args); }
+
+function controlWith(withEnv, ...args) {
   console.log(`$ tools/control ${args.join(" ")}`);
-  const r = spawnSync(process.execPath, [join(here, "control.mjs"), ...args], { cwd: root, env, encoding: "utf8", timeout: 300000 });
+  const r = spawnSync(process.execPath, [join(here, "control.mjs"), ...args], { cwd: root, env: withEnv, encoding: "utf8", timeout: 300000 });
   const out = (r.stdout ?? "").trim();
   console.log(out.length > 1500 ? `${out.slice(0, 1500)}…` : out);
   let json = null;
@@ -34,6 +36,15 @@ const pngWidth = (file) => readFileSync(file).readUInt32BE(16);
 rmSync(dir, { recursive: true, force: true });
 let r = control("doctor");
 expect(r.json && r.json.checks.filter((c) => !c.ok && c.name !== "machine load").length === 0, "doctor: every check passes (the machine's load aside)");
+
+// A start that fails says why: here a "Chromium" that exits at once (the session's own browser lookup finds it first).
+const fake = join(dir, "fake-browsers");
+mkdirSync(join(fake, "chromium-0", "chrome-linux"), { recursive: true });
+writeFileSync(join(fake, "chromium-0", "chrome-linux", "chrome"), "#!/bin/sh\necho 'not a browser' >&2\nexit 1\n", { mode: 0o755 });
+r = controlWith({ ...env, PLAYWRIGHT_BROWSERS_PATH: fake }, "start", "--anyway", "--plain");
+expect(r.code === 1 && r.json?.error?.code === "start_failed" && !r.json.error.message.includes("its process ended") && !existsSync(join(dir, "state.json")),
+  "a start that fails reports the session's own error, and leaves no state behind");
+rmSync(fake, { recursive: true, force: true });
 
 // --anyway: a busy CI runner or container shouldn't fail the smoke test (start refusing on a busy machine is unit-tested).
 r = control("start", "--anyway");

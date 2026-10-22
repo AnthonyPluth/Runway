@@ -667,7 +667,10 @@ function takeStartLock() {
   throw new ControlError("already_starting", "couldn't take artifacts/control/start.lock", `\`${PROG} cleanup\``);
 }
 
-const tail = (file, n = 15) => { try { return readFileSync(file, "utf8").trim().split("\n").slice(-n).join("\n"); } catch { return ""; /* no log yet */ } };
+// The end of a log, without its terminal colors (Playwright's call log has them) or blank lines.
+// eslint-disable-next-line no-control-regex -- the escape character is what a color code starts with
+const ANSI = /\u001b\[[0-9;]*m/g;
+const tail = (file, n = 15) => { try { return readFileSync(file, "utf8").replace(ANSI, "").split("\n").filter((l) => l.trim()).slice(-n).join("\n"); } catch { return ""; /* no log yet */ } };
 
 async function start(options) {
   mkdirSync(CONTROL_DIR, { recursive: true });
@@ -719,7 +722,7 @@ async function startLocked(options) {
       if (!gone) { try { process.kill(child.pid, "SIGTERM"); } catch { /* ended meanwhile */ } await waitGone(child.pid, 10000); }
       await applyCleanup(cleanupPlan({ processes: controlProcesses() }));
       throw new ControlError("start_failed", `the session didn't start: ${state?.error ?? (gone ? "its process ended" : "it wasn't ready after 3 minutes")}`,
-        `${tail(join(CONTROL_DIR, "daemon.log"), 8).replace(/\n/g, " | ")} — run \`${PROG} doctor\``);
+        `the end of ${rel(join(CONTROL_DIR, "daemon.log"))}: ${tail(join(CONTROL_DIR, "daemon.log"), 4).replace(/\s*\n\s*/g, " | ")} — run \`${PROG} doctor\``);
     }
   }
 }
