@@ -770,6 +770,14 @@ export function screenshotTarget(path, root = ROOT) {
   return full;
 }
 
+/** The session's reply as a command's data, or the error it reports. A failure keeps the reply's other fields (a failed
+ *  flow's steps, its -FAILED- image and notes): they are what says where it went wrong. */
+export function replyData(reply) {
+  const { ok, error, command: _command, ...rest } = reply ?? {};
+  if (ok) return rest;
+  throw Object.assign(new ControlError(error?.code ?? "failed", error?.message ?? "the command failed", error?.hint ?? ""), Object.keys(rest).length ? { data: rest } : {});
+}
+
 // --- Output ---------------------------------------------------------------------------------------------------------
 
 const scalar = (v) => v === null || ["string", "number", "boolean"].includes(typeof v);
@@ -844,10 +852,7 @@ export async function run(argv) {
       if (command === "reset" && options["dry-run"]) data = resetPlan(state);
       else {
         const target = command === "screenshot" ? screenshotTarget(args[0]) : undefined;
-        const reply = await rpc(state, { command, args, options, ...(target ? { path: target } : {}) }, command === "flow" ? 600000 : 180000);
-        if (!reply.ok) throw new ControlError(reply.error?.code ?? "failed", reply.error?.message ?? "the command failed", reply.error?.hint ?? "");
-        const { ok: _ok, ...rest } = reply;
-        data = rest;
+        data = replyData(await rpc(state, { command, args, options, ...(target ? { path: target } : {}) }, command === "flow" ? 600000 : 180000));
       }
     }
     return { result: { ok: true, command, ...data }, exit: 0, text };

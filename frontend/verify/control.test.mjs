@@ -131,6 +131,31 @@ describe("the JSON error shape", () => {
   });
 });
 
+describe("the session's reply", () => {
+  it("is the command's data when it worked", () => {
+    expect(c.replyData({ ok: true, route: "/#budget", settled: true })).toEqual({ route: "/#budget", settled: true });
+  });
+
+  it("keeps a failed flow's steps, image and notes with its error", () => {
+    const reply = { ok: false, command: "flow", error: { code: "flow_failed", message: "x failed: step 2 failed", hint: "look" },
+      flow: "x", steps: [{ n: 1, ok: true }, { n: 2, ok: false, error: "Timeout" }], files: ["artifacts/control/flows/flow-x-FAILED-phone.png"], notes: ["n"] };
+    let thrown;
+    try { c.replyData(reply); } catch (e) { thrown = e; }
+    const result = c.errorResult("flow", thrown);
+    expect(result).toMatchObject({ ok: false, command: "flow", error: { code: "flow_failed", hint: "look" }, steps: reply.steps, files: reply.files, notes: ["n"] });
+    const text = c.renderText(result);
+    expect(text).toContain("FAIL  2");
+    expect(text).toContain("flow-x-FAILED-phone.png");
+  });
+
+  it("is an error without extra fields when the reply has none", () => {
+    let thrown;
+    try { c.replyData({ ok: false, error: { code: "no_match", message: "nothing" } }); } catch (e) { thrown = e; }
+    expect(thrown).toMatchObject({ code: "no_match", message: "nothing" });
+    expect(thrown.data).toBeUndefined();
+  });
+});
+
 describe("help", () => {
   it("lists every command in the overview and has help for each", async () => {
     const overview = (await c.run(["--help"])).help;

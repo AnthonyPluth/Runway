@@ -70,6 +70,11 @@ control("network");
 r = control("flow", "transactions-delete", "--viewport", "desktop");
 expect(r.code === 0 && r.json?.steps?.every((s) => s.ok) && r.json.files.length === 4, "flow: transactions-delete passes, step by step, with its 4 images");
 
+// A flow that fails keeps its step report: at the phone's width the rows' Delete buttons only show on hover (gotchas.md).
+r = control("flow", "transactions-delete", "--viewport", "phone");
+expect(r.code === 1 && r.json?.error?.code === "flow_failed" && r.json.steps?.some((s) => !s.ok && s.error)
+  && r.json.files?.some((f) => f.includes("-FAILED-")), "a failed flow says which step failed, why, and where its -FAILED- image is");
+
 r = control("reset", "--dry-run");
 expect(r.json?.dryRun === true, "reset --dry-run says what it would do");
 r = control("reset");

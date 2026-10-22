@@ -333,10 +333,15 @@ async function main() {
     async flow({ args, options: o }) { return runFlow(args[0], o); },
     async reset() {
       const at = route();
-      const old = server;
-      server = null;
-      await old.stop();
-      await newServer();
+      // The new server first: if it can't start, the session keeps the one it had (and says why), never none at all.
+      const old = server, oldBase = base;
+      try { await newServer(); } catch (e) {
+        if (server && server !== old) await server.stop().catch(() => { /* it never fully started */ });
+        server = old;
+        base = oldBase;
+        throw new ControlError("reset_failed", `couldn't start a demo server on fresh data: ${firstLine(e)}`, `the session still has its old server and data; try again, or \`${PROG} stop\` and \`${PROG} start\``);
+      }
+      await old.stop().catch((e) => log(`stopping the old demo server: ${firstLine(e)}`));
       save({ base, port: server.port });
       await page.goto(`${base}${at}`, { waitUntil: "networkidle" });
       return { reset: true, server: base, route: route(), seed: opt.seed, ...(await settledNow(15000)) };
