@@ -59,29 +59,235 @@ class RunPyFileArgumentTests(unittest.TestCase):
             self.assertIn("Which backup file?", done.stderr)
 
 
+class Exec(Exception):
+    """What a mocked os.execve raises in place of becoming the server."""
+
+
+class ServeTests(unittest.TestCase):
+    """`python -m runway.verify serve`: each page, flow and check's own demo server, on its own copy of the data.
+    (Waiting for it to answer, and trying another port, is frontend/verify/jobs.mjs's startServer: jobs.test.mjs.)"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.seed = os.path.join(self.tmp, "seed")
+        os.makedirs(self.seed)
+        with open(os.path.join(self.seed, "runway.db"), "w") as f:
+            f.write("seeded")
+
+    def serve(self, data, *extra, env=None):
+        """Runs serve() up to the exec, which it records: (program, argv, env), or the exit code when it stops first."""
+        with mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.object(verify, "die_with_parent") as died, mock.patch("os.dup2"), mock.patch("os.chdir") as moved, \
+                mock.patch("os.execve", side_effect=Exec) as execve, \
+                mock.patch.dict("os.environ", {"PATH": "/bin", verify.SESSION_ENV: "secret-token", **(env or {})}), \
+                mock.patch("sys.stderr"):
+            try:
+                code = verify.serve(["--seed", self.seed, "--data", data, "--port", "8123", *extra])
+            except Exec:
+                died.assert_called_once()
+                moved.assert_called_once_with(verify.ROOT)
+                return execve.call_args.args
+            execve.assert_not_called()
+            return code
+
+    def test_each_item_gets_a_copy_of_the_data_of_its_own_and_an_existing_folder_is_refused(self):
+        one, two = os.path.join(self.tmp, "one"), os.path.join(self.tmp, "two")
+        self.serve(one)
+        self.serve(two)
+        with open(os.path.join(one, "runway.db"), "a") as f:
+            f.write(", then changed by one item")
+        with open(os.path.join(two, "runway.db")) as f:
+            self.assertEqual(f.read(), "seeded")   # the other item's copy, and the seed, are untouched
+        with open(os.path.join(self.seed, "runway.db")) as f:
+            self.assertEqual(f.read(), "seeded")
+        self.assertTrue(os.path.isfile(os.path.join(one, "server.log")))   # its output, beside its data
+        self.assertEqual(self.serve(one), 2)   # never on a folder another item has (or had)
+        with open(os.path.join(one, "runway.db")) as f:
+            self.assertIn("changed by one item", f.read())
+
+    def test_it_becomes_the_frozen_demo_server_on_its_port_and_data_without_the_session_token(self):
+        data = os.path.join(self.tmp, "item")
+        program, argv, env = self.serve(data)
+        self.assertEqual((program, argv), (sys.executable, verify.server_command(8123)))
+        self.assertEqual(env["RUNWAY_DATA"], data)
+        self.assertEqual((env["LD_PRELOAD"], env["FAKETIME"]), ("/lib/libfaketime.so.1", verify.FROZEN_TIME))
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], verify.SITE_DIR)   # verify_site/sitecustomize.py, each server
+        self.assertNotIn(verify.SESSION_ENV, env)
+        self.assertFalse(any(k.startswith("OIDC_") for k in env))
+
+    def test_a_signed_in_server_signs_in_at_its_own_address_and_never_sees_real_settings(self):
+        _, _, env = self.serve(os.path.join(self.tmp, "item"), "--signed-in",
+                                        env={"DATABASE_URL": "postgresql://real", "PLAID_SECRET": "real"})
+        self.assertEqual(env["RUNWAY_PUBLIC_URL"], "http://localhost:8123")
+        self.assertEqual(env["OIDC_ALLOWED_EMAILS"], verify.DEMO_EMAIL)
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("PLAID_SECRET", env)
+
+    def test_without_libfaketime_it_refuses_and_copies_nothing(self):
+        data = os.path.join(self.tmp, "item")
+        with mock.patch.object(verify, "find_libfaketime", return_value=None), mock.patch("os.execve") as execve, \
+                mock.patch("sys.stderr"):
+            self.assertEqual(verify.serve(["--seed", self.seed, "--data", data, "--port", "1"]), 2)
+        execve.assert_not_called()
+        self.assertFalse(os.path.exists(data))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "prctl is Linux's")
+    def test_a_server_ends_when_the_run_that_started_it_is_killed(self):
+        """die_with_parent: a demo server (or the browser run) never outlives what started it, even one killed outright."""
+        code = ("import subprocess, sys, time\n"
+                "from runway import verify\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], preexec_fn=verify.die_with_parent)\n"
+                "print(child.pid, flush=True)\n"
+                "time.sleep(60)\n")
+        parent = subprocess.Popen([sys.executable, "-c", code], cwd=verify.ROOT, stdout=subprocess.PIPE, text=True)
+        try:
+            assert parent.stdout is not None
+            child = int(parent.stdout.readline())
+            self.assertTrue(_alive(child))
+            parent.kill()
+            parent.wait()
+            end = time.monotonic() + 10
+            while _alive(child) and time.monotonic() < end:
+                time.sleep(0.05)
+            self.assertFalse(_alive(child))
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+            if parent.stdout:
+                parent.stdout.close()
+
+
+def _alive(pid: int) -> bool:
+    """Whether pid is a running process (a zombie, ended but not yet reaped, counts as ended)."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+class WorkerTests(unittest.TestCase):
+    """How many pages and flows run at once (VERIFY_JOBS), and the browser run's command line."""
+
+    def test_verify_jobs_is_a_whole_number_of_one_or_more_or_unset(self):
+        self.assertIsNone(verify.requested_jobs({}))
+        self.assertIsNone(verify.requested_jobs({verify.JOBS_ENV: " "}))
+        self.assertEqual(verify.requested_jobs({verify.JOBS_ENV: "1"}), 1)
+        self.assertEqual(verify.requested_jobs({verify.JOBS_ENV: " 6 "}), 6)
+        for bad in ("0", "-2", "two", "1.5"):
+            with self.assertRaisesRegex(ValueError, "VERIFY_JOBS is a whole number"):
+                verify.requested_jobs({verify.JOBS_ENV: bad})
+
+    def test_a_run_with_a_bad_verify_jobs_stops_before_it_takes_the_machine(self):
+        with mock.patch("os.path.isdir", return_value=True), mock.patch("os.path.isfile", return_value=True), \
+                mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.dict("os.environ", {verify.JOBS_ENV: "lots"}), mock.patch.object(verify, "machine_lock") as lock, \
+                mock.patch("builtins.print") as out:
+            self.assertEqual(verify.run([]), 2)
+        lock.assert_not_called()
+        self.assertIn("VERIFY_JOBS", out.call_args.args[0])
+
+    def test_by_default_one_worker_per_spare_cpu_at_most_four(self):
+        self.assertEqual(verify.worker_count(None, 0.0, 4), 4)
+        self.assertEqual(verify.worker_count(None, 0.0, 16), verify.MAX_JOBS)
+        self.assertEqual(verify.worker_count(None, 0.0, 2), 2)
+        self.assertEqual(verify.worker_count(None, 0.0, 1), 1)
+
+    def test_the_busier_the_machine_the_fewer_workers_down_to_one(self):
+        self.assertEqual(verify.worker_count(None, 0.3, 4), 3)    # 1.2 of 4 CPUs taken: 3 left
+        self.assertEqual(verify.worker_count(None, 0.5, 4), 2)
+        self.assertEqual(verify.worker_count(None, 0.8, 4), 1)
+        self.assertEqual(verify.worker_count(None, 1.5, 4), 1)    # as busy as wait_for_quiet lets a run start: one at a time
+        self.assertEqual(verify.worker_count(None, 12.0, 4), 1)   # it waited, and went ahead anyway
+        self.assertEqual(verify.worker_count(None, 0.5, 16), verify.MAX_JOBS)
+
+    def test_busy_now_counts_what_is_running_now_not_this_run_and_not_the_minute_s_average(self):
+        counts, slept = iter([1, 3, 5, 3]), []
+        busy = verify.busy_now(4, 0.1, running=lambda: next(counts), cpus=lambda: 4, sleep=slept.append)
+        self.assertEqual(busy, (0 + 2 + 4 + 2) / 4 / 4)   # this process doesn't count itself
+        self.assertEqual(slept, [0.1, 0.1, 0.1])
+        with tempfile.NamedTemporaryFile("w", suffix="loadavg") as f:   # /proc/loadavg's form: the running count is the 4th field
+            f.write("5.10 3.20 1.00 3/412 9999\n")
+            f.flush()
+            self.assertEqual(verify._running(f.name), 3)
+
+    def test_busy_now_falls_back_to_the_load_average_where_it_cannot_read_the_running_count(self):
+        def unreadable():
+            raise OSError("no /proc")
+        with mock.patch.object(verify, "load_per_cpu", return_value=1.5) as average:
+            self.assertEqual(verify.busy_now(running=unreadable, cpus=lambda: 4, sleep=self.fail), 1.5)
+        self.assertEqual(average.call_args.kwargs["cpus"](), 4)
+
+    def test_verify_jobs_is_taken_as_asked_and_one_is_serial(self):
+        self.assertEqual(verify.worker_count(1, 0.0, 16), 1)
+        self.assertEqual(verify.worker_count(4, 0.9, 2), 4)
+
+    def test_the_waits_count_the_run_s_own_workers_as_load(self):
+        self.assertEqual(verify.load_with(0.0, 4, 4), 1.0)    # an idle machine with a worker per CPU: the waits as written
+        self.assertEqual(verify.time_scale(verify.load_with(0.0, 4, 4)), 1.0)
+        self.assertEqual(verify.time_scale(verify.load_with(1.5, 2, 4)), 2.0)
+        self.assertEqual(verify.load_with(0.0, 1, 0), 1.0)
+
+    def test_each_round_gives_every_item_a_server_of_its_own_from_the_seed(self):
+        args = verify.round_command("/usr/bin/node", "/w/seed", "/w/round-1/servers", "/w/round-1/out", ["budget"], ["flow:x"], 2.0, 2, 3)
+        def value(flag):
+            return args[args.index(flag) + 1]
+        self.assertEqual((value("--seed"), value("--work"), value("--python"), value("--jobs")),
+                         ("/w/seed", "/w/round-1/servers", sys.executable, "3"))
+        self.assertEqual((value("--time-scale"), value("--attempt"), value("--only"), value("--day")), ("2.0", "2", "flow:x", verify.FROZEN_DAY))
+        self.assertEqual(args[-1], "budget")
+        self.assertNotIn("--url", args)
+        self.assertNotIn("--reverse", args)
+        self.assertIn("--reverse", verify.round_command("node", "s", "w", "o", [], None, 1.0, 1, 1, reverse=True))
+
+
+class WholeRunTests(unittest.TestCase):
+    """run(): the machine lock is taken once and held for every round, the retries and --twice's second run included."""
+
+    def test_the_lock_is_held_once_for_the_whole_run_and_twice_runs_again_serial_and_reversed(self):
+        held, entered, rounds = [False], [], []
+
+        @contextlib.contextmanager
+        def lock(**_):
+            entered.append(True)
+            held[0] = True
+            try:
+                yield
+            finally:
+                held[0] = False
+
+        def round_(folder, seed, pages, only, scale, attempt, node, token, log, workers=1, reverse=False):
+            rounds.append({"held": held[0], "only": only, "workers": workers, "reverse": reverse, "seed": seed})
+            ok = attempt > 1 or folder.endswith("again")   # flow:x fails the first time, then passes
+            items = [{"id": i, "ok": ok or i != "flow:x", "files": [], "problems": [] if ok or i != "flow:x" else ["timed out"]}
+                     for i in (only or ["page:budget", "flow:x"])]
+            return {"out": os.path.join(folder, "out"), "items": items, "all_items": ["page:budget", "flow:x"]}
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("os.path.isdir", return_value=True), \
+                mock.patch("os.path.isfile", return_value=True), mock.patch("shutil.which", return_value="/usr/bin/node"), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch.object(verify, "LOGS", tmp), mock.patch.object(verify, "OUT", os.path.join(tmp, "verify")), \
+                mock.patch.object(verify, "machine_lock", lock), mock.patch.object(verify, "wait_for_quiet", return_value=0.0), \
+                mock.patch.object(verify, "cpu_count", return_value=4), mock.patch.object(verify, "busy_now", return_value=0.0), \
+                mock.patch.dict("os.environ", {verify.JOBS_ENV: ""}), \
+                mock.patch.object(verify, "_round", round_), mock.patch("sys.stdout"), mock.patch("sys.stderr"), \
+                mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stdout="", stderr="")):
+            self.assertEqual(verify.run([], twice=True), 0)
+            with open(os.path.join(tmp, "verify", "report.json")) as f:
+                report = json.load(f)
+        self.assertEqual(len(entered), 1)
+        self.assertFalse(held[0])   # let go at the end
+        self.assertTrue(all(r["held"] for r in rounds))
+        self.assertEqual([(r["only"], r["workers"], r["reverse"]) for r in rounds],
+                         [(None, 4, False), (["flow:x"], 4, False), (None, 1, True)])   # the retry, then --twice: serial, reversed
+        self.assertEqual(len({r["seed"] for r in rounds}), 1)   # one seeded database, which each item's server copies
+        self.assertEqual((report["ok"], report["jobs"], report["flaky"]), (True, 4, {"flow:x": ["timed out"]}))
+
+
 class RunTests(unittest.TestCase):
-    def test_a_server_that_dies_is_reported_not_waited_for(self):
-        server = mock.Mock(spec=subprocess.Popen)
-        server.poll.return_value = 3
-        server.returncode = 3
-        with self.assertRaisesRegex(RuntimeError, "exited with code 3"):
-            verify.wait_ready("http://127.0.0.1:1", server, timeout=5)
-
-    def test_the_readiness_check_skips_the_system_proxy(self):
-        server = mock.Mock(spec=subprocess.Popen)
-        server.poll.return_value = None
-        with mock.patch.dict("os.environ", {"HTTP_PROXY": "http://proxy:3128", "http_proxy": "http://proxy:3128"}), \
-                mock.patch("runway.tls.urlopen") as opened:
-            verify.wait_ready("http://127.0.0.1:8123", server, timeout=5)
-        (handler,) = opened.call_args.kwargs["handlers"]
-        self.assertEqual(handler.proxies, {})
-
-    def test_a_server_that_never_answers_times_out_with_the_address(self):
-        server = mock.Mock(spec=subprocess.Popen)
-        server.poll.return_value = None
-        with self.assertRaisesRegex(RuntimeError, r"http://127\.0\.0\.1:1 after 0 seconds"):
-            verify.wait_ready("http://127.0.0.1:1", server, timeout=0)
-
     def test_the_signed_in_server_is_this_demo_s_own_sign_in_on_loopback(self):
         env = verify.signed_in_env(verify.clean_env("/tmp/demo", {"PATH": "/bin"}), "http://localhost:8124")
         self.assertEqual({k: v for k, v in env.items() if k.startswith(("OIDC_", "RUNWAY_PUBLIC"))},

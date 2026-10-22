@@ -1,6 +1,6 @@
 # Scripted flows
 
-Each `*.json` file here is a flow that `make verify` runs after visiting the pages (each saved as a full page, `<page>-<width>.png`, and as its first screen, `<page>-top-<width>.png`), at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths (or the `viewports` it lists). There is no tablet width. A step that fails saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
+Each `*.json` file here is a flow that `make verify` runs besides visiting the pages (each saved as a full page, `<page>-<width>.png`, and as its first screen, `<page>-top-<width>.png`), at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths (or the `viewports` it lists). There is no tablet width. A step that fails saves a `-FAILED-` image to `artifacts/verify/`, which is never committed. A pull request adds steps by adding or editing a file.
 
 ```json
 {
@@ -17,7 +17,7 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
 ```
 
 - `page` is the route the flow starts on (default `overview`); `viewports` defaults to `phone` and `desktop`; `landscape` (844×390, touch: a phone turned sideways) runs only when a flow lists it.
-- `"signed_in": true` runs the flow signed in: against a second demo server with sign-in on (runway/verify.py), with a session made for it and a virtual platform authenticator (Chrome's DevTools WebAuthn) standing in for Face ID or Touch ID. The app lock's flow (`app-lock.json`) needs it. Each viewport is a new browser on the same session, so a flow that changes something about the session puts it back at the end.
+- `"signed_in": true` runs the flow signed in: against a demo server with sign-in on (runway/verify.py's `serve`), with a session made for it and a virtual platform authenticator (Chrome's DevTools WebAuthn) standing in for Face ID or Touch ID. The app lock's flow (`app-lock.json`) needs it. Each viewport is a new browser on the same session, so a flow that changes something about the session puts it back at the end.
 - A step has one action, and an optional `timeout` in milliseconds (default 10000). Selectors are [Playwright selectors](https://playwright.dev/docs/other-locators) (CSS, `text=…`, `role=…`).
   - `{"goto": "#route"}` opens a route of the app (or a full URL).
   - `{"click": selector}`, `{"fill": {"selector": …, "text": …}}`, `{"press": {"selector": …, "key": "Enter"}}`.
@@ -31,7 +31,8 @@ Each `*.json` file here is a flow that `make verify` runs after visiting the pag
   - `{"screenshot": "name"}` saves the full page (the window, when a dialog, a sheet or the To review bar is showing) as `flow-<flow name>-<name>-<viewport>.png`.
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
 - A screenshot waits until nothing on the page is still loading (no skeleton, nothing `aria-busy`, no transition moving), and is retaken until two captures in a row match; one that never settles fails the flow. The `expect_text` and `expect_focus` steps since the last action are checked again after it, so a panel that closes while it's captured fails instead of being kept.
-- A step's `timeout` is for an idle machine: on a busy one every limit stretches with the load. A flow that fails is run again on fresh demo data (three tries in all), so it must not depend on what an earlier run left behind.
+- A step's `timeout` is for an idle machine: on a busy one every limit stretches with the load. A flow that fails is run again on fresh demo data (three tries in all).
+- **Flows are independent.** Every flow (and every page) runs on a demo server and a fresh copy of the demo data of its own, several at once (`VERIFY_JOBS`), in no fixed order. A flow starts from the demo data as `make verify` seeds it, never from what another flow did, so it must not depend on another flow's data, and its images are the same in a full run, a partial one (`PAGES="<flow>"`), any order and any number of workers (`make verify-twice` checks the last two). A flow that needs something the demo data doesn't have gets it from the seed (`runway/domain/demo.py`, through an option `make verify` passes to `run.py demo`, like `--receipt`) or from its own steps. Its widths run one after the other on the same data, so what it changes at one width is there at the next.
 - A flow's name (its file's) picks it alone: `make verify PAGES="categories-emoji"`. It can't be a page's name.
 
 Flows run against the demo data only.
