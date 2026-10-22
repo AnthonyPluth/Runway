@@ -37,6 +37,11 @@ class Reading(unittest.TestCase):
             "goes to": ["#setup/data"], "touches": ["Edit Coffee budget", "Cancel"], "expects to see": ["Used in months"]})
         self.assertEqual(ufm.widths(FLOW), ["phone", "desktop"])
 
+    def test_both_quote_styles_are_read(self):
+        self.assertEqual(ufm.quoted("[data-tx] button[aria-label^=\"Details for \"]"), ["Details for "])
+        self.assertEqual(ufm.quoted("button:has-text(\"Delete transaction\")"), ["Delete transaction"])
+        self.assertEqual(ufm.quoted("button:text-is('Save')"), ["Save"])
+
     def test_reach_differs_for_a_tab_a_more_sheet_page_and_settings(self):
         nav = {"budget": ("Budget", "Day to day"), "reports": ("Reports", "Day to day")}
         self.assertEqual(ufm.reach("budget", nav, ["budget"]), "desktop: sidebar > Day to day > Budget; phone: the tab bar")
@@ -68,6 +73,14 @@ class Rendering(unittest.TestCase):
         for want in ("## Budget (`budget`)", "tools/control goto budget", "### Flows on Budget", "#### `budget-edit`",
                      "tools/control flow budget-edit", "  - Scope matters.", "  - Cancel it.", "It is not `docs/feature-map.json`"):
             self.assertIn(want, text)
+
+    def test_docs_links_lead_to_the_page_files_from_where_the_map_is_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "budget.md").write_text("---\ntitle: Budget\ndescription: Limits.\n---\n")
+            text = ufm.render(["budget"], {}, [], [], {}, Path(tmp))
+        link = text.split("](")[2].split(")")[0] if "](" in text else ""
+        self.assertTrue((ufm.OUT.parent / link).resolve().is_relative_to(ROOT / "docs/src/content/docs/using"), link)
+        self.assertTrue((ufm.OUT.parent / ufm.DOCS_LINK / "budget.md").resolve() == ROOT / "docs/src/content/docs/using/budget.md")
 
     def test_a_signed_in_flow_says_to_start_signed_in(self):
         with tempfile.TemporaryDirectory() as tmp:

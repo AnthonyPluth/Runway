@@ -28,6 +28,8 @@ GOTCHAS = REFERENCES / "feature-gotchas.md"
 # Pages the navigation doesn't list, and the docs page (under using/) for pages whose name isn't their docs file's.
 NOT_IN_NAV = {"setup": ("Settings", "")}
 PAGE_DOCS = {"networth": "net-worth", "setup": "settings"}
+# From references/ (where the map is written) to the docs pages, so the link works on GitHub and in an editor.
+DOCS_LINK = "../../../../docs/src/content/docs/using"
 VIEWPORT_ORDER = ["phone", "desktop", "landscape"]
 
 
@@ -94,7 +96,7 @@ def gotchas(text: str, names: set[str]) -> tuple[dict[str, list[str]], list[str]
 
 def quoted(selector: str) -> list[str]:
     """The visible names a selector points at: aria-label prefixes, has-text and text-is strings, text= selectors."""
-    found = re.findall(r"aria-label[\^*]?='([^']+)'|(?:has-text|text-is)\('([^']+)'\)|text=(.+)$", selector)
+    found = re.findall(r"""aria-label[\^*]?=(?:'([^']+)'|"([^"]+)")|(?:has-text|text-is)\((?:'([^']+)'|"([^"]+)")\)|text=(.+)$""", selector)
     return [next(x for x in f if x) for f in found]
 
 
@@ -144,7 +146,7 @@ def render(page_names: list[str], nav: dict, tabs: list[str], all_flows: list[di
         doc = docs_page(page, docs)
         lines += [f"## {label} (`{page}`)", ""]
         if doc:
-            lines.append(f"- **What exists:** {doc[2]} Docs: [{doc[1]}](/Runway/using/{doc[0]}/).")
+            lines.append(f"- **What exists:** {doc[2]} Docs: [{doc[1]}]({DOCS_LINK}/{doc[0]}.md).")
         else:
             lines.append("- **What exists:** no docs page of its own.")
         lines += [

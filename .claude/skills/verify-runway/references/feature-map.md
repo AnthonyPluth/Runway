@@ -6,7 +6,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Overview (`overview`)
 
-- **What exists:** The cash-flow forecast, what's coming up, and the setup checklist. Docs: [Overview](/Runway/using/overview/).
+- **What exists:** The cash-flow forecast, what's coming up, and the setup checklist. Docs: [Overview](../../../../docs/src/content/docs/using/overview.md).
 - **Reach it:** desktop: sidebar > Day to day > Overview; phone: the tab bar; URL `#overview`; control `tools/control goto overview`.
 - **Drive it:** `tools/control goto overview`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="overview"`.
 
@@ -45,7 +45,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Transactions (`transactions`)
 
-- **What exists:** The transaction list, review, categories, rules, splits and receipts. Docs: [Transactions](/Runway/using/transactions/).
+- **What exists:** The transaction list, review, categories, rules, splits and receipts. Docs: [Transactions](../../../../docs/src/content/docs/using/transactions.md).
 - **Reach it:** desktop: sidebar > Day to day > Transactions; phone: the tab bar; URL `#transactions`; control `tools/control goto transactions`.
 - **Drive it:** `tools/control goto transactions`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="transactions"`.
 - **What usually breaks:**
@@ -103,6 +103,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 - **Starts at:** `#transactions`; goes to: `#review`.
 - **Widths:** desktop.
+- **Touches:** `Details for `, `Delete transaction`, `Cancel`.
 - **Expects to see:** `A later bank sync may bring it back.`.
 - **Drive it:** `tools/control flow transactions-delete-details`; or `make verify PAGES="transactions-delete-details"`.
 
@@ -110,6 +111,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 - **Starts at:** `#transactions`; goes to: `#review`.
 - **Widths:** phone.
+- **Touches:** `Details for `, `Delete transaction`, `Cancel`.
 - **Expects to see:** `A later bank sync may bring it back.`.
 - **Drive it:** `tools/control flow transactions-delete-phone`; or `make verify PAGES="transactions-delete-phone"`.
 
@@ -153,7 +155,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Budget (`budget`)
 
-- **What exists:** Monthly budgets with rollover, a month of its own, and suggestions. Docs: [Budget](/Runway/using/budget/).
+- **What exists:** Monthly budgets with rollover, a month of its own, and suggestions. Docs: [Budget](../../../../docs/src/content/docs/using/budget.md).
 - **Reach it:** desktop: sidebar > Day to day > Budget; phone: the tab bar; URL `#budget`; control `tools/control goto budget`.
 - **Drive it:** `tools/control goto budget`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="budget"`.
 - **What usually breaks:**
@@ -192,7 +194,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Investments (`investments`)
 
-- **What exists:** Holdings, performance against the S&P 500, live prices and each holding's page. Docs: [Investments](/Runway/using/investments/).
+- **What exists:** Holdings, performance against the S&P 500, live prices and each holding's page. Docs: [Investments](../../../../docs/src/content/docs/using/investments.md).
 - **Reach it:** desktop: sidebar > Wealth > Investments; phone: the tab bar; URL `#investments`; control `tools/control goto investments`.
 - **Drive it:** `tools/control goto investments`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="investments"`.
 
@@ -225,7 +227,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Recurring (`recurring`)
 
-- **What exists:** Paychecks, bills and subscriptions, matched to transactions and flagged when they don't show up. Docs: [Recurring](/Runway/using/recurring/).
+- **What exists:** Paychecks, bills and subscriptions, matched to transactions and flagged when they don't show up. Docs: [Recurring](../../../../docs/src/content/docs/using/recurring.md).
 - **Reach it:** desktop: sidebar > Day to day > Recurring; phone: tab bar > More; URL `#recurring`; control `tools/control goto recurring`.
 - **Drive it:** `tools/control goto recurring`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="recurring"`.
 
@@ -253,7 +255,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Net worth (`networth`)
 
-- **What exists:** Everything you own minus what you owe, equity grants, and the retirement planner. Docs: [Net worth](/Runway/using/net-worth/).
+- **What exists:** Everything you own minus what you owe, equity grants, and the retirement planner. Docs: [Net worth](../../../../docs/src/content/docs/using/net-worth.md).
 - **Reach it:** desktop: sidebar > Wealth > Net worth; phone: tab bar > More; URL `#networth`; control `tools/control goto networth`.
 - **Drive it:** `tools/control goto networth`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="networth"`.
 
@@ -268,13 +270,13 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Reports (`reports`)
 
-- **What exists:** Cash flow, spending over time, merchants, income and a breakdown you can click into. Docs: [Reports](/Runway/using/reports/).
+- **What exists:** Cash flow, spending over time, merchants, income and a breakdown you can click into. Docs: [Reports](../../../../docs/src/content/docs/using/reports.md).
 - **Reach it:** desktop: sidebar > Day to day > Reports; phone: tab bar > More; URL `#reports`; control `tools/control goto reports`.
 - **Drive it:** `tools/control goto reports`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="reports"`.
 
 ## Churning (`churning`)
 
-- **What exists:** Sign-up bonuses, 5/24, annual fees, card benefits, bank bonuses and the cards you want next. Docs: [Churning](/Runway/using/churning/).
+- **What exists:** Sign-up bonuses, 5/24, annual fees, card benefits, bank bonuses and the cards you want next. Docs: [Churning](../../../../docs/src/content/docs/using/churning.md).
 - **Reach it:** desktop: sidebar > Wealth > Churning; phone: tab bar > More; URL `#churning`; control `tools/control goto churning`.
 - **Drive it:** `tools/control goto churning`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="churning"`.
 
@@ -289,7 +291,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 
 ## Settings (`setup`)
 
-- **What exists:** Accounts, bank connections, categories, rules, notifications, the app lock, backups and assistants. Docs: [Settings](/Runway/using/settings/).
+- **What exists:** Accounts, bank connections, categories, rules, notifications, the app lock, backups and assistants. Docs: [Settings](../../../../docs/src/content/docs/using/settings.md).
 - **Reach it:** desktop: the sidebar's Settings link; phone: tab bar > More; URL `#setup`; control `tools/control goto setup`.
 - **Drive it:** `tools/control goto setup`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="setup"`.
 - **What usually breaks:**
