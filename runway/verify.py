@@ -203,6 +203,52 @@ def serve(argv: list[str]) -> int:
     return 1   # (execve doesn't return)
 
 
+# What make verify seeds (run.py demo's options): every page and flow runs on the demo data with all of them.
+SEED_OPTIONS = ("ai-buttons", "investments", "receipt", "subcategories", "signed-in")
+
+
+def seed_demo(folder: str, lib: str, options: tuple[str, ...] | list[str] = SEED_OPTIONS,
+              token: str = "") -> subprocess.CompletedProcess[str]:
+    """`run.py demo` with these of SEED_OPTIONS, into `folder` (its own SQLite database), under the frozen clock. With
+    "signed-in", the session it adds is for `token`. ValueError for an option that isn't one of SEED_OPTIONS."""
+    if unknown := sorted(set(options) - set(SEED_OPTIONS)):
+        raise ValueError(f"verify: unknown seed option {', '.join(unknown)} (one of {', '.join(SEED_OPTIONS)})")
+    env = {**frozen_env(clean_env(folder), lib), **({SESSION_ENV: token} if "signed-in" in options else {})}
+    return subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", *(f"--{o}" for o in SEED_OPTIONS if o in options)],
+                          env=env, cwd=ROOT, capture_output=True, text=True)
+
+
+def seed(argv: list[str]) -> int:
+    """`python -m runway.verify seed --data D [--investments ...]`: the demo data make verify seeds, or some of it, made
+    in D (a new folder) under the frozen clock, for frontend/verify/control.mjs's session, which serves copies of it
+    with `serve`. A signed-in seed's session is for the token in RUNWAY_VERIFY_SESSION."""
+    p = argparse.ArgumentParser(prog="python -m runway.verify seed")
+    p.add_argument("--data", required=True)
+    for o in SEED_OPTIONS:
+        p.add_argument(f"--{o}", action="store_true")
+    a = p.parse_args(argv)
+    options = [o for o in SEED_OPTIONS if getattr(a, o.replace("-", "_"))]
+    token = os.environ.get(SESSION_ENV, "")
+    if "signed-in" in options and not token:
+        print(f"verify: --signed-in needs the session's token in {SESSION_ENV}", file=sys.stderr)
+        return 2
+    lib = find_libfaketime()
+    if not lib:
+        print(libfaketime_missing_message(), file=sys.stderr)
+        return 2
+    try:
+        os.makedirs(a.data)   # a new folder: never on top of data that's already there
+    except OSError as e:
+        print(f"verify: couldn't make {a.data} for the demo data: {e.strerror or e}", file=sys.stderr)
+        return 2
+    done = seed_demo(a.data, lib, options, token)
+    if done.returncode:
+        shutil.rmtree(a.data, ignore_errors=True)
+        print(f"verify: couldn't fill the demo database:\n{done.stdout}{done.stderr}", file=sys.stderr)
+        return 2
+    return 0
+
+
 # --- Sharing the machine -------------------------------------------------------------------------------------------
 
 def _span(seconds: float) -> str:
@@ -410,6 +456,32 @@ def worker_count(requested: int | None, ratio: float, cpus: int) -> int:
     return max(1, min(MAX_JOBS, cpus, spare))
 
 
+def verify_holder(path: str | None = None) -> str | None:
+    """Who holds the machine's verify lock now ("pid … in …"), or None when nobody does. Only looks (/proc/locks): never
+    takes it, so a waiting `make verify` isn't held up by the look."""
+    path = path or LOCK_FILE
+    try:
+        fd = os.open(path, os.O_RDONLY | _LOCK_FLAGS)
+    except OSError:
+        return None   # no lock file (no run since the machine started), or one that isn't a file: nothing holds it
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode) or not (holders := lock_holders(fd)):
+            return None
+        return os.pread(fd, 300, 0).decode(errors="replace").strip() or ", ".join(f"pid {p}: {_cmdline(p)}" for p in sorted(holders))
+    finally:
+        os.close(fd)
+
+
+def status() -> dict[str, Any]:
+    """`python -m runway.verify status`: what frontend/verify/control.mjs checks before it starts a session, as JSON: the
+    frozen clock (libfaketime, the day), how busy the machine is now (busy_now, against BUSY) and whether a make verify
+    is running (it never takes the lock: a session is long-lived)."""
+    ratio = busy_now()
+    return {"libfaketime": find_libfaketime(), "libfaketime_install": LIBFAKETIME_INSTALL, "frozen_day": FROZEN_DAY,
+            "frozen_time": FROZEN_TIME, "cpus": cpu_count(), "busy_per_cpu": round(ratio, 2), "busy_limit": BUSY,
+            "busy": ratio > BUSY, "verify_running": verify_holder()}
+
+
 def load_with(ratio: float, jobs: int, cpus: int) -> float:
     """The load per CPU a run should expect once its own workers are running: what's there now plus a CPU per worker
     (each one's browser and server), for scaling its waits (time_scale)."""
@@ -579,9 +651,7 @@ def _run(pages: list[str], twice: bool, node: str, lib: str, ratio: float, jobs:
     os.makedirs(seed)
     token = secrets.token_urlsafe(32)
     try:
-        seeded = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "demo", "--ai-buttons", "--investments", "--receipt",
-                                 "--subcategories", "--signed-in"], env={**frozen_env(clean_env(seed), lib), SESSION_ENV: token},
-                                cwd=ROOT, capture_output=True, text=True)
+        seeded = seed_demo(seed, lib, SEED_OPTIONS, token)
         if seeded.returncode:
             log.say(f"verify: couldn't fill the demo database:\n{seeded.stdout}{seeded.stderr}", err=True)
             return 2
@@ -698,6 +768,12 @@ def _crashed(only: list[str] | None, why: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] != ["serve"]:
-        sys.exit("usage: python -m runway.verify serve --seed S --data D --port P [--signed-in] (make verify runs it)")
-    sys.exit(serve(sys.argv[2:]))
+    if sys.argv[1:2] == ["serve"]:
+        sys.exit(serve(sys.argv[2:]))
+    if sys.argv[1:2] == ["seed"]:
+        sys.exit(seed(sys.argv[2:]))
+    if sys.argv[1:2] == ["status"]:
+        print(json.dumps(status()))
+        sys.exit(0)
+    sys.exit("usage: python -m runway.verify serve --parent PID --seed S --data D --port P [--signed-in] (make verify runs it), "
+             "seed --data D [--investments ...] or status (frontend/verify/control.mjs runs those two)")

@@ -798,5 +798,60 @@ class MakeTargetTests(unittest.TestCase):
         self.assertIn("sync_screenshots.py", self.make("screenshots"))
 
 
+class ControlSessionTests(unittest.TestCase):
+    """What frontend/verify/control.mjs runs: `seed` (the demo data, or some of it, under the frozen clock) and `status`
+    (the clock, the load, a running make verify), which only looks at the machine lock and never takes it."""
+
+    def test_seed_demo_runs_run_py_demo_with_the_options_asked_for_frozen(self):
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as ran:
+            verify.seed_demo("/tmp/seed", "/lib/libfaketime.so.1", ["receipt", "investments"])
+        argv, env = ran.call_args.args[0], ran.call_args.kwargs["env"]
+        self.assertEqual(argv[-3:], ["demo", "--investments", "--receipt"])
+        self.assertEqual((env["FAKETIME"], env["RUNWAY_DATA"]), (verify.FROZEN_TIME, "/tmp/seed"))
+        self.assertNotIn(verify.SESSION_ENV, env)   # the session's token only for a signed-in seed
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as ran:
+            verify.seed_demo("/tmp/seed", "/lib/libfaketime.so.1", ["signed-in"], "tok")
+        self.assertEqual(ran.call_args.kwargs["env"][verify.SESSION_ENV], "tok")
+        with self.assertRaisesRegex(ValueError, "unknown seed option bogus"):
+            verify.seed_demo("/tmp/seed", "/lib/libfaketime.so.1", ["bogus"])
+
+    def test_seed_refuses_a_signed_in_seed_without_a_token_and_a_folder_that_exists(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("os.environ", {verify.SESSION_ENV: ""}), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch("subprocess.run") as ran, mock.patch("sys.stderr"):
+            self.assertEqual(verify.seed(["--data", os.path.join(tmp, "new"), "--signed-in"]), 2)
+            self.assertEqual(verify.seed(["--data", tmp]), 2)   # never on top of data that's there
+            ran.assert_not_called()
+
+    def test_a_seed_that_fails_leaves_no_folder(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"), \
+                mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout="", stderr="boom")), mock.patch("sys.stderr"):
+            self.assertEqual(verify.seed(["--data", os.path.join(tmp, "seed")]), 2)
+            self.assertFalse(os.path.exists(os.path.join(tmp, "seed")))
+
+    def test_verify_holder_names_a_running_verify_without_taking_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "verify.lock")
+            self.assertIsNone(verify.verify_holder(path))   # no lock file yet
+            holder = subprocess.Popen([sys.executable, "-c", "import time; from runway import verify\n"
+                                       f"with verify.machine_lock({path!r}): print('held', flush=True); time.sleep(60)"],
+                                      cwd=verify.ROOT, stdout=subprocess.PIPE, text=True)
+            self.addCleanup(lambda: (holder.kill(), holder.wait(10)))
+            assert holder.stdout is not None
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            self.assertIn(f"pid {holder.pid}", verify.verify_holder(path) or "")
+            holder.kill()
+            holder.wait(10)
+            self.assertIsNone(verify.verify_holder(path))   # let go when it ends
+
+    def test_status_reports_the_clock_the_load_and_a_running_verify(self):
+        with mock.patch.object(verify, "busy_now", return_value=2.0), mock.patch.object(verify, "verify_holder", return_value=None), \
+                mock.patch.object(verify, "find_libfaketime", return_value="/lib/libfaketime.so.1"):
+            got = verify.status()
+        self.assertEqual((got["frozen_day"], got["busy"], got["busy_limit"], got["verify_running"]),
+                         (verify.FROZEN_DAY, True, verify.BUSY, None))
+        json.dumps(got)   # what control.mjs reads
+
+
 if __name__ == "__main__":
     unittest.main()

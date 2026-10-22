@@ -115,6 +115,23 @@ A failed run ends with a `FAIL:` line per page or flow, with its first problem (
 
 ![A page make verify saved: the Budget page at phone width, with demo data](../../../../../screenshots/budget-phone.png)
 
+### Driving the app by hand: tools/control
+
+`make verify` checks everything in one batch. While you work, `tools/control` drives the same app one command at a time. `start` launches a session in the background: a demo server on a fresh copy of the demo data, under the same frozen clock, and a Chromium on it, set up the way `make verify`'s browsers are. Later commands connect to it: `goto budget`, `snapshot` (the accessibility tree, with the names to click), `click button Save`, `type textbox Search coffee`, `viewport desktop`, `screenshot`, `console`, `network`, `flow budget-edit` (one of the flows, step by step) and `reset` (fresh data). `stop` ends it, and so do 30 idle minutes.
+
+```sh
+tools/control doctor --text    # what's missing, and how to fix it
+tools/control start
+tools/control goto transactions
+tools/control snapshot --text
+tools/control screenshot       # artifacts/control/shots/…png
+tools/control stop
+```
+
+Output is JSON, or text with `--text`. Errors carry a code and a hint that says what to do instead. `reset`, `stop` and `cleanup` take `--dry-run`, and `eval` is read-only unless you pass `--write`. A session drives only its own loopback demo server and refuses other addresses. It writes only under `artifacts/control/`, never takes `make verify`'s machine lock (it uses ports and data of its own), and refuses to start on a busy machine unless you pass `--anyway`. If a session crashes, the next command says the state is stale, and `cleanup` removes what it left. A screenshot is taken the way `make verify` takes one, so on the same Chromium a page's image is byte for byte the same as its file in `screenshots/`. Those files still only ever come from `make screenshots`.
+
+For agents, the `verify-runway` skill (`.claude/skills/verify-runway/`) says when to use it, what evidence to attach, what usually breaks, and gives recipes to copy. Its command reference, `references/cli.md`, is generated from the CLI's own help with `make verify-skill`, and `make fleet-checks` fails when it's out of date. `make control-smoke` (also run by the Verify flows workflow) runs `doctor`, `start`, `snapshot`, `screenshot`, a flow, `reset` and `stop` against the real demo server.
+
 ### Screenshots in a pull request
 
 `screenshots/` holds every image `make verify` writes, committed: the visual regression baselines, and the pictures the README and the docs show. A pull request that changes the UI runs
