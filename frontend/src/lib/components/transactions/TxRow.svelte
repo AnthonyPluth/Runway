@@ -164,7 +164,7 @@
             // gray badges, and a click area reaching a little past it on every side.
             "relative inline-flex min-h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors @sm/title:px-2 max-sm:px-2",
             "after:absolute after:-inset-1.5 after:content-['']",
-            showOrder ? "bg-primary/25 text-primary" : "bg-primary/12 text-primary hover:bg-primary/25")}>
+            showOrder ? "bg-primary/18 text-primary" : "bg-primary/12 text-primary hover:bg-primary/18")}>
           <Receipt class="size-4 shrink-0" aria-hidden="true" /><span class="hidden @sm/title:inline max-sm:inline">receipt</span></button>
       {/if}
     </div>

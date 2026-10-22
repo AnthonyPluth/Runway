@@ -81,7 +81,7 @@
 
   const uid = $props.id();
   const title = $derived(`Edit ${c.name} budget`);
-  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : "not set"}`
+  const fieldName = $derived(`${title}: ${c.budget != null ? money(c.budget) : income && !sub ? "not set (Expected)" : "not set"}`
     + (c.budget == null ? "" : canMonth && ownMonth ? `, ${monthName} only` : ", usual monthly amount"));
   const fieldCls = "inline-flex h-9 min-w-[5.25rem] cursor-pointer items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50 sm:h-7 sm:min-w-24 dark:bg-input/30";
 
@@ -275,7 +275,7 @@
       <button type="button" aria-pressed={!!c.rollover_from} disabled={locked} onclick={() => setRollover(!c.rollover_from)}
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
           : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border disabled:cursor-default disabled:opacity-50 px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border disabled:cursor-default disabled:opacity-50 px-2.5 py-1.5 text-sm whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           c.rollover_from ? "border-primary/40 text-primary" : "border-transparent text-muted-foreground")}>
         <Repeat class="size-3.5" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
       </button>
@@ -291,7 +291,7 @@
       <!-- Always shown (not on hover), a real button: reachable by keyboard, and a big enough target on touch. -->
       <button type="button" onclick={() => resetMonth()} disabled={resetting || locked} data-month-reset
         aria-label={`Reset to usual: ${c.name} back to ${fmt0(usual)} in ${monthName}`}
-        class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
+        class="-my-2 ml-1 inline-flex cursor-pointer items-center rounded-md px-1.5 py-2.5 font-medium text-primary underline underline-offset-2 hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-50 sm:-my-1 sm:py-1.5">
         Reset to usual</button>
     </p>
   {/if}

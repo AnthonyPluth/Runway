@@ -5,7 +5,7 @@
   "steps": [
     { "goto": "#overview" },
     { "wait_for": "[data-testid=balance-card] [data-testid=forecast-chart]" },
-    { "press": { "selector": "[data-testid=balance-card] button[aria-label='Forecast settings']", "key": "Tab" } },
+    { "press": { "selector": "[data-testid=balance-card] button[aria-label^='Forecast settings']", "key": "Tab" } },
     { "expect_focus": "[data-testid=forecast-chart][role=slider]" },
     { "wait_for": "[data-testid=forecast-readout]" },
     { "press": { "selector": "[data-testid=forecast-chart]", "key": "ArrowRight" } },

@@ -130,23 +130,21 @@
         aria-label={`Cash flow for ${monthName}: money in on the left, spending on the right`}>
         {#each c.links as l (l.key)}
           {@const t = ofLink(l)}
-          <path d={l.d} style:fill={l.color} role="button" tabindex="0" aria-label={ariaOf(t)} data-key={l.key}
-            class={["outline-none transition-[fill-opacity] hover:[fill-opacity:0.55] focus-visible:[fill-opacity:0.55]", t.filters && "cursor-pointer",
+          <path d={l.d} style:fill={l.color} role="button" tabindex="0" aria-label={ariaOf(t)} aria-description={t.filters ? "See transactions" : undefined} data-key={l.key}
+            class={["outline-none transition-[fill-opacity] hover:[fill-opacity:0.55] focus-visible:stroke-foreground focus-visible:[stroke-width:2] focus-visible:[fill-opacity:0.55]", t.filters && "cursor-pointer",
               sel?.key === l.key ? "[fill-opacity:0.6]" : l.role === "neutral" ? "[fill-opacity:0.2]" : "[fill-opacity:0.3]"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}
             onfocus={() => focused(t)} onkeydown={(e) => key(e, t)}>
-            {#if t.filters}<title>See transactions: {t.name}</title>{/if}
           </path>
         {/each}
         {#each c.all as n (n.key)}
           {@const t = ofNode(n)}
           <rect x={n.x} y={n.y} width={nodeW} height={n.h} rx="2" style:fill={n.color} role="button"
-            tabindex="0" aria-label={ariaOf(t)} data-key={n.key}
+            tabindex="0" aria-label={ariaOf(t)} aria-description={t.filters ? "See transactions" : undefined} data-key={n.key}
             stroke={sel?.key === n.key ? "var(--foreground)" : "var(--card)"} stroke-width={sel?.key === n.key ? 2 : 1}
-            class={["outline-none focus-visible:stroke-foreground", t.filters && "cursor-pointer"]}
+            class={["outline-none focus-visible:stroke-foreground focus-visible:[stroke-width:2]", t.filters && "cursor-pointer"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}
             onfocus={() => focused(t)} onkeydown={(e) => key(e, t)}>
-            {#if t.filters}<title>See transactions: {n.name}</title>{/if}
           </rect>
         {/each}
         <!-- Labels: money in on the left, the month above its bar, everything else to the right. -->

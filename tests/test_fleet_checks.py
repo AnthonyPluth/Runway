@@ -228,3 +228,50 @@ class Images(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class A11yBaseline(unittest.TestCase):
+    VISITS = {"budget @ phone", "budget @ desktop", "flow lock @ phone", "flow lock @ landscape"}
+    LINE = "budget @ phone | tap-target: button A is 32×44 px, under 44 | a small icon button"
+
+    def problems(self, text):
+        return fc.check_a11y_baseline(text, self.VISITS)
+
+    def test_the_repository_passes(self):
+        self.assertEqual(fc.check_a11y_baseline(fc.A11Y_BASELINE.read_text() if fc.A11Y_BASELINE.exists() else "", fc.verify_visits()), [])
+
+    def test_the_real_visits_are_read(self):
+        visits = fc.verify_visits()
+        self.assertIn("budget @ phone", visits)
+        self.assertIn("flow more-sheet-focus @ landscape", visits)
+        self.assertFalse([v for v in visits if v.endswith("tablet")])
+
+    def test_visits_come_from_the_pages_and_the_flows(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        (Path(tmp.name) / "lock.json").write_text(json.dumps({"name": "lock", "viewports": ["phone", "landscape"]}))
+        (Path(tmp.name) / "emoji.json").write_text(json.dumps({"name": "emoji"}))
+        verify = 'export const PAGES = ["budget"];\nexport const DEFAULT_VIEWPORTS = ["phone", "desktop"];\n'
+        self.assertEqual(fc.verify_visits(verify, Path(tmp.name)), {
+            "budget @ phone", "budget @ desktop", "flow lock @ phone", "flow lock @ landscape", "flow emoji @ phone", "flow emoji @ desktop"})
+
+    def test_an_empty_baseline_and_comments_pass(self):
+        self.assertEqual(self.problems(""), [])
+        self.assertEqual(self.problems("# header\n\n"), [])
+
+    def test_a_line_with_all_three_parts_passes(self):
+        self.assertEqual(self.problems(f"# header\n{self.LINE}\nflow lock @ landscape | focus: a X shows no focus ring | why\n"), [])
+
+    def test_a_line_without_a_reason_fails(self):
+        self.assertEqual(len(self.problems("budget @ phone | tap-target: button A is 32×44 px, under 44")), 1)
+        self.assertEqual(len(self.problems("budget @ phone | tap-target: button A is 32×44 px, under 44 |  ")), 1)
+
+    def test_a_page_or_flow_that_is_gone_or_not_shot_at_that_width_fails(self):
+        self.assertEqual(len(self.problems("setup @ phone | focus: a X shows no focus ring | why")), 1)
+        self.assertEqual(len(self.problems("flow lock @ desktop | focus: a X shows no focus ring | why")), 1)
+        self.assertEqual(len(self.problems("budget @ tablet | focus: a X shows no focus ring | why")), 1)
+
+    def test_a_line_listed_twice_fails(self):
+        problems = self.problems(f"{self.LINE}\n{self.LINE} again")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("line 2: listed twice", problems[0])

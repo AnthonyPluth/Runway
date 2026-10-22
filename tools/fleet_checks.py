@@ -12,6 +12,10 @@ one a correction that used to live as prose and now fails `make check` and CI in
   page's first screen or a flow image, `<name>-<phone|desktop>.png`, the names read from frontend/verify/verify.mjs and its
   flows) or sits where images belong (the extension's icons, the served assets, the docs site's logo); a hand-made before
   and after image fails.
+- Accessibility baseline (frontend/verify/a11y-baseline.txt): the findings `make verify` tolerates, one line each,
+  `<page or flow> @ <width> | <finding> | <reason>`; each line has all three parts, names a page or flow that exists at a width
+  it is shot at, and is listed once. A line whose finding no longer occurs fails `make verify` itself (this check reads no
+  browser), so the list only shrinks.
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
   every action pinned by SHA has its version in a comment; `gh api` with `per_page` paginates; and no `runner`, `steps`, `job` or
   `env` expression in a workflow's or job's `env:` (GitHub rejects the whole file, which then never runs).
@@ -190,6 +194,45 @@ STEP_ONLY_CONTEXT = re.compile(r"\$\{\{.*(?<![\w.])(runner|steps|job|env)\.")
 GH_API_LIST = re.compile(r"\bgh api\b[^\n]*per_page=")
 
 
+# --- The accessibility baseline -------------------------------------------------------------------------------------
+
+A11Y_BASELINE = ROOT / "frontend/verify/a11y-baseline.txt"
+A11Y_BASELINE_NAME = "frontend/verify/a11y-baseline.txt"
+
+
+def verify_visits(text: str | None = None, flows: Path = FLOWS) -> set[str]:
+    """Every `<page or flow> @ <width>` visit `make verify` makes: a page at the default widths, a flow (named
+    `flow <name>`) at the widths it lists, else the defaults."""
+    text = VERIFY.read_text() if text is None else text
+    pages, widths = _verify_list(text, "PAGES"), _verify_list(text, "DEFAULT_VIEWPORTS")
+    visits = {f"{page} @ {w}" for page in pages for w in widths}
+    for path in sorted(flows.glob("*.json")):
+        flow = json.loads(path.read_text())
+        visits |= {f"flow {flow['name']} @ {w}" for w in flow.get("viewports") or widths}
+    return visits
+
+
+def check_a11y_baseline(text: str, visits: set[str]) -> list[str]:
+    problems = []
+    seen: set[str] = set()
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        where = f"{A11Y_BASELINE_NAME} line {number}"
+        parts = [p.strip() for p in line.split(" | ")]
+        if len(parts) < 3 or not all(parts):
+            problems.append(f"{where}: expected `<page or flow> @ <width> | <finding> | <reason>`, all three parts")
+            continue
+        if parts[0] not in visits:
+            problems.append(f"{where}: `{parts[0]}` is not a page or flow make verify visits at that width: delete the line")
+        key = " | ".join(parts[:-1])
+        if key in seen:
+            problems.append(f"{where}: listed twice")
+        seen.add(key)
+    return problems
+
+
 def check_workflow(name: str, text: str, workflow: bool = True) -> list[str]:
     problems = []
     if workflow and not BASH_DEFAULT.search(text):
@@ -229,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     problems = check_migrations(migrations(), MIGRATION_TESTS.read_text())
     problems += check_workflows()
+    problems += check_a11y_baseline(A11Y_BASELINE.read_text() if A11Y_BASELINE.exists() else "", verify_visits())
     if args.commits:
         for sha, message in commits(args.commits):
             problems += check_commit(sha, message)
@@ -239,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p, file=sys.stderr)
     if not problems:
         print("Fleet checks passed: one migration head, migrations tested" + (", commit trailers, images only where make verify puts them" if args.commits else "")
-              + ", workflow conventions.")
+              + ", a11y baseline, workflow conventions.")
     return 1 if problems else 0
 
 

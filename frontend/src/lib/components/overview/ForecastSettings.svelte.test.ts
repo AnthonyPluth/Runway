@@ -27,7 +27,7 @@ afterEach(() => { cleanup(); forecastSheet.open = false; setupReview.open = fals
 const open = async () => {
   const user = userEvent.setup();
   render(ForecastSettings, { label: "Everyday Checking" });
-  await user.click(screen.getByRole("button", { name: "Forecast settings" }));
+  await user.click(screen.getByRole("button", { name: /^Forecast settings/ }));
   await screen.findByRole("dialog", { name: "Forecast settings" });
   return user;
 };
@@ -61,7 +61,7 @@ describe("ForecastSettings", () => {
     const version = app.version;
     const user = userEvent.setup();
     render(ForecastSettings, { label: "Everyday Checking", onhorizon });
-    await user.click(screen.getByRole("button", { name: "Forecast settings" }));
+    await user.click(screen.getByRole("button", { name: /^Forecast settings/ }));
     const days = await screen.findByLabelText("Default forecast length (days)");
     await user.clear(days);
     await user.type(days, "60");
@@ -84,7 +84,7 @@ describe("ForecastSettings", () => {
     const onchange = vi.fn();
     const user = userEvent.setup();
     render(ForecastSettings, { label: "Everyday Checking", onchange });
-    await user.click(screen.getByRole("button", { name: "Forecast settings" }));
+    await user.click(screen.getByRole("button", { name: /^Forecast settings/ }));
     await waitFor(() => expect(screen.getByRole("option", { name: "High-Yield Savings" })).toBeInTheDocument());
     await user.selectOptions(screen.getByLabelText("Primary account"), "sav");
     await waitFor(() => expect(onchange).toHaveBeenCalled());
@@ -95,7 +95,7 @@ describe("ForecastSettings", () => {
   it("has no everyday-spending setting", async () => {
     const user = userEvent.setup();
     render(ForecastSettings, { label: "Checking" });
-    await user.click(screen.getByRole("button", { name: "Forecast settings" }));
+    await user.click(screen.getByRole("button", { name: /^Forecast settings/ }));
     expect(await screen.findByLabelText("Primary account")).toBeInTheDocument();
     expect(screen.queryByText(/everyday spending/i)).not.toBeInTheDocument();
   });
