@@ -16,7 +16,7 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
-- `tools/`: scripts for the repo itself; `feature_map.py` generates the feature map, `api_contract.py` the API contract, `sync_screenshots.py` copies `make verify`'s screenshots into `screenshots/`.
+- `tools/`: scripts for the repo itself; `feature_map.py` generates the feature map, `user_feature_map.py` the user-point-of-view one for the verify-runway skill (`make user-feature-map`; advice for it goes in `.claude/skills/verify-runway/references/feature-gotchas.md`), `api_contract.py` the API contract, `sync_screenshots.py` copies `make verify`'s screenshots into `screenshots/`.
 - `docs/`: the documentation site (Starlight), published to GitHub Pages. Pages are Markdown in `docs/src/content/docs/`, one per part of the app under `using/`; their screenshots, and the README's, come from `screenshots/`, which holds a full-page screenshot of every page and flow at phone and desktop widths (taken at the iPhone 17 Pro Max's 440×956 and at 1280×800) and each page's first screen (`<page>-top-<width>.png`).
 
 ## Commands
