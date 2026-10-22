@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
+/* global document, Element -- the jsdom environment above */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyBaseline, axeProblems, BASELINE, focusProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
 
 describe("axeProblems", () => {
@@ -162,15 +164,16 @@ describe("ringedBy", () => {
 
 describe("tapBoxes", () => {
   it("measures an interactive SVG shape but not a decorative one", async () => {
-    const { chromium } = await import("@playwright/test");
-    const { findChromium } = await import("./verify.mjs");
-    const browser = await chromium.launch({ executablePath: findChromium() });
+    document.body.innerHTML = `<svg><rect role="button" tabindex="0" aria-label="Bar" width="30" height="10"/><rect width="30" height="10"/><g aria-hidden="true"><path role="button" tabindex="0" width="20" height="20"/></g></svg>`;
+    // jsdom lays nothing out: a shape is as big as its width and height attributes say.
+    const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
+      return { width: Number(this.getAttribute("width") ?? 0), height: Number(this.getAttribute("height") ?? 0) };
+    });
     try {
-      const page = await browser.newPage();
-      await page.setContent(`<svg width="200" height="100"><rect role="button" tabindex="0" aria-label="Bar" width="30" height="10"/><rect width="30" height="10" x="50"/><g aria-hidden="true"><path role="button" tabindex="0" d="M0 0h20v20z"/></g></svg>`);
-      const boxes = await tapBoxes(page);
+      // The page's evaluate runs its callback right here, in the jsdom document.
+      const boxes = await tapBoxes({ evaluate: async (fn) => fn() });
       expect(boxes.map((b) => b.target)).toEqual(['rect "Bar"']);
       expect(tapProblems(boxes, "phone")).toHaveLength(1);
-    } finally { await browser.close(); }
+    } finally { rect.mockRestore(); }
   });
 });
