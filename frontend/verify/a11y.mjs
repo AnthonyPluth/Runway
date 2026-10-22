@@ -69,22 +69,38 @@ export async function tapBoxes(page) {
     const inline = (el) => el.tagName === "A" && getComputedStyle(el).display === "inline" && !!el.closest("p, li, span, td");
     const box = (el) => (el.matches("input[type=checkbox], input[type=radio]") ? el.closest("label") ?? el : el);
     return [...document.querySelectorAll("a[href], button, input:not([type=hidden]), select, textarea, [role=button], [role=tab], [role=link], [tabindex]:not([tabindex='-1'])")]
-      .filter((el) => { const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return s.visibility !== "hidden" && s.display !== "none" && !el.disabled && r.width > 0 && r.height > 0 && !el.closest(".sr-only, [aria-hidden=true], svg") && !inline(el) && !(el.classList.contains("sr-only")); })
+      .filter((el) => { const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return s.visibility !== "hidden" && s.display !== "none" && !el.disabled && r.width > 0 && r.height > 0 && !el.closest(".sr-only, [aria-hidden=true]") && !inline(el) && !(el.classList.contains("sr-only")); })
       .map((el) => { const r = box(el).getBoundingClientRect(); return { target: name(el), width: r.width, height: r.height }; });
   });
 }
+
+/** Whether focusing an element draws something its unfocused style does not: a new or different outline, box shadow, or (on an
+ *  SVG shape) stroke of 2 px or more. A permanent shadow (a button's `shadow-xs`) is not a ring. `focused` and `plain` are
+ *  snapshots of the computed style: { outlineStyle, outlineWidth, outlineColor, boxShadow, stroke, strokeWidth, svg }.
+ *  Self-contained but for the two helpers it is given: it is also sent to the page. */
+export function ringedWith(focused, plain, shadowRinged, strokeRinged) {
+  const outline = (s) => s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0 && s.outlineColor !== "rgba(0, 0, 0, 0)";
+  if (outline(focused) && !(outline(plain) && focused.outlineStyle === plain.outlineStyle && focused.outlineWidth === plain.outlineWidth && focused.outlineColor === plain.outlineColor)) return true;
+  if (shadowRinged(focused.boxShadow) && focused.boxShadow !== plain.boxShadow) return true;
+  return !!focused.svg && strokeRinged(focused.stroke, focused.strokeWidth) && (focused.stroke !== plain.stroke || focused.strokeWidth !== plain.strokeWidth);
+}
+export const ringedBy = (focused, plain) => ringedWith(focused, plain, shadowRinged, strokeRinged);
 
 export async function focusStops(page) {
   await page.evaluate(() => { document.activeElement?.blur?.(); window.scrollTo(0, 0); });
   const probe = `(() => {
     const shadowRinged = ${shadowRinged};
     const strokeRinged = ${strokeRinged};
+    const ringedWith = ${ringedWith};
     const el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return null;
-    const s = getComputedStyle(el);
-    const outline = s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0 && s.outlineColor !== "rgba(0, 0, 0, 0)";
+    const snap = () => { const s = getComputedStyle(el); return { outlineStyle: s.outlineStyle, outlineWidth: s.outlineWidth, outlineColor: s.outlineColor, boxShadow: s.boxShadow, stroke: s.stroke, strokeWidth: s.strokeWidth, svg: el instanceof SVGElement }; };
+    const focused = snap();
+    el.blur();
+    const plain = snap();
+    el.focus();
     const label = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + ' "' + (el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 24) + '"';
-    return { key: label + [...document.querySelectorAll(el.tagName)].indexOf(el), target: label, ringed: outline || shadowRinged(s.boxShadow) || (el instanceof SVGElement && strokeRinged(s.stroke, s.strokeWidth)) };
+    return { key: label + [...document.querySelectorAll(el.tagName)].indexOf(el), target: label, ringed: ringedWith(focused, plain, shadowRinged, strokeRinged) };
   })()`;
   const stops = [];
   const seen = new Set();

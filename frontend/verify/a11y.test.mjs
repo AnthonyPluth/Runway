@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyBaseline, axeProblems, BASELINE, focusProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapProblems, visitProblems } from "./a11y.mjs";
+import { applyBaseline, axeProblems, BASELINE, focusProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
 
 describe("axeProblems", () => {
   it("names each failing element with its rule", () => {
@@ -139,5 +139,39 @@ describe("applyBaseline and visitProblems", () => {
     const tall = "tap-target: button.block.cursor-pointer \"Logo for Target\" is 36×40 px, under 44";
     expect(visitProblems([tall, "tap-target: button.block.cursor-pointer \"Logo for Fuel Stop\" is 36×36 px, under 44"], where, e)).toEqual([]);
     expect(visitProblems(["tap-target: button.other \"Logo\" is 36×36 px, under 44"], where, e)).toHaveLength(2);
+  });
+});
+
+describe("ringedBy", () => {
+  const plain = { outlineStyle: "none", outlineWidth: "0px", outlineColor: "rgb(0, 0, 0)", boxShadow: "none", stroke: "none", strokeWidth: "1px", svg: false };
+  const SHADOW = "rgba(0, 0, 0, 0.05) 0px 1px 2px 0px";
+  it("is a ring when focus adds an outline, a box shadow or a stroke", () => {
+    expect(ringedBy({ ...plain, outlineStyle: "solid", outlineWidth: "2px", outlineColor: "rgb(59, 130, 246)" }, plain)).toBe(true);
+    expect(ringedBy({ ...plain, boxShadow: "rgb(59, 130, 246) 0px 0px 0px 3px" }, plain)).toBe(true);
+    expect(ringedBy({ ...plain, boxShadow: `rgb(59, 130, 246) 0px 0px 0px 3px, ${SHADOW}` }, { ...plain, boxShadow: SHADOW })).toBe(true);
+    expect(ringedBy({ ...plain, svg: true, stroke: "rgb(255, 255, 255)", strokeWidth: "2px" }, { ...plain, svg: true, stroke: "rgb(0, 0, 0)", strokeWidth: "1px" })).toBe(true);
+  });
+  it("is not a ring when the same shadow, outline or stroke is there unfocused (a button's shadow-xs)", () => {
+    expect(ringedBy({ ...plain, boxShadow: SHADOW }, { ...plain, boxShadow: SHADOW })).toBe(false);
+    const outlined = { ...plain, outlineStyle: "solid", outlineWidth: "1px", outlineColor: "rgb(1, 2, 3)" };
+    expect(ringedBy(outlined, outlined)).toBe(false);
+    const stroked = { ...plain, svg: true, stroke: "rgb(255, 255, 255)", strokeWidth: "2px" };
+    expect(ringedBy(stroked, stroked)).toBe(false);
+    expect(ringedBy(plain, plain)).toBe(false);
+  });
+});
+
+describe("tapBoxes", () => {
+  it("measures an interactive SVG shape but not a decorative one", async () => {
+    const { chromium } = await import("@playwright/test");
+    const { findChromium } = await import("./verify.mjs");
+    const browser = await chromium.launch({ executablePath: findChromium() });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`<svg width="200" height="100"><rect role="button" tabindex="0" aria-label="Bar" width="30" height="10"/><rect width="30" height="10" x="50"/><g aria-hidden="true"><path role="button" tabindex="0" d="M0 0h20v20z"/></g></svg>`);
+      const boxes = await tapBoxes(page);
+      expect(boxes.map((b) => b.target)).toEqual(['rect "Bar"']);
+      expect(tapProblems(boxes, "phone")).toHaveLength(1);
+    } finally { await browser.close(); }
   });
 });
