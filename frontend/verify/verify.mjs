@@ -635,8 +635,9 @@ async function main() {
 
   // Each worker is a browser of its own. No partial raster: with it, a tile that changed is rastered again only where it
   // was invalidated and keeps the rest from an earlier frame, so an edge across that boundary (a card's rounded corner
-  // behind the emoji picker) came out a level or two apart depending on which frames were drawn: about half the captures
-  // of the emoji picker, against none of 72 without it. One raster thread: a busy machine has no cores to spare anyway.
+  // behind the emoji picker) came out a level or two apart depending on which frames were drawn: 15 to 45% of the emoji
+  // picker's captures, against none of 152 without it (whatever the number of raster threads, which on its own changed
+  // nothing). One raster thread: a busy machine has no cores to spare anyway.
   // With --url, one item at a time: they share that server.
   const { outcomes, failures } = await runPool({
     items, workers: seed ? jobs : 1, reverse,
