@@ -815,7 +815,11 @@ export function renderText(result) {
 /** Runs one command line; returns { result, exit, help? } (help is text, printed as it is). */
 export async function run(argv) {
   let parsed;
-  try { parsed = parseArgs(argv); } catch (e) { return { result: errorResult(null, e), exit: e.exit ?? 1, text: argv.includes("--text") }; }
+  try { parsed = parseArgs(argv); } catch (e) {
+    // Name the command when it was one (`goto` without its route), so the caller knows which line failed.
+    const named = argv.find((a) => !a.startsWith("-"));
+    return { result: errorResult(named in COMMANDS ? named : null, e), exit: e.exit ?? 1, text: argv.includes("--text") };
+  }
   const { command, args, options, text, help } = parsed;
   if (command !== null && help) return { help: commandHelp(command), exit: 0 };
   if (command === null || (command === "help" && !options.markdown && !args[0])) return { help: overviewHelp(), exit: 0 };

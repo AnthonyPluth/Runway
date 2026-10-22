@@ -123,7 +123,8 @@ describe("the JSON error shape", () => {
 
   it("comes out of run() with exit 2 for usage and 1 for a failure, and renders as text", async () => {
     const bad = await c.run(["viewport", "tablet"]);
-    expect(bad).toMatchObject({ exit: 2, result: { ok: false, command: null, error: { code: "usage" } } });
+    expect(bad).toMatchObject({ exit: 2, result: { ok: false, command: "viewport", error: { code: "usage" } } });
+    expect((await c.run(["clik"])).result).toMatchObject({ ok: false, command: null, error: { code: "usage" } });
     const none = await c.run(["info", "--text"]);
     expect(none).toMatchObject({ exit: 1, text: true, result: { ok: false, command: "info", error: { code: "no_session" } } });
     expect(c.renderText(none.result)).toBe("error (no_session): no session is running\n  what to do: run `tools/control start` first (`tools/control doctor` if it fails)");

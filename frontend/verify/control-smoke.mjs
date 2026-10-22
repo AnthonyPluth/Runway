@@ -62,6 +62,11 @@ expect(r.code === 1 && r.json?.error?.code === "no_match" && r.json.error.hint.i
 r = control("goto", "https://example.com");
 expect(r.code === 1 && r.json?.error?.code === "refused", "goto anywhere but its own server is refused");
 
+r = control("eval", "() => fetch('/api/control-smoke', { method: 'POST' }).then((r) => r.status)");
+expect(r.code === 1 && r.json?.error?.code === "not_read_only", "eval is read-only without --write: a POST is blocked, and said so");
+control("console");
+control("network");
+
 r = control("flow", "transactions-delete", "--viewport", "desktop");
 expect(r.code === 0 && r.json?.steps?.every((s) => s.ok) && r.json.files.length === 4, "flow: transactions-delete passes, step by step, with its 4 images");
 

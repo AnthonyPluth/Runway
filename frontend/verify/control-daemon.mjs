@@ -224,6 +224,9 @@ async function main() {
     return settledNow(5000);
   };
 
+  const notReadOnly = (blocked) => new ControlError("not_read_only", `it tried to change the app's data (${blocked.join(", ")}), which was blocked`,
+    "pass --write if that's what you meant (demo data only), or use click and type");
+
   const handlers = {
     async goto({ args, options: o }) {
       await page.goto(routeUrl(base, args[0]), { waitUntil: "networkidle" });
@@ -308,12 +311,13 @@ async function main() {
       try {
         value = await page.evaluate(jsExpression(code));
       } catch (e) {
+        if (blocked.length) throw notReadOnly(blocked);   // the blocked request is what made it fail
         throw new ControlError("eval_error", scrubText(firstLine(e)).replace(/^page\.evaluate: /, ""), "check the expression: it runs in the page (document, window), as an expression or a () => function");
       } finally {
         if (!o.write) await page.unroute("**/*", guard);
       }
       const domChanges = await page.evaluate(() => { globalThis.__controlObserver?.disconnect(); return globalThis.__controlChanges ?? 0; }).catch(() => 0);
-      if (blocked.length) throw new ControlError("not_read_only", `it tried to change the app's data (${blocked.join(", ")}), which was blocked`, "pass --write if that's what you meant (demo data only), or use click and type");
+      if (blocked.length) throw notReadOnly(blocked);
       const json = JSON.stringify(value);
       return { value: json === undefined ? null : json.length > 20000 ? `${json.slice(0, 20000)}… (cut)` : value, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, domChanges, ...(domChanges && !o.write ? { warning: "the page changed while it ran (the app re-rendering, or the expression): prefer click and type to change it" } : {}) };
     },
