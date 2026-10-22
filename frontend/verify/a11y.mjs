@@ -75,14 +75,16 @@ export async function tapBoxes(page) {
 }
 
 /** Whether focusing an element draws something its unfocused style does not: a new or different outline, box shadow, or (on an
- *  SVG shape) stroke of 2 px or more. A permanent shadow (a button's `shadow-xs`) is not a ring. `focused` and `plain` are
+ *  SVG shape) a stroke of 2 px or more. A permanent shadow (a button's `shadow-xs`) is not a ring. `focused` and `plain` are
  *  snapshots of the computed style: { outlineStyle, outlineWidth, outlineColor, boxShadow, stroke, strokeWidth, svg }.
  *  Self-contained but for the two helpers it is given: it is also sent to the page. */
 export function ringedWith(focused, plain, shadowRinged, strokeRinged) {
   const outline = (s) => s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0 && s.outlineColor !== "rgba(0, 0, 0, 0)";
   if (outline(focused) && !(outline(plain) && focused.outlineStyle === plain.outlineStyle && focused.outlineWidth === plain.outlineWidth && focused.outlineColor === plain.outlineColor)) return true;
   if (shadowRinged(focused.boxShadow) && focused.boxShadow !== plain.boxShadow) return true;
-  return !!focused.svg && strokeRinged(focused.stroke, focused.strokeWidth) && (focused.stroke !== plain.stroke || focused.strokeWidth !== plain.strokeWidth);
+  // An SVG shape's ring is a stroke of 2 px or more (its unfocused outline is 1 px). Not compared with the unfocused style: the
+  // chart selects a shape when it gets focus and keeps it selected, so blurring it leaves the same stroke.
+  return !!focused.svg && strokeRinged(focused.stroke, focused.strokeWidth);
 }
 export const ringedBy = (focused, plain) => ringedWith(focused, plain, shadowRinged, strokeRinged);
 

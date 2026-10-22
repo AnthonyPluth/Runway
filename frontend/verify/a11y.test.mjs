@@ -150,13 +150,12 @@ describe("ringedBy", () => {
     expect(ringedBy({ ...plain, boxShadow: "rgb(59, 130, 246) 0px 0px 0px 3px" }, plain)).toBe(true);
     expect(ringedBy({ ...plain, boxShadow: `rgb(59, 130, 246) 0px 0px 0px 3px, ${SHADOW}` }, { ...plain, boxShadow: SHADOW })).toBe(true);
     expect(ringedBy({ ...plain, svg: true, stroke: "rgb(255, 255, 255)", strokeWidth: "2px" }, { ...plain, svg: true, stroke: "rgb(0, 0, 0)", strokeWidth: "1px" })).toBe(true);
+    expect(ringedBy({ ...plain, svg: true, stroke: "rgb(255, 255, 255)", strokeWidth: "1px" }, { ...plain, svg: true })).toBe(false);
   });
   it("is not a ring when the same shadow, outline or stroke is there unfocused (a button's shadow-xs)", () => {
     expect(ringedBy({ ...plain, boxShadow: SHADOW }, { ...plain, boxShadow: SHADOW })).toBe(false);
     const outlined = { ...plain, outlineStyle: "solid", outlineWidth: "1px", outlineColor: "rgb(1, 2, 3)" };
     expect(ringedBy(outlined, outlined)).toBe(false);
-    const stroked = { ...plain, svg: true, stroke: "rgb(255, 255, 255)", strokeWidth: "2px" };
-    expect(ringedBy(stroked, stroked)).toBe(false);
     expect(ringedBy(plain, plain)).toBe(false);
   });
 });
