@@ -160,7 +160,7 @@ describe("a reload that fails", () => {
     await screen.findByTestId("nw-headline");
     expect(screen.queryByTestId("refresh-failed")).toBeNull();
     fail = true;
-    await userEvent.click(screen.getByRole("button", { name: "Checking, $5,500.00" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Checking\b.*\$5,500\.00$/ }));
     await userEvent.click(await screen.findByRole("switch", { name: "Count in net worth" }));
     const banner = await screen.findByTestId("refresh-failed");
     expect(banner).toHaveTextContent("Couldn’t refresh · showing earlier numbers");

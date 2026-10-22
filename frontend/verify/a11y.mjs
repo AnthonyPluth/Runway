@@ -1,3 +1,4 @@
+/* global document, window, getComputedStyle -- used inside page.evaluate callbacks, which run in the browser */
 // The accessibility checks `make verify` makes on every page and flow it visits (ported from Waypoint's verify/a11y.mjs):
 // axe-core's WCAG 2.2 AA rules, a 44 px minimum for a tap target on the phone, and a visible focus ring on every tab stop.
 // A finding is a line of text; baseline.txt-style tolerance of known ones (a list that only shrinks) is applied by

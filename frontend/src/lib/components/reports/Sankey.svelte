@@ -116,6 +116,8 @@
     const base = t.role === "in" ? cf.total_in : t.role === "out" ? cf.total_out : 0;
     return base > 0 ? `${pct(t.v / base)} of ${t.role === "in" ? "money in" : "money out"}` : "";
   };
+  // The hint is a description, not part of the name (a <title> child would be, and the name must start with what's on screen).
+  const hint = (t: Sel) => (t.filters ? { "aria-description": "See transactions" } : {});
   const ariaOf = (t: Sel) => [`${t.name}: ${fmt0(t.v)}`, share(t)].filter(Boolean).join(", ");
   // The selection goes when the month changes or what it pointed at is gone.
   $effect(() => { if (sel && !chart.all.some((n) => n.key === sel!.key) && !chart.links.some((l) => l.key === sel!.key)) sel = null; });
@@ -130,7 +132,7 @@
         aria-label={`Cash flow for ${monthName}: money in on the left, spending on the right`}>
         {#each c.links as l (l.key)}
           {@const t = ofLink(l)}
-          <path d={l.d} style:fill={l.color} role="button" tabindex="0" aria-label={ariaOf(t)} aria-description={t.filters ? "See transactions" : undefined} data-key={l.key}
+          <path d={l.d} style:fill={l.color} role="button" tabindex="0" aria-label={ariaOf(t)} {...hint(t)} data-key={l.key}
             class={["outline-none transition-[fill-opacity] hover:[fill-opacity:0.55] focus-visible:stroke-foreground focus-visible:[stroke-width:2] focus-visible:[fill-opacity:0.55]", t.filters && "cursor-pointer",
               sel?.key === l.key ? "[fill-opacity:0.6]" : l.role === "neutral" ? "[fill-opacity:0.2]" : "[fill-opacity:0.3]"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}
@@ -140,7 +142,7 @@
         {#each c.all as n (n.key)}
           {@const t = ofNode(n)}
           <rect x={n.x} y={n.y} width={nodeW} height={n.h} rx="2" style:fill={n.color} role="button"
-            tabindex="0" aria-label={ariaOf(t)} aria-description={t.filters ? "See transactions" : undefined} data-key={n.key}
+            tabindex="0" aria-label={ariaOf(t)} {...hint(t)} data-key={n.key}
             stroke={sel?.key === n.key ? "var(--foreground)" : "var(--card)"} stroke-width={sel?.key === n.key ? 2 : 1}
             class={["outline-none focus-visible:stroke-foreground focus-visible:[stroke-width:2]", t.filters && "cursor-pointer"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}

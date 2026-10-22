@@ -243,9 +243,10 @@ def check_a11y_shrinks(base_text: str, text: str) -> list[str]:
     return [f"{A11Y_BASELINE_NAME}: `{line}` is new: the list only shrinks, so fix the finding instead of listing it" for line in added]
 
 
-def base_a11y_baseline(base: str) -> str:
+def base_a11y_baseline(base: str) -> str | None:
+    """The base's baseline, or None when the base has none yet (the pull request that introduces the list)."""
     out = subprocess.run(["git", "show", f"{base}:{A11Y_BASELINE_NAME}"], cwd=ROOT, capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else ""
+    return out.stdout if out.returncode == 0 else None
 
 
 def check_workflow(name: str, text: str, workflow: bool = True) -> list[str]:
@@ -294,7 +295,9 @@ def main(argv: list[str] | None = None) -> int:
         base = subprocess.run(["git", "merge-base", *args.commits.split("..", 1)], cwd=ROOT, check=True, capture_output=True,
                               text=True).stdout.strip() if ".." in args.commits else args.commits
         problems += check_images(added_images(base), verify_images())
-        problems += check_a11y_shrinks(base_a11y_baseline(base), A11Y_BASELINE.read_text() if A11Y_BASELINE.exists() else "")
+        base_baseline = base_a11y_baseline(base)
+        if base_baseline is not None:
+            problems += check_a11y_shrinks(base_baseline, A11Y_BASELINE.read_text() if A11Y_BASELINE.exists() else "")
     for p in problems:
         print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p, file=sys.stderr)
     if not problems:

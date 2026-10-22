@@ -234,7 +234,8 @@ describe("MobileNav", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
-    expect(within(bar).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(["Overview", "Transactions", "Budget", "Invest"]);
+    // The tab shows "Invest"; the rest of its name is read ("Investments"), so the name starts with what is on screen.
+    expect(within(bar).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(["Overview", "Transactions", "Budget", "Investments"]);
     expect(within(bar).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["#overview", "#transactions", "#budget", "#investments"]);
     expect(within(bar).getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
   });
@@ -244,7 +245,7 @@ describe("MobileNav", () => {
     route.page = page; route.sub = sub;
     render(MobileNav);
     const lit = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link").filter((l) => l.hasAttribute("aria-current"));
-    expect(lit.map((l) => l.textContent!.trim())).toEqual(["Invest"]);
+    expect(lit.map((l) => l.textContent!.trim())).toEqual(["Investments"]);
   });
 
   it("floats as a glass pill 12px in from the sides and the bottom (and the inset), 56px of tabs", () => {

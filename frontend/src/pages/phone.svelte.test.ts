@@ -107,7 +107,7 @@ describe("Net worth", () => {
     render(NetWorth);
     expect(await screen.findByText("$5,000")).toBeInTheDocument();
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Checking, $5,500.00" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Checking\b.*\$5,500\.00$/ })).toBeInTheDocument();
     expect(screen.getByText(/Not counted/)).toBeInTheDocument();
     const tabs = screen.getByRole("navigation", { name: "Net worth" });
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Summary", "Equity", "Retirement"]);
@@ -122,7 +122,7 @@ describe("Net worth", () => {
 
   it("lists its accounts and tabs on a computer", async () => {
     render(NetWorth);
-    expect(await screen.findByRole("button", { name: "Checking, $5,500.00" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Checking\b.*\$5,500\.00$/ })).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Net worth" })).getAllByRole("link")).toHaveLength(3);
     expect(screen.getByText(/Not counted/)).toBeInTheDocument();
   });

@@ -42,7 +42,7 @@ beforeEach(() => {
 describe("the breakdown", () => {
   it("lists each asset once, with no separate assets card", async () => {
     render(NetWorth);
-    await screen.findByRole("button", { name: /^House, / });
+    await screen.findByRole("button", { name: /^House\b/ });
     expect(screen.getAllByText("House")).toHaveLength(1);
     expect(screen.queryByText("Home, vehicles and other assets")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add an asset" })).not.toBeInTheDocument();
@@ -51,7 +51,7 @@ describe("the breakdown", () => {
   it("opens an asset row in a side panel with its actions, and removes it from there", async () => {
     render(NetWorth);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^House, / }));
+    await user.click(await screen.findByRole("button", { name: /^House\b/ }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).getByText(/\$340,000\.00 equity after Mortgage/)).toBeInTheDocument();
     expect(within(dialog).getAllByText(/Home \/ property/)).toHaveLength(1);
@@ -71,7 +71,7 @@ describe("the breakdown", () => {
   it("shows a vehicle's value link and saves a new value from the panel", async () => {
     render(NetWorth);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Outback, / }));
+    await user.click(await screen.findByRole("button", { name: /^Outback\b/ }));
     const dialog = await screen.findByRole("dialog", { name: "Outback" });
     expect(within(dialog).getByRole("link", { name: /Check on KBB/ })).toHaveAttribute("href", expect.stringContaining("kbb.com"));
     const input = within(dialog).getByLabelText(/^Value/);
@@ -88,7 +88,7 @@ describe("the breakdown", () => {
     data.assets_list = [{ ...house, address: "1 Main St, Springfield, IL 62701", source: "realie", realie_valued: true } as unknown as typeof house, car];
     render(NetWorth);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^House, / }));
+    await user.click(await screen.findByRole("button", { name: /^House\b/ }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).queryByLabelText(/^Value/)).not.toBeInTheDocument();
     expect(within(dialog).getByText("$540,000.00")).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("the breakdown", () => {
   it("edits details in the panel and goes back to the summary", async () => {
     render(NetWorth);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /^Outback, / }));
+    await user.click(await screen.findByRole("button", { name: /^Outback\b/ }));
     const dialog = await screen.findByRole("dialog", { name: "Outback" });
     await user.click(within(dialog).getByRole("button", { name: "Edit details" }));
     expect(within(dialog).getByLabelText("Name")).toHaveValue("Outback");
@@ -135,9 +135,9 @@ describe("the breakdown", () => {
     render(NetWorth);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Cash, collapse" }));
-    expect(screen.queryByRole("button", { name: /^Checking, / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Checking\b/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cash, expand" }));
-    expect(screen.getByRole("button", { name: /^Checking, / })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Checking\b/ })).toBeInTheDocument();
   });
 
   it("links a company row under Equity (vested) to the equity view", async () => {
