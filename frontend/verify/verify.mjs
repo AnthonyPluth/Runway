@@ -43,6 +43,10 @@ export function findChromium(env = process.env, exists = existsSync, list = read
   return undefined;
 }
 
+/** How a worker's browser is launched (control.mjs's session's too). One raster thread: tiles rastered in parallel came
+ *  out a level or two apart at an edge from run to run (a card's rounded corner behind the emoji picker). */
+export const launchOptions = () => ({ executablePath: findChromium(), args: ["--num-raster-threads=1"] });
+
 /** The moment the browser's clock starts at for a run frozen at `day` (YYYY-MM-DD): noon local time, as runway/verify.py's
  *  FROZEN_TIME is for the server (both read in the machine's time zone). The browser keeps it fixed for every visit but the device cache check, which installs a running clock from it so it can jump ahead. */
 export const frozenTime = (day) => new Date(`${day}T12:00:00`);
@@ -232,7 +236,7 @@ export function flowProblems(flow) {
 
 /** Waits until unsettled() finds nothing, up to `timeout` ms; returns what was still loading then ([] when settled). */
 // (Polled from here with page.evaluate: page.waitForFunction would eval a string in the page, which the app's CSP refuses.)
-async function waitSettled(page, timeout) {
+export async function waitSettled(page, timeout) {
   const end = Date.now() + timeout;
   for (;;) {
     const left = await page.evaluate(unsettled).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
@@ -241,7 +245,9 @@ async function waitSettled(page, timeout) {
   }
 }
 
-async function runStep(page, step, shot) {
+/** Runs one flow step on `page` (which carries `t(ms)`, the stretched limit, and the flow's `checks` so far); `shot(name)`
+ *  takes a screenshot step's image. Throws when the step fails. (control.mjs's `flow` runs flows with it too.) */
+export async function runStep(page, step, shot) {
   const timeout = page.t(step.timeout ?? 10000);
   // A scroll_to sets where the page is scrolled for the shots after it, until a goto or reload moves to another page.
   if ("scroll_to" in step) page.scrolledByFlow = true;
@@ -338,7 +344,7 @@ async function doStep(page, step, shot, timeout) {
  *  DevTools WebAuthn domain) standing in for Face ID or Touch ID, which verifies the person until a step says otherwise.
  *  `prf`: the authenticator gives a PRF secret (as a passkey on a current iPhone, Android or Mac would), so the app keeps
  *  its encrypted cache; without it (the flows), it's a passkey without PRF, and the app keeps none. */
-async function signIn(ctx, page, url, token, { prf = false } = {}) {
+export async function signIn(ctx, page, url, token, { prf = false } = {}) {
   await ctx.addCookies([{ name: "runway_session", value: token, url }]);
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
@@ -435,6 +441,43 @@ async function cacheCheck(page, base) {
   if (left && left.length) throw new Error(`signing out left ${left.length} row(s) in IndexedDB`);
 }
 
+/** A new browser context made ready the way every visit is (control.mjs's session too): the browser's clock at the frozen
+ *  `day` (fixed, or running from it when the visit `moves` it itself), the app's minute timers off (unless it `moves`),
+ *  PAGE_STYLE in every page from the start and holdLayout. */
+export async function prepareContext(ctx, { day, moves = false } = {}) {
+  // The device cache check moves the clock itself (setSystemTime), so it gets a running one; every other visit's clock is
+  // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
+  if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
+  // PAGE_STYLE in the page from the start (the capture also stops the endless animations, STILL).
+  // Nor the app's check-in every minute (setInterval(checkIn, 60_000) in lib/app.svelte.ts): its refresh re-renders the lists, which
+  // drops an open confirm dialog or an expanded row wherever in a flow it lands (a guess at the transactions-delete flake, and the card
+  // projection that's sometimes collapsed in its shot). The device cache check keeps it: it tests the app as it runs.
+  if (!moves) await ctx.addInitScript(() => {
+    const real = globalThis.setInterval.bind(globalThis);
+    globalThis.setInterval = (fn, ms, ...rest) => (ms >= 30000 ? 0 : real(fn, ms, ...rest));
+  });
+  await ctx.addInitScript((css) => {
+    const style = globalThis.document.createElement("style");
+    style.textContent = css;
+    globalThis.document.addEventListener("DOMContentLoaded", () => globalThis.document.head.append(style));
+  }, PAGE_STYLE);
+  await ctx.addInitScript(holdLayout);
+}
+
+/** The flows in `dir` (each file's JSON, checked with flowProblems), sorted by file name: { flows } or { error }. */
+export function readFlows(dir) {
+  if (!existsSync(dir)) return { flows: [] };
+  const flows = [];
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort()) {
+    let flow;
+    try { flow = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch (e) { return { error: `flow ${f} isn't valid JSON (${e.message})` }; }
+    const bad = flowProblems(flow);
+    if (bad.length) return { error: `flow ${f}: ${bad.join("; ")}` };
+    flows.push(flow);
+  }
+  return { flows };
+}
+
 // A screenshot is retaken when the page wasn't settled (SHOT_TRIES in all) and fails after that: never kept half loaded.
 const SHOT_TRIES = 4;
 
@@ -464,13 +507,8 @@ async function main() {
   if (seed && !(workDir && python)) { console.error("verify: --seed needs --work and --python"); process.exit(2); }
   if (!base && !seed) { console.error("verify: no server (--seed, or the address of one already running: --url or RUNWAY_VERIFY_URL)"); process.exit(2); }
 
-  const flows = existsSync(flowsDir) ? readdirSync(flowsDir).filter((f) => f.endsWith(".json")).sort().map((f) => {
-    let flow;
-    try { flow = JSON.parse(readFileSync(join(flowsDir, f), "utf8")); } catch (e) { console.error(`verify: flow ${f} isn't valid JSON (${e.message})`); process.exit(2); }
-    const bad = flowProblems(flow);
-    if (bad.length) { console.error(`verify: flow ${f}: ${bad.join("; ")}`); process.exit(2); }
-    return flow;
-  }) : [];
+  const { flows, error } = readFlows(flowsDir);
+  if (error) { console.error(`verify: ${error}`); process.exit(2); }
   const { items, unknown } = selectItems(args, flows, only);
   if (unknown) {
     console.error(`verify: no such page or flow: ${unknown.join(", ")} (pages: ${PAGES.join(", ")}; flows: the names in ${flowsDir}; ${DEVICE_CACHE})`);
@@ -487,24 +525,8 @@ async function main() {
 
   async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
-    // The device cache check moves the clock itself (setSystemTime), so it gets a running one; every other visit's clock is
-    // fixed, so a time of day ("as of 12:00:18 PM") doesn't change from one run to the next.
     const moves = label === DEVICE_CACHE;
-    if (day) await (moves ? ctx.clock.install({ time: frozenTime(day) }) : ctx.clock.setFixedTime(frozenTime(day)));
-    // PAGE_STYLE in the page from the start (the capture also stops the endless animations, STILL).
-    // Nor the app's check-in every minute (setInterval(checkIn, 60_000) in lib/app.svelte.ts): its refresh re-renders the lists, which
-    // drops an open confirm dialog or an expanded row wherever in a flow it lands (a guess at the transactions-delete flake, and the card
-    // projection that's sometimes collapsed in its shot). The device cache check keeps it: it tests the app as it runs.
-    if (!moves) await ctx.addInitScript(() => {
-      const real = globalThis.setInterval.bind(globalThis);
-      globalThis.setInterval = (fn, ms, ...rest) => (ms >= 30000 ? 0 : real(fn, ms, ...rest));
-    });
-    await ctx.addInitScript((css) => {
-      const style = globalThis.document.createElement("style");
-      style.textContent = css;
-      globalThis.document.addEventListener("DOMContentLoaded", () => globalThis.document.head.append(style));
-    }, PAGE_STYLE);
-    await ctx.addInitScript(holdLayout);
+    await prepareContext(ctx, { day, moves });
     const page = await ctx.newPage();
     // Every limit stretched by the load (each wait still ends as soon as what it waits for is there).
     const scale = timeScale(baseScale, attempt);
@@ -638,7 +660,7 @@ async function main() {
   // machine has no cores to spare anyway. With --url, one item at a time: they share that server.
   const { outcomes, failures } = await runPool({
     items, workers: seed ? jobs : 1, reverse,
-    prepare: () => chromium.launch({ executablePath: findChromium(), args: ["--num-raster-threads=1"] }),
+    prepare: () => chromium.launch(launchOptions()),
     work: runOne,
     release: (browser) => browser.close(),
   });
