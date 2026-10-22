@@ -14,7 +14,7 @@ one a correction that used to live as prose and now fails `make check` and CI in
   and after image fails.
 - Accessibility baseline (frontend/verify/a11y-baseline.txt): the findings `make verify` tolerates, one line each,
   `<page or flow> @ <width> | <finding> | <reason>`; each line has all three parts, names a page or flow that exists at a width
-  it is shot at, and is listed once. A line whose finding no longer occurs fails `make verify` itself (this check reads no
+  it is shot at, and is listed once; with `--commits`, no line is new compared with the base. A line whose finding no longer occurs fails `make verify` itself (this check reads no
   browser), so the list only shrinks.
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
   every action pinned by SHA has its version in a comment; `gh api` with `per_page` paginates; and no `runner`, `steps`, `job` or
@@ -233,6 +233,21 @@ def check_a11y_baseline(text: str, visits: set[str]) -> list[str]:
     return problems
 
 
+def baseline_lines(text: str) -> set[str]:
+    return {line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")}
+
+
+def check_a11y_shrinks(base_text: str, text: str) -> list[str]:
+    """The baseline only shrinks: every line is one the base (main) already had, word for word."""
+    added = sorted(baseline_lines(text) - baseline_lines(base_text))
+    return [f"{A11Y_BASELINE_NAME}: `{line}` is new: the list only shrinks, so fix the finding instead of listing it" for line in added]
+
+
+def base_a11y_baseline(base: str) -> str:
+    out = subprocess.run(["git", "show", f"{base}:{A11Y_BASELINE_NAME}"], cwd=ROOT, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else ""
+
+
 def check_workflow(name: str, text: str, workflow: bool = True) -> list[str]:
     problems = []
     if workflow and not BASH_DEFAULT.search(text):
@@ -279,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         base = subprocess.run(["git", "merge-base", *args.commits.split("..", 1)], cwd=ROOT, check=True, capture_output=True,
                               text=True).stdout.strip() if ".." in args.commits else args.commits
         problems += check_images(added_images(base), verify_images())
+        problems += check_a11y_shrinks(base_a11y_baseline(base), A11Y_BASELINE.read_text() if A11Y_BASELINE.exists() else "")
     for p in problems:
         print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p, file=sys.stderr)
     if not problems:

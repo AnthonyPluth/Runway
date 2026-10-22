@@ -226,10 +226,6 @@ class Images(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ["git", "diff", "--name-only", "-z", "--diff-filter=AMR", "base", "HEAD", "--"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class A11yBaseline(unittest.TestCase):
     VISITS = {"budget @ phone", "budget @ desktop", "flow lock @ phone", "flow lock @ landscape"}
     LINE = "budget @ phone | tap-target: button A is 32×44 px, under 44 | a small icon button"
@@ -275,3 +271,15 @@ class A11yBaseline(unittest.TestCase):
         problems = self.problems(f"{self.LINE}\n{self.LINE} again")
         self.assertEqual(len(problems), 1)
         self.assertIn("line 2: listed twice", problems[0])
+
+    def test_a_new_baseline_line_fails_and_a_removed_one_passes(self):
+        other = "budget @ desktop | focus: a X shows no focus ring | why"
+        self.assertEqual(fc.check_a11y_shrinks(f"{self.LINE}\n{other}\n", f"{self.LINE}\n"), [])
+        self.assertEqual(fc.check_a11y_shrinks("# header\n", ""), [])
+        problems = fc.check_a11y_shrinks(f"{self.LINE}\n", f"# header\n{self.LINE}\n{other}\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is new", problems[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
