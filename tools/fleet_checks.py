@@ -15,6 +15,10 @@ one a correction that used to live as prose and now fails `make check` and CI in
 - Workflows (.github/workflows/, .github/actions/): each workflow runs bash by default (so steps get -eo pipefail);
   every action pinned by SHA has its version in a comment; `gh api` with `per_page` paginates; and no `runner`, `steps`, `job` or
   `env` expression in a workflow's or job's `env:` (GitHub rejects the whole file, which then never runs).
+- Skills (.claude/skills/*/SKILL.md): valid frontmatter (`name`, its folder's, and a `description`), a body, links that
+  lead somewhere; and the verify-runway skill's references/cli.md is exactly what tools/control's help generates
+  (`make verify-skill`), so the skill can't drift from the CLI. That one runs Node (frontend/verify/control.mjs, which
+  needs no packages for its help).
 
 Exits 1, listing each problem, when any check fails."""
 from __future__ import annotations
@@ -223,12 +227,83 @@ def check_workflows() -> list[str]:
     return problems
 
 
+# --- Skills -------------------------------------------------------------------------------------------------------
+
+SKILLS = ROOT / ".claude/skills"
+CONTROL = ROOT / "frontend/verify/control.mjs"
+CLI_REFERENCE = SKILLS / "verify-runway/references/cli.md"
+SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+MD_LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
+
+
+def check_skill(folder: str, text: str, exists=lambda rel: True) -> list[str]:
+    """A skill's SKILL.md: frontmatter of `key: value` lines with a `name` (its folder's) and a `description` (what makes
+    an agent load it: one line, at most 1024 characters), a body, and relative links that lead to files that exist."""
+    where = f".claude/skills/{folder}/SKILL.md"
+    found = FRONTMATTER.match(text)
+    if not found:
+        return [f"{where}: no frontmatter (a --- line, `name:` and `description:`, then a --- line)"]
+    fields: dict[str, str] = {}
+    problems = []
+    for line in found.group(1).splitlines():
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip() or key != key.strip():
+            problems.append(f"{where}: frontmatter line isn't `key: value`: {line[:60]!r}")
+            continue
+        fields[key.strip()] = value.strip()
+    if fields.get("name") != folder or not SKILL_NAME.match(folder):
+        problems.append(f"{where}: `name` should be {folder!r}, its folder's name (lowercase letters, digits and -), not {fields.get('name')!r}")
+    description = fields.get("description", "")
+    if not description:
+        problems.append(f"{where}: no `description` (it is what makes an agent use the skill)")
+    elif len(description) > 1024 or "<" in description or ">" in description:
+        problems.append(f"{where}: `description` is at most 1024 characters, without < or > ({len(description)} now)")
+    if not found.group(2).strip():
+        problems.append(f"{where}: no body after the frontmatter")
+    for target in MD_LINK.findall(found.group(2)):
+        if "://" not in target and not target.startswith("/") and not exists(target):
+            problems.append(f"{where}: links to {target}, which isn't there")
+    return problems
+
+
+def check_skills(directory: Path = SKILLS) -> list[str]:
+    problems = []
+    for skill in sorted(p for p in directory.glob("*/SKILL.md")):
+        problems += check_skill(skill.parent.name, skill.read_text(), lambda rel, base=skill.parent: (base / rel).exists())
+    return problems
+
+
+def check_cli_reference(committed: str | None, generated: str | None, why: str = "") -> list[str]:
+    """references/cli.md is tools/control's help, generated (`make verify-skill`), so the skill can't drift from the CLI."""
+    name = str(CLI_REFERENCE.relative_to(ROOT))
+    if generated is None:
+        return [f"{name}: couldn't generate it to compare ({why}); it needs Node"]
+    if committed is None:
+        return [f"{name}: missing; run make verify-skill and commit it"]
+    if committed != generated:
+        return [f"{name} isn't what tools/control's help generates: run make verify-skill and commit the result "
+                "(edit the help in frontend/verify/control.mjs, never the file)"]
+    return []
+
+
+def generated_cli_reference() -> tuple[str | None, str]:
+    try:
+        done = subprocess.run(["node", str(CONTROL), "help", "--markdown"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, str(e)
+    return (done.stdout, "") if done.returncode == 0 else (None, (done.stderr or done.stdout).strip()[-200:])
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--commits", metavar="BASE..HEAD", help="also check these commits' trailers (a pull request's)")
     args = ap.parse_args(argv)
     problems = check_migrations(migrations(), MIGRATION_TESTS.read_text())
     problems += check_workflows()
+    problems += check_skills()
+    generated, why = generated_cli_reference()
+    problems += check_cli_reference(CLI_REFERENCE.read_text() if CLI_REFERENCE.exists() else None, generated, why)
     if args.commits:
         for sha, message in commits(args.commits):
             problems += check_commit(sha, message)
@@ -239,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{p}" if "GITHUB_ACTIONS" in os.environ else p, file=sys.stderr)
     if not problems:
         print("Fleet checks passed: one migration head, migrations tested" + (", commit trailers, images only where make verify puts them" if args.commits else "")
-              + ", workflow conventions.")
+              + ", workflow conventions, skills and the generated tools/control reference.")
     return 1 if problems else 0
 
 

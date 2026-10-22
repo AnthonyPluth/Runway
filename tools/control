@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Drive the real app on demo data, one command at a time: `tools/control --help`. (frontend/verify/control.mjs; the
+# verify-runway skill, .claude/skills/verify-runway/, says when and how.)
+set -euo pipefail
+exec node "$(dirname "$0")/../frontend/verify/control.mjs" "$@"

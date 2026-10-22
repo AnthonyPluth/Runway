@@ -24,7 +24,7 @@ SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg test-timings fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check \
-	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup
+	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup verify-skill control-smoke
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check api-contract-check fleet-checks test-parallel frontend-check docs-build
@@ -119,6 +119,17 @@ verify: frontend/node_modules frontend-build
 # make verify, run twice on fresh data: fails on any image that isn't byte for byte the same both times (nondeterminism).
 verify-twice: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify --twice $(PAGES)
+
+# tools/control's command reference in the verify-runway skill (.claude/skills/verify-runway/references/cli.md),
+# generated from the CLI's own help: run it after changing a command. make fleet-checks fails when it's out of date.
+verify-skill:
+	node frontend/verify/control.mjs help --markdown > .claude/skills/verify-runway/references/cli.md
+
+# tools/control end to end on the real demo server under the frozen clock: doctor, start, snapshot, screenshot (checked
+# byte for byte against screenshots/overview-phone.png), a flow, reset and stop (frontend/verify/control-smoke.mjs; the
+# Verify flows workflow runs it too). Needs what make verify needs; writes only under artifacts/control-smoke/.
+control-smoke: frontend/node_modules frontend-build
+	RUNWAY_PYTHON="$$($(PYTHON) -c 'import sys; print(sys.executable)')" node frontend/verify/control-smoke.mjs
 
 # The feature map (docs/feature-map.json and its docs page): each route's handler, web app callers, tests and docs.
 # feature-map-check fails when it is out of date or a route has no test (tools/feature_map_allowlist.txt only shrinks).
