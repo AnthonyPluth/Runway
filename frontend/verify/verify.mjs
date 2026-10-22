@@ -12,13 +12,14 @@
 // depends on what another did; --jobs items run at once, each worker a browser of its own (jobs.mjs). With --url every
 // item uses that one server, one at a time. report.json says, item by item, whether it passed and what it wrote
 // (rewritten after each one, so a crash leaves the items it didn't reach marked as not run). An item fails on a console
-// error, an uncaught page error, a 5xx response, a failed scripted step or a screenshot that never settled.
+// error, an uncaught page error, a 5xx response, a failed scripted step, a screenshot that never settled or an accessibility finding (a11y.mjs) that is not in a11y-baseline.txt.
 // Exits 1 when one failed, 2 when the run can't start (a malformed flow, an unknown page).
 import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { auditPage, readBaseline, visitProblems } from "./a11y.mjs";
 import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
@@ -518,6 +519,9 @@ async function main() {
     process.exit(2);
   }
 
+  const a11yBaseline = readBaseline();
+  if (a11yBaseline.errors.length) { console.error(`verify: ${a11yBaseline.errors.join("; ")}`); process.exit(2); }
+
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   // Rewritten after each item, so a run that dies part way says which items it never reached.
@@ -579,6 +583,8 @@ async function main() {
     };
     try {
       await work(page, shot);
+      // Every page and flow, at the end of its steps (a11y.mjs): axe, tap targets on the phone, a focus ring on each tab stop.
+      if (label !== DEVICE_CACHE) result.problems.push(...visitProblems(await auditPage(page, viewport), where, a11yBaseline.entries));
     } catch (e) {
       result.problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
       console.error(`${where}: ${e.message}`);   // the whole message, with Playwright's call log, for finding why

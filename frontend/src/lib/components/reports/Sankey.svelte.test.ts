@@ -119,3 +119,13 @@ describe("Sankey", () => {
     expect(document.querySelector(".min-w-\\[720px\\]")).toBeNull();
   });
 });
+
+describe("Sankey, what a shape announces", () => {
+  it("says 'See transactions' on a shape that opens them, and nothing on one that doesn't", () => {
+    render(Sankey, { cf, monthName: "March" });
+    expect(mark(/^Groceries: \$500/)).toHaveAttribute("aria-description", "See transactions");
+    expect(mark(/^Salary → March: \$4,000/)).toHaveAttribute("aria-description", "See transactions");
+    expect(mark(/^Left over: /)).not.toHaveAttribute("aria-description");
+    expect(document.querySelector("svg title")).toBeNull();
+  });
+});

@@ -84,7 +84,7 @@ Link to another page by its address, base included: `[Configuration](/Runway/ref
 
 ## Verifying a change in the real app
 
-Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` makes a temporary database, fills it with the demo data (made-up, never yours), and drives Runway with Playwright: each page at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths, and the scripted flows. Every page and flow gets a Runway server and a fresh copy of the demo data of its own, started for it and stopped after it, so none sees what another changed: a flow must not depend on another's data, and a partial run (`PAGES=…`) writes exactly the images a full run does for those pages and flows. It saves a full-page screenshot of each page (`<page>-<width>.png`), the page's first screen (`<page>-top-<width>.png`, for the README and the docs) and each flow's steps, plus `report.json`, to `artifacts/verify/`, and exits non-zero on a console error, an uncaught error, a 5xx, a failed step or a page that never finished loading.
+Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` makes a temporary database, fills it with the demo data (made-up, never yours), and drives Runway with Playwright: each page at phone (440×956, an iPhone 17 Pro Max) and desktop (1280×800) widths, and the scripted flows. Every page and flow gets a Runway server and a fresh copy of the demo data of its own, started for it and stopped after it, so none sees what another changed: a flow must not depend on another's data, and a partial run (`PAGES=…`) writes exactly the images a full run does for those pages and flows. It saves a full-page screenshot of each page (`<page>-<width>.png`), the page's first screen (`<page>-top-<width>.png`, for the README and the docs) and each flow's steps, plus `report.json`, to `artifacts/verify/`, and exits non-zero on a console error, an uncaught error, a 5xx, a failed step, a page that never finished loading or an accessibility finding (below).
 
 ```bash
 make verify                          # every page and flow
@@ -110,6 +110,14 @@ A shot is taken only once nothing on the page is still loading (no skeleton plac
 - A page or flow that fails is run again, alone, on a fresh copy of the demo data, up to three times in all, more patiently each time. One that passed only on a retry is listed as `flaky` in the summary.
 - All or nothing: only a run where every page and flow passed puts its images in `artifacts/verify/`. A failed run leaves its `report.json`, each failed step's `-FAILED-` image and, under `unverified/`, what it did capture, for looking at, not committing.
 - The whole output also goes to its own log, `artifacts/verify-logs/verify-<time>-<pid>.log` (the path is printed first and last), so don't redirect it to a fixed file name another run could share.
+
+Every page and flow is also audited for accessibility at the end of its steps (`frontend/verify/a11y.mjs`), and fails on:
+
+- an [axe-core](https://github.com/dequelabs/axe-core) violation of its WCAG 2.2 AA rules (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`; the rules that judge a whole document, not a screen of a single-page app, are off: `region`, `landmark-one-main`, `page-has-heading-one`, `landmark-unique`, `scrollable-region-focusable`);
+- a control that shows no focus ring when you Tab to it (an outline or a box shadow; the first 80 tab stops are tried);
+- at phone width, a button, link or field smaller than 44 × 44 px (inline links in a sentence are exempt), since Runway is used as an installed iPhone app.
+
+The audit uses the dark theme and the widths verify visits, like the screenshots: a light-theme contrast problem is not seen. Findings that were there when the audit began are listed in `frontend/verify/a11y-baseline.txt`, one per line as `<page or flow> @ <width> | <finding> | <reason>`. A finding on that list is tolerated; a new one fails, and so does a line whose finding no longer occurs (delete it), so the list only shrinks. Never add a line for a new finding: fix it. `make fleet-checks` checks the file's form (all three parts, a page or flow that exists at that width, no repeats). A `PAGES=…` run checks only the lines of the pages and flows it visits.
 
 A failed run ends with a `FAIL:` line per page or flow, with its first problem (a step that timed out, `never settled` and what was still loading, a check that `no longer held after the screenshot`, a console error or a 5xx); the log has each attempt's full message.
 

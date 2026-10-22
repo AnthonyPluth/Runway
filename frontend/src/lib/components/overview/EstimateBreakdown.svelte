@@ -16,6 +16,6 @@
       <span class="min-w-0">{l.label}</span>
       <span class={["shrink-0 whitespace-nowrap", l.sum && !l.label && "font-medium text-foreground"]}>{l.value}</span>
     </div>
-    {#if l.detail}<div class="pr-20 text-muted-foreground/70">{l.detail}</div>{/if}
+    {#if l.detail}<div class="pr-20 text-muted-foreground">{l.detail}</div>{/if}
   {/each}
 </div>

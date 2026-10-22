@@ -135,14 +135,14 @@
 
 <button bind:this={trigger} type="button" role="combobox" aria-label={triggerName} aria-haspopup="listbox" aria-expanded={open}
   aria-controls={open ? listId : undefined} data-category-trigger data-value={value} {disabled}
-  class={children ? cn("cursor-pointer outline-none disabled:cursor-not-allowed", className) : cn(
+  class={children ? cn("cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed", className) : cn(
     "relative inline-flex h-9 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border border-transparent bg-transparent py-1 pr-8 pl-2.5 text-left text-base outline-none transition-[color,box-shadow] dark:bg-input md:text-sm",
     "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
     ghost && "shadow-none dark:bg-transparent hover:border-input", className)}
   onclick={() => (open ? close() : show())} onkeydown={onTriggerKey}>
   {#if children}{@render children()}{:else}
     {#if icon}<span aria-hidden="true" class="shrink-0">{icon}</span>{/if}
-    <span class={cn("min-w-0 truncate", value === "" && "text-muted-foreground")}>{shown}{#if parent && !short}<span class="text-muted-foreground">{` in ${parent}`}</span>{/if}</span>
+    <span class={cn("min-w-0 truncate", value === "" && "text-foreground/70")}>{shown}{#if parent && !short}<span class="text-muted-foreground">{` in ${parent}`}</span>{/if}</span>
     <ChevronDown aria-hidden="true" class="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 opacity-60" />
   {/if}
 </button>
@@ -172,7 +172,7 @@
     <!-- 16px text on a phone, so the browser doesn't zoom in on it. -->
     <input bind:this={input} type="text" role="combobox" aria-label="Search categories" aria-expanded="true" aria-controls={listId}
       aria-autocomplete="list" aria-activedescendant={flat[active]?.id} autocomplete="off" spellcheck="false" placeholder="Search"
-      class="h-11 w-full bg-transparent pr-3 pl-9 text-base outline-none placeholder:text-muted-foreground md:h-10 md:text-sm"
+      class="h-11 w-full bg-transparent pr-3 pl-9 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:h-10 md:text-sm"
       value={query} {oninput} onkeydown={onInputKey} />
   </div>
   <div bind:this={listbox} id={listId} role="listbox" aria-label={label} class="max-h-72 overflow-y-auto overscroll-contain p-1 phone:max-h-[60dvh]">

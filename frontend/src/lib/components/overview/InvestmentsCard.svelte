@@ -60,7 +60,7 @@
   </section>
 {:else if s && !s.empty}
   <section class="min-w-0" data-testid="investments-card">
-    <a href="#investments" class="group-list block transition-colors hover:bg-white/4" aria-label="Investments">
+    <a href="#investments" class="group-list block transition-colors hover:bg-white/4">
       <div class="px-4 pt-3 pb-3.5">
         <div class="flex items-center gap-2">
           <h2 class="eyebrow">Investments</h2>

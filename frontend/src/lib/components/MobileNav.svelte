@@ -82,10 +82,11 @@
   <div class="grid h-[56px] grid-cols-5 items-stretch gap-0 p-1 min-[380px]:gap-0.5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}
-      <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short ? item.label : undefined}
+      <a href={`#${item.page}`} aria-current={on ? "page" : undefined} aria-label={item.short && !item.label.startsWith(item.short) ? item.label : undefined}
         class={cn("relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-full text-[10px] tracking-tight min-[380px]:text-[11px] min-[380px]:tracking-normal", on ? "bg-foreground/12 text-foreground" : INACTIVE)}>
         <item.icon class={cn("size-5", on && "stroke-[2.25]")} aria-hidden="true" />
-        <span class="max-w-full truncate">{item.short ?? item.label}</span>
+        <!-- The short label shows ("Invest"); the rest of the name is read, so the name still starts with what's on screen. -->
+        <span class="max-w-full truncate">{#if item.short && item.label.startsWith(item.short)}{item.short}<span class="sr-only">{item.label.slice(item.short.length)}</span>{:else}{item.short ?? item.label}{/if}</span>
         {#if item.page === "transactions" && s?.review_count}
           <span class="absolute top-1 left-1/2 ml-2 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums">{s.review_count > 99 ? "99+" : s.review_count}</span>
         {/if}

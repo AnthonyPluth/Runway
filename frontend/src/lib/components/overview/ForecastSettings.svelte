@@ -54,7 +54,7 @@
 </script>
 
 <Sheet.Root bind:open={forecastSheet.open}>
-  <Sheet.Trigger aria-label="Forecast settings"
+  <Sheet.Trigger aria-label={`Forecast settings, ${label}`}
     class="-mx-1.5 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[15px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
     {label}<ChevronDown class="size-4" aria-hidden="true" />
   </Sheet.Trigger>

@@ -179,7 +179,7 @@
               {#if i.type === "equity"}
                 <a href="#networth/equity" class="flex w-full items-start justify-between gap-3 rounded-md text-sm hover:bg-muted/50" aria-label={`${i.name}, in the Equity view`}>{@render row()}</a>
               {:else}
-                <button type="button" class="flex w-full cursor-pointer items-start justify-between gap-3 rounded-md text-sm hover:bg-muted/50" aria-label={`${i.name}, ${fmt(i.value)}`}
+                <button type="button" class="flex w-full cursor-pointer items-start justify-between gap-3 rounded-md text-sm hover:bg-muted/50"
                   onclick={() => (i.type === "asset" ? openAsset(Number(i.id)) : openAccount(String(i.id)))}>{@render row()}</button>
               {/if}
             </li>

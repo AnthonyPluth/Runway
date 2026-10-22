@@ -28,7 +28,7 @@ describe("InvestmentsCard", () => {
   it("shows the total, today's change, the movers, and links to Investments", async () => {
     vi.mocked(api).mockResolvedValue(summary());
     render(InvestmentsCard);
-    const link = await screen.findByRole("link", { name: "Investments" });
+    const link = await screen.findByRole("link", { name: /^Investments/ });
     expect(link).toHaveAttribute("href", "#investments");
     expect(api).toHaveBeenCalledWith("/api/investments/summary");
     expect(screen.getByText("$5,460")).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe("InvestmentsCard", () => {
     await waitFor(() => expect(api).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByTestId("investments-card")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Investments" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Investments/ })).not.toBeInTheDocument();
   });
 
   it("says it couldn't load, with no figures, and tries again", async () => {

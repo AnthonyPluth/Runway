@@ -120,7 +120,7 @@ describe("forecast length", () => {
       if (path === "/api/state") return app.state;
       return new Promise((ok, fail) => { (asked[path] ||= []).push({ ok: ok as Pending["ok"], fail: (m) => fail(new Error(m)) }); });
     }) as never);
-    await userEvent.click(screen.getByRole("button", { name: "Forecast settings" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Forecast settings/ }));
     await userEvent.selectOptions(await screen.findByLabelText("Primary account"), "sav");
     await waitFor(() => expect(asked["/api/overview?days=90"]).toHaveLength(2));
     await userEvent.keyboard("{Escape}");

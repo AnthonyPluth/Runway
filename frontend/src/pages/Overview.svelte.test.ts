@@ -339,7 +339,7 @@ describe("Overview on a phone", () => {
     viewport.phone = true;
     serve(() => fc());
     render(Overview);
-    await userEvent.click(await screen.findByRole("button", { name: "Forecast settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Forecast settings/ }));
     expect(await screen.findByLabelText("Default forecast length (days)")).toBeInTheDocument();
   });
 

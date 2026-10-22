@@ -39,7 +39,7 @@
     {@const since = sinceMonthStart(nw.history)}
     {@const change = since.base ? nw.net - since.base.net : null}
     {@const path = line(since.points.map((p) => p.net))}
-    <a href="#networth" class={tile} aria-label={`Net worth, ${fmt0(nw.net)}. Open Net worth`}>
+    <a href="#networth" class={tile}>
       <span class="flex items-center justify-between text-[13px] text-muted-foreground">Net worth<ChevronRight class="size-4" aria-hidden="true" /></span>
       <span class="mt-1 block text-[24px] leading-tight font-semibold tracking-tight tabular-nums">{fmt0(nw.net)}</span>
       {#if path}

@@ -30,7 +30,7 @@ describe("leaving an account out of net worth", () => {
     }) as never);
     render(NetWorth);
     expect(screen.queryByText("Leave out")).not.toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: /^Checking, / }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Checking\b/ }));
     const dialog = await screen.findByRole("dialog", { name: "Checking" });
     expect(within(dialog).getByRole("switch", { name: "Count in net worth" })).toBeChecked();
     expect(within(dialog).getByRole("link", { name: "More account settings →" })).toHaveAttribute("href", "#setup/accounts");
