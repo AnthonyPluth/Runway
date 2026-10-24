@@ -109,8 +109,46 @@ describe("refreshing a Plaid connection early", () => {
     await userEvent.click(box);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/plaid/items/it1/refresh", { method: "POST", body: { on: false } }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Waits for the daily sync from now on"));
-    expect(reload).toHaveBeenCalled();
     expect(box).not.toBeChecked();
+  });
+
+  it("updates in place: the page isn't redrawn and the row's elements stay the same ones", async () => {
+    let finish: (v: unknown) => void = () => {};
+    vi.mocked(api).mockReturnValue(new Promise((res) => { finish = res; }));
+    const it0 = item({ refresh: true, refresh_paused: "Plaid: too many refreshes", refresh_paused_at: "2026-09-30 15:00:00" });
+    const { container } = row(it0);
+    const box = screen.getByRole("checkbox", { name: "Refresh transactions early" });
+    const root = container.firstElementChild!;
+    const name = screen.getByText("Chase");
+    const seen: MutationRecord[] = [];
+    const mo = new MutationObserver((m) => seen.push(...m));
+    mo.observe(root, { childList: true, subtree: true });
+    await userEvent.click(box);
+    expect(box).toBeDisabled();   // saving: the same switch, only disabled
+    finish({ refresh: false, refresh_paused: null, refresh_paused_at: null });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Waits for the daily sync from now on"));
+    await waitFor(() => expect(box).not.toBeDisabled());
+    await Promise.resolve();
+    mo.disconnect();
+    expect(reload).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Refresh transactions early" })).toBe(box);
+    expect(screen.getByText("Chase")).toBe(name);
+    expect(container.firstElementChild).toBe(root);
+    expect(box).not.toBeChecked();
+    expect(screen.queryByText(/Refresh paused/)).not.toBeInTheDocument();   // the pause ended with the reply
+    // Only the pause note came out; nothing else was added or removed.
+    expect(seen.flatMap((m) => [...m.addedNodes])).toHaveLength(0);
+    expect(seen.flatMap((m) => [...m.removedNodes]).every((n) => (n as Element).textContent?.includes("Refresh paused") || n.nodeType === 3)).toBe(true);
+  });
+
+  it("shows a pause that arrives with fresher data after a toggle", async () => {
+    vi.mocked(api).mockResolvedValue({ refresh: true, refresh_paused: null, refresh_paused_at: null });
+    const it0 = item({ refresh: false });
+    const r = row(it0);
+    await userEvent.click(screen.getByRole("checkbox", { name: "Refresh transactions early" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Refresh transactions early" })).not.toBeDisabled());
+    await r.rerender({ it: item({ refresh: true, refresh_paused: "Plaid: too many refreshes", refresh_paused_at: "2026-09-30 15:00:00" }), items: [it0] });
+    expect(await screen.findByText(/^Refresh paused: Plaid: too many refreshes/)).toBeInTheDocument();
   });
 
   it("puts the switch back when saving fails", async () => {

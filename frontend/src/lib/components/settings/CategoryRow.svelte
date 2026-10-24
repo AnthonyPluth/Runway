@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
   import { CAT_MAX_DEPTH, catLabel, categories, categoryGroups, loadCategories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
@@ -16,7 +15,7 @@
   import FolderInput from "@lucide/svelte/icons/folder-input";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash from "@lucide/svelte/icons/trash";
-  import { addCategory } from "./categories";
+  import { addCategory, categoriesChanged } from "./categories";
   import LookPicker from "./LookPicker.svelte";
   import type { PayAccount } from "$lib/components/budget/types";
   import { dangerGhost, inputCls, selectCls } from "./ui";
@@ -36,13 +35,13 @@
 
   async function rename(e: Event) {
     const f = e.currentTarget as HTMLInputElement;
-    try { await api("/api/categories/rename", { method: "POST", body: { name, new_name: f.value } }); toast.success("Renamed"); reload(); }
+    try { await api("/api/categories/rename", { method: "POST", body: { name, new_name: f.value } }); toast.success("Renamed"); await categoriesChanged(); }
     catch (err) { toast.error(errMsg(err)); f.value = name; }
   }
 
   // + Sub
   let subName = $state("");
-  const addSub = () => addCategory(subName, name, false, false);
+  async function addSub() { if (await addCategory(subName, name, false, false)) { mode = ""; subName = ""; } }
 
   // Move: only under parents this branch fits beneath (it and its subcategories must stay within CAT_MAX_DEPTH levels).
   let moveTo = $state("");
@@ -52,7 +51,8 @@
     await act(async () => {
       await api("/api/categories/move", { method: "POST", body: { name, parent } });
       toast.success(parent ? `Moved ${name} under ${parent}` : `${name} is now a top-level category`);
-      await refreshState(); reload();
+      mode = "";
+      await categoriesChanged();
     });
   }
 
@@ -72,15 +72,15 @@
     undoable(`Removed ${name}`, async () => {
       await api("/api/categories", { method: "POST", body: { name: was.name, parent: was.parent, is_transfer: was.is_transfer, is_income: was.is_income } });
       if (was.icon || was.color) await api("/api/categories/look", { method: "POST", body: { name: was.name, icon: was.icon ?? "", color: was.color ?? "" } });
-      await refreshState(); reload();
+      await categoriesChanged();
     });
-    await refreshState(); reload();
+    await categoriesChanged();
   }
   async function removeAsked(): Promise<boolean> {
     return act(async () => {
       const r = await api<{ moved?: number }>("/api/categories/remove", { method: "POST", body: { name, move_to: sendTo || null } });
       toast.success(r.moved ? `Removed ${name} · ${plural(r.moved, "transaction")} ${sendTo ? `moved to ${sendTo}` : "sent to Review"}` : `Removed ${name}`);
-      await refreshState(); reload();
+      await categoriesChanged();
     });
   }
   // What else goes with it, one short line each.

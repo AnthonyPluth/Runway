@@ -31,6 +31,24 @@ beforeEach(() => {
   categories.list = [category("Groceries"), category("Coffee")];
 });
 
+describe("RuleEditor split parts", () => {
+  it("removing a part keeps the other parts' fields as they were (keyed by the part, not its place)", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Split instead…" }));
+    await userEvent.click(screen.getByRole("button", { name: "+ Add a part" }));
+    const pct = () => screen.getAllByLabelText(/^Part \d+ percent$/) as HTMLInputElement[];
+    expect(pct()).toHaveLength(3);
+    await userEvent.clear(pct()[1]); await userEvent.type(pct()[1], "30");
+    await userEvent.clear(pct()[2]); await userEvent.type(pct()[2], "20");
+    const [, second, third] = pct();
+    await userEvent.click(screen.getAllByRole("button", { name: "Remove this part" })[0]);
+    expect(pct()).toHaveLength(2);
+    expect(pct()[0]).toBe(second);
+    expect(pct()[1]).toBe(third);
+    expect([pct()[0].value, pct()[1].value]).toEqual(["30", "20"]);
+  });
+});
+
 describe("RuleEditor", () => {
   it("previews how many past transactions the rule would match, after you stop typing", async () => {
     vi.mocked(api).mockImplementation((async () => preview(5, 2)) as never);

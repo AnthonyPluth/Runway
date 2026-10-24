@@ -216,6 +216,21 @@ describe("Settings → Connections", () => {
     expect(secret).toHaveAttribute("type", "password");
   });
 
+  it("redraws the page when the keys saved but the status can't be read again", async () => {
+    let calls = 0;
+    vi.mocked(api).mockImplementation((async (path: string) => {
+      if (path === "/api/plaid/status") { if (++calls > 1) throw new Error("down"); return status([], { configured: false, client_id: "" }); }
+      if (path === "/api/retail") throw new Error("The extension's status didn't load");
+      return {};
+    }) as never);
+    render(ConnectionsSection);
+    const keys = (await screen.findByText("Plaid API keys · not set")).closest("details")!;
+    await userEvent.type(within(keys).getByLabelText("Client ID"), "abc");
+    await userEvent.type(within(keys).getByLabelText("Secret"), "s3cret");
+    await userEvent.click(within(keys).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+  });
+
   it("saves Plaid's keys together with Save, not field by field, and empties the secret once saved", async () => {
     serve(status([], { configured: false, client_id: "" }));
     render(ConnectionsSection);
@@ -235,7 +250,11 @@ describe("Settings → Connections", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/plaid/settings",
       { method: "POST", body: { env: "sandbox", client_id: "abc", secret: "s3cret" } }));
     await waitFor(() => expect(secret).toHaveValue(""));
-    expect(reload).toHaveBeenCalled();
+    // The status is read again and swapped in where it is; the keys' fields are the same elements, not a redrawn tab.
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/plaid/status")).toHaveLength(2));
+    expect(reload).not.toHaveBeenCalled();
+    expect(within(keys).getByLabelText("Secret")).toBe(secret);
+    expect(keys.isConnected).toBe(true);
   });
 
   it("keeps Plaid Link's session IDs behind Details", async () => {

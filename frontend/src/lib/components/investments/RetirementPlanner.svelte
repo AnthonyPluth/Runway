@@ -271,7 +271,7 @@
 
   <section class="lg:col-span-2">
     <h3 class="mb-2 font-medium">One-time events</h3>
-    {#each plan.events as ev, i (i)}
+    {#each plan.events as ev, i (ev)}
       <div class="mb-2 grid grid-cols-[1fr_auto] items-end gap-2">
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <label class="col-span-2 flex flex-col gap-1 sm:col-span-1">{@render field("What")}
@@ -361,7 +361,7 @@
 
       <section>
         <h3 class="mb-2 font-medium">Income in retirement</h3>
-        {#each plan.income as inc, i (i)}
+        {#each plan.income as inc, i (inc)}
           <div class="mb-2 grid grid-cols-[1fr_auto] items-end gap-2">
             <div class="grid grid-cols-2 gap-2 @2xl:grid-cols-5">
               <label class="col-span-2 flex flex-col gap-1 @2xl:col-span-1">{@render field("What")}
