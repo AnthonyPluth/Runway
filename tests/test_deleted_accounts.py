@@ -101,6 +101,18 @@ class DeleteAccountTests(LedgerCase):
             api.api_account_remove(c, {}, DROP, "cc")
         self.assertEqual(e.exception.status, 404)
 
+    def test_the_payment_amounts_changed_on_its_forecast_by_statement_close(self):
+        # forecast.card_cycles keeps a card's payment edits as cardclose:<card>:<close>: counted and deleted with the card,
+        # another card's (and one whose id merely starts the same) left alone.
+        self.acct("cc22", "credit", 0.0)
+        self.conn.execute(insert(Override), [{"key": "cardclose:cc:2026-09-10", "amount": -300.0},
+                                             {"key": "cardclose:cc2:2026-09-10", "amount": -20.0},
+                                             {"key": "cardclose:cc22:2026-09-10", "amount": -10.0}])
+        self.assertEqual(api.api_account_removal(self.conn, {}, {}, "cc2")["forecast_amounts"], 2)   # card:cc2:… and cardclose:cc2:…
+        api.api_account_remove(self.conn, {}, {}, "cc2")
+        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.startswith("cardclose:"))).scalars()),
+                         ["cardclose:cc22:2026-09-10", "cardclose:cc:2026-09-10"])
+
     def test_its_plaid_account_linked_to_another_account_leaves_it_deleted(self):
         api.api_account_remove(self.conn, {}, DROP, "cc")
         plaidbank.match(self.conn, "p-cc", "cc2", TODAY)

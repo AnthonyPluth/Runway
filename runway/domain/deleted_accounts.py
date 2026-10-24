@@ -73,8 +73,10 @@ _GROUP_NAME = {"cash": "a checking or savings account", "credit": "another credi
                "investment": "another investment account"}
 
 
-# The amounts you changed on its forecast (its payments, its statements), by these prefixes of their keys.
-_OWN_OVERRIDES = ("card", "stmt")
+# The amounts you changed on its forecast, by these prefixes of their keys (api/state.py's overrides accept them): its
+# payments (cardclose: by the statement's close, as forecast.card_cycles keeps them; card: by the due date, as they
+# were kept before) and its statements.
+_OWN_OVERRIDES = ("card", "cardclose", "stmt")
 
 
 def _group(kind: str | None) -> str:

@@ -14,7 +14,8 @@
   //   confirmLabel  the button that does it ("Remove"); cancelLabel is "Cancel" unless given
   //   busyLabel     the button while onconfirm runs ("Removing…")
   //   destructive   the confirm button in red
-  //   children      fields the answer needs (a choice to make), under the description; `disabled` holds it until made
+  //   children      fields the answer needs (a choice to make), under the description; `disabled` holds it until made, and
+  //                 they're disabled while onconfirm runs
   //   typeToConfirm a word ("RESTORE") or name the confirm button waits for, typed exactly
   //   disabled      holds the confirm button back (while what it would do is still being worked out)
   //   onconfirm     does it; the dialog stays open and busy until it settles, then closes, unless it returns false (a
@@ -54,7 +55,8 @@
             {#if typeof description === "string"}<p>{description}</p>{:else}{@render description()}{/if}
           </Dialog.Description>
         {/if}
-        {@render children?.()}
+        <!-- disabled while it runs, like the typed name: the answer it was sent with can't change under it -->
+        {#if children}<fieldset class="min-w-0" disabled={busy}>{@render children()}</fieldset>{/if}
         {#if typeToConfirm}
           <label class="flex flex-col gap-1.5 text-sm text-muted-foreground">
             <span>Type <strong class="text-foreground font-mono">{typeToConfirm}</strong> to confirm</span>

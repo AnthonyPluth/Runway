@@ -200,6 +200,26 @@ describe("deleting an account that things depend on", () => {
     expect(toast.success).toHaveBeenCalledWith("Savings deleted; what depended on it moved to Rainy day");
   });
 
+  it("holds the choice still while it's deleting, and says what was sent", async () => {
+    let answer!: (v: unknown) => void;
+    vi.mocked(api).mockImplementation(async (path: string) => (path.endsWith("/removal") ? depending()
+      : new Promise((resolve) => { answer = resolve; })) as never);
+    show(acct());
+    await userEvent.click(screen.getByRole("button", { name: "Delete account…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
+    const select = await within(dialog).findByRole("combobox", { name: "Move these to…" });
+    const box = within(dialog).getByRole("checkbox", { name: "Delete them with the account instead" });
+    await userEvent.selectOptions(select, "Rainy day");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/sav/remove", { method: "POST", body: { move_to: "sav2" } }));
+    expect(select).toBeDisabled();
+    expect(box).toBeDisabled();
+    await userEvent.click(box);   // disabled: no other answer while the first one is out
+    expect(box).not.toBeChecked();
+    answer({ ok: true });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Savings deleted; what depended on it moved to Rainy day"));
+  });
+
   it("deletes them with it only when you say so, saying what's lost", async () => {
     const dialog = await openWith(depending({ cards_paid: 2, assets: 1, churning: 1 }));
     await userEvent.click(within(dialog).getByRole("checkbox", { name: "Delete them with the account instead" }));

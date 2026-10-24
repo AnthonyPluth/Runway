@@ -207,9 +207,11 @@
   }
   async function remove() {
     if (!(await act(async () => {
-      const body = !removal?.choose ? undefined : moveName ? { move_to: moveTo } : { drop_dependents: true };
+      // The choice as sent: what the message says is what was done, whatever the dialog shows by the time it's answered.
+      const movedTo = removal?.choose ? moveName : undefined;
+      const body = !removal?.choose ? undefined : movedTo ? { move_to: moveTo } : { drop_dependents: true };
       await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, body ? { method: "POST", body } : { method: "POST" });
-      toast.success(moveName ? `${label} deleted; what depended on it moved to ${moveName}` : `${label} deleted`);
+      toast.success(movedTo ? `${label} deleted; what depended on it moved to ${movedTo}` : `${label} deleted`);
       openAccounts.delete(a.id);
       reload();
     }))) return false;
