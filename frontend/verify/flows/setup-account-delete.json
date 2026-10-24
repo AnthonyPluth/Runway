@@ -8,6 +8,7 @@
     { "click": "summary:has-text('Everyday Checking')" },
     { "click": "button:has-text('Delete account…')" },
     { "wait_for": "[data-slot=confirm-dialog]" },
+    { "wait_for": "[data-slot=confirm-dialog] [data-testid=account-depends]" },
     { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Depends on it, and needs a place to go:" } },
     { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Move these to…" } },
     { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Delete them with the account instead" } },
