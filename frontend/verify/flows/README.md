@@ -21,7 +21,7 @@ Each `*.json` file here is a flow that `make verify` runs besides visiting the p
 - `"signed_in": true` runs the flow signed in: against a demo server with sign-in on (runway/verify.py's `serve`), with a session made for it and a virtual platform authenticator (Chrome's DevTools WebAuthn) standing in for Face ID or Touch ID. The app lock's flow (`app-lock.json`) needs it. Each viewport is a new browser on the same session, so a flow that changes something about the session puts it back at the end.
 - A step has one action, and an optional `timeout` in milliseconds (default 10000). Selectors are [Playwright selectors](https://playwright.dev/docs/other-locators) (CSS, `text=…`, `role=…`).
   - `{"goto": "#route"}` opens a route of the app (or a full URL).
-  - `{"click": selector}`, `{"fill": {"selector": …, "text": …}}`, `{"press": {"selector": …, "key": "Enter"}}`.
+  - `{"click": selector}`, `{"fill": {"selector": …, "text": …}}`, `{"press": {"selector": …, "key": "Enter"}}`. A click first waits for a dialog or sheet the step before closed to let go of the page: until it has, the click lands on the closing dialog, and Playwright's retries scroll the page a different way each time.
   - `{"scroll_to": selector}` scrolls it to the middle of the window (and, inside a table that scrolls sideways, to its left edge), so the screenshot after it shows it.
   - `{"wait_for": selector}` waits for it to appear; `{"expect_text": {"selector": …, "text": …}}` fails unless it contains the text.
     `expect_text` reads the text once the selector exists and does not wait for the text to arrive: for content a page loads after it renders (a `{#await}` block), `wait_for` a `text=…` selector first, or a slow runner reads the page before it is filled in.

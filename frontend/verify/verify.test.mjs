@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { captureOptions, capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
-  STILL, timeScale, TOP, unknownPages, unsettled, VIEWPORTS } from "./verify.mjs";
+  STILL, timeScale, TOP, unknownPages, unsettled, VIEWPORTS, heldByClosingModal } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -204,6 +204,22 @@ describe("unsettled", () => {
 
   it("waits for the document and its fonts", () => {
     expect(page({ readyState: "interactive", fonts: "loading" })).toEqual(["the document is still loading", "fonts are still loading"]);
+  });
+});
+
+describe("heldByClosingModal", () => {
+  // The body's pointer-events and whether a dialog is open, in a stand-in document.
+  const page = ({ pointerEvents = "auto", open = false } = {}) => {
+    globalThis.getComputedStyle = () => ({ pointerEvents });
+    globalThis.document = { body: {}, querySelector: () => (open ? {} : null) };
+    return heldByClosingModal();
+  };
+  afterEach(() => { delete globalThis.document; delete globalThis.getComputedStyle; });
+
+  it("waits while a closed dialog still holds the page, not while one is open or once it let go", () => {
+    expect(page({ pointerEvents: "none" })).toEqual(["a dialog is still closing (the page takes no clicks yet)"]);
+    expect(page({ pointerEvents: "none", open: true })).toEqual([]);
+    expect(page()).toEqual([]);
   });
 });
 

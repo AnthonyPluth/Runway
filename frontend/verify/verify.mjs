@@ -239,12 +239,25 @@ export function flowProblems(flow) {
   return out;
 }
 
-/** Waits until unsettled() finds nothing, up to `timeout` ms; returns what was still loading then ([] when settled). */
+/** What keeps a click from landing, [] when nothing does; run in the page, so it stands alone. A modal dialog (a sheet, a
+ *  confirm) that was just closed still holds the page through its closing animation and a moment after (bits-ui's scroll
+ *  lock leaves the body at pointer-events: none until then), so a click on the page behind it hits the closing dialog or
+ *  nothing. Playwright retries such a click, scrolling the target into view a different way on each try (end, centre,
+ *  start), so where the page ended up scrolled depended on how many tries the closing took: budget-edit's phone images
+ *  came out at three scroll positions, by how long after Cancel its next click started. */
+export function heldByClosingModal() {
+  const doc = globalThis.document;
+  const open = doc.querySelector("[role=dialog][data-state=open], [role=alertdialog][data-state=open]");
+  return !open && globalThis.getComputedStyle(doc.body).pointerEvents === "none" ? ["a dialog is still closing (the page takes no clicks yet)"] : [];
+}
+
+/** Waits until `check` (unsettled(), unless another is given) finds nothing, up to `timeout` ms; returns what was still
+ *  loading then ([] when settled). */
 // (Polled from here with page.evaluate: page.waitForFunction would eval a string in the page, which the app's CSP refuses.)
-export async function waitSettled(page, timeout) {
+export async function waitSettled(page, timeout, check = unsettled) {
   const end = Date.now() + timeout;
   for (;;) {
-    const left = await page.evaluate(unsettled).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
+    const left = await page.evaluate(check).catch((e) => [`the page couldn't be read (${String(e.message).split("\n")[0]})`]);
     if (!left.length || Date.now() > end) return left;
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -260,6 +273,9 @@ export async function runStep(page, step, shot) {
   // The checks since the last action, made again after a screenshot (CHECKS).
   const action = Object.keys(step).find((k) => k !== "timeout");
   if (ACTS.includes(action)) page.checks = [];
+  // A click waits for a dialog closed by the step before to let go of the page (heldByClosingModal; best effort: the click's
+  // own retries still apply).
+  if ("click" in step) await waitSettled(page, page.t(5000), heldByClosingModal);
   await doStep(page, step, shot, timeout);
   if (CHECKS.includes(action)) page.checks.push(step);
   // What a click, a fill or a key press sets off (a fetch for a row's details) has landed before the next step looks at the
