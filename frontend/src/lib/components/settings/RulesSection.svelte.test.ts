@@ -103,6 +103,19 @@ describe("Rules → Remove", () => {
       category: null, rename: null, review: 0, split: split.split, apply: false } });
   });
 
+  it("takes it off the list where it is: the other rule's row stays the same element, and the count is told", async () => {
+    cleanup();
+    const other: Rule = { ...rule, id: 9, match: "trader", summary: "merchant contains 'trader'" };
+    vi.mocked(api).mockResolvedValue({ ok: true } as never);
+    const oncount = vi.fn();
+    render(RulesSection, { rules: [rule, other], accounts, oncount });
+    const kept = screen.getByText("merchant contains 'trader'");
+    await userEvent.click(within(screen.getByText("merchant contains 'whole foods'").closest("div")!.parentElement!).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.queryByText("merchant contains 'whole foods'")).toBeNull());
+    expect(screen.getByText("merchant contains 'trader'")).toBe(kept);
+    expect(oncount).toHaveBeenCalledWith(1);
+  });
+
   it("shows the error, and offers no Undo, when it can't be removed", async () => {
     vi.mocked(api).mockRejectedValue(new Error("Rule not found"));
     await userEvent.click(within(row()).getByRole("button", { name: "Remove" }));

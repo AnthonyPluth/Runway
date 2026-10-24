@@ -86,7 +86,7 @@
     <div class="flex flex-col gap-6">
       {#if section === "accounts"}<AccountsSection accounts={d.accounts ?? []} />
       {:else if section === "categories"}<CategoriesSection accounts={sideAccounts} />
-      {:else if section === "rules"}<RulesSection rules={d.rules ?? []} accounts={d.accounts ?? []} />{/if}
+      {:else if section === "rules"}<RulesSection rules={d.rules ?? []} accounts={d.accounts ?? []} oncount={(n) => (ruleCount = n)} />{/if}
     </div>
   {:catch err}
     <Card.Root>

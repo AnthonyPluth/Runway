@@ -75,7 +75,11 @@ describe("Settings → Accounts: deleted accounts", () => {
     await userEvent.click(within(within(section).getByText("Old Visa").closest("li")!).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/A1/restore", { method: "POST" }));
     expect(toast.success).toHaveBeenCalledWith("Old Visa comes back with the next sync");
-    expect(reload).toHaveBeenCalled();
+    // Off the list where it is: no redraw, the other one's row stays the same element.
+    expect(reload).not.toHaveBeenCalled();
+    expect(section).toHaveTextContent("1 deleted account");
+    expect(within(section).queryByText("Old Visa")).toBeNull();
+    expect(within(section).getByText("Old Savings")).toBeInTheDocument();
   });
 
   it("shows nothing when none were deleted", async () => {

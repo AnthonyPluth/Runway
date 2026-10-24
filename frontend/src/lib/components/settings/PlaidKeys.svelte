@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import { toast } from "svelte-sonner";
   import SecretInput from "./SecretInput.svelte";
@@ -11,7 +10,7 @@
   // The Plaid API keys, collapsed once they're set (`open` is bound so Connect a bank can open it when they aren't).
   // They're a pair, so they're saved together with Save rather than field by field; the secret field is emptied once
   // it's saved (the server never sends it back).
-  let { st, open = $bindable(false) }: { st: PlaidStatus; open?: boolean } = $props();
+  let { st, open = $bindable(false), onsaved }: { st: PlaidStatus; open?: boolean; onsaved: () => void } = $props();
 
   // svelte-ignore state_referenced_locally
   let env = $state(st.env === "sandbox" ? "sandbox" : "production");
@@ -19,8 +18,7 @@
   let clientId = $state(st.client_id);
   let secret = $state("");
   let saving = $state(false);
-  // svelte-ignore state_referenced_locally
-  const savedEnv = st.env === "sandbox" ? "sandbox" : "production";
+  const savedEnv = $derived(st.env === "sandbox" ? "sandbox" : "production");
   const changed = $derived(env !== savedEnv || clientId.trim() !== st.client_id || !!secret.trim());
 
   async function save(e: SubmitEvent) {
@@ -31,7 +29,7 @@
       await api("/api/plaid/settings", { method: "POST", body: { env, client_id: clientId.trim(), ...(secret.trim() ? { secret: secret.trim() } : {}) } });
       secret = "";
       toast.success("Plaid keys saved");
-      reload();
+      onsaved();
     }, { busy: (on) => (saving = on) });
   }
 </script>

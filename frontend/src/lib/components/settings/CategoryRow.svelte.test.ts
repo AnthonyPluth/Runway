@@ -11,16 +11,60 @@ import { api } from "$lib/api";
 import { categories } from "$lib/categories.svelte";
 import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
+import { reload } from "$lib/app.svelte";
+import CategoriesSection from "./CategoriesSection.svelte";
 import CategoryRow from "./CategoryRow.svelte";
 
-const calls = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path).map((c) => (c[1] as { body?: unknown }).body);
+const calls = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { body?: unknown } | undefined)?.body !== undefined).map((c) => (c[1] as { body?: unknown }).body);
 const removeButton = () => screen.getByRole("button", { name: "Remove Pharmacy" });
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
-  vi.mocked(api).mockResolvedValue({ ok: true, moved: 0 } as never);
+  vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/categories" ? categories.list : { ok: true, moved: 0 })) as never);
   vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
   categories.list = [category("Medical"), category("Pharmacy", { parent: "Medical", path: ["Medical", "Pharmacy"], depth: 1, top: "Medical" })];
+});
+
+
+describe("a change to the categories", () => {
+  it("is loaded again where it is: the other rows stay the same elements and the page isn't redrawn", async () => {
+    categories.list = [category("Medical"), category("Pharmacy", { parent: "Medical", path: ["Medical", "Pharmacy"], depth: 1, top: "Medical" }), category("Food")];
+    vi.mocked(api).mockImplementation((async (path: string, o?: { body?: { new_name?: string } }) => {
+      if (path === "/api/categories/rename") {
+        categories.list = categories.list.map((c) => (c.name === "Food" ? { ...c, name: o!.body!.new_name! } : c));
+        return { ok: true };
+      }
+      return path === "/api/categories" ? categories.list : { ok: true };
+    }) as never);
+    vi.mocked(reload).mockClear();
+    render(CategoriesSection, { accounts: [] });
+    const pharmacy = screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Pharmacy")!;
+    const food = screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Food")! as HTMLInputElement;
+    await userEvent.clear(food);
+    await userEvent.type(food, "Groceries{Tab}");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Renamed"));
+    await waitFor(() => expect(screen.getAllByLabelText("Category name").some((i) => (i as HTMLInputElement).value === "Groceries")).toBe(true));
+    expect(reload).not.toHaveBeenCalled();
+    expect(screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Pharmacy")).toBe(pharmacy);
+    expect(pharmacy.isConnected).toBe(true);
+  });
+});
+
+describe("adding a category", () => {
+  it("closes and clears the Add form and a row's + Sub form once added, so Enter can't add it twice", async () => {
+    categories.list = [category("Medical")];
+    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/categories" ? categories.list : { ok: true })) as never);
+    render(CategoriesSection, { accounts: [] });
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    const box = screen.getByLabelText("Name");
+    await userEvent.type(box, "Pets{Enter}");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added Pets"));
+    await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Add a subcategory to Medical" }));
+    await userEvent.type(screen.getByLabelText("New subcategory of Medical"), "Dental{Enter}");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added Dental under Medical"));
+    await waitFor(() => expect(screen.queryByLabelText("New subcategory of Medical")).toBeNull());
+  });
 });
 
 describe("removing a category", () => {

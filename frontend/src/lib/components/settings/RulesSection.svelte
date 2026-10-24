@@ -24,10 +24,13 @@
   // (already open when there are no rules yet). Apply says how many past transactions it would change (the editor's
   // preview) and asks first; afterwards its toast can undo it. Remove happens at once, with an Undo that adds the
   // rule back.
-  let { rules, accounts }: { rules: Rule[]; accounts: SettingsAccount[] } = $props();
+  let { rules: all, accounts, oncount }: { rules: Rule[]; accounts: SettingsAccount[]; oncount?: (n: number) => void } = $props();
+  // A removed rule leaves the list where it is (no redraw of the tab); Undo adds it back with a new id, which needs the reload.
+  let removed = $state<number[]>([]);
+  const rules = $derived(all.filter((r) => r.id == null || !removed.includes(r.id)));
 
   // svelte-ignore state_referenced_locally
-  let adding = $state(!rules.length);
+  let adding = $state(!all.length);
   let editing = $state<number | null>(null);
   let filter = $state(rulesFilter);
   const q = $derived(filter.trim().toLowerCase());
@@ -43,11 +46,11 @@
   }
   async function remove(r: Rule) {
     if (!(await act(async () => { await api(`/api/rules/${r.id}`, { method: "DELETE" }); }))) return;
+    if (r.id != null) { removed = [...removed, r.id]; oncount?.(rules.length); if (!rules.length) adding = true; }
     undoable("Rule removed", async () => {
       await api("/api/rules", { method: "POST", body: { ...previewBody(r), split: r.split ?? null, apply: false } });
       reload();
     });
-    reload();
   }
   const actionCls = "h-8 px-2.5 text-muted-foreground hover:text-foreground";
 </script>

@@ -23,7 +23,10 @@
   let isIncome = $state(false);
   let nameInput = $state<HTMLInputElement | null>(null);
 
-  const add = () => addCategory(name, parent || null, isTransfer, isIncome);
+  // Added: the form closes and starts over (the list updates in place, so it isn't redrawn for it).
+  async function add() {
+    if (await addCategory(name, parent || null, isTransfer, isIncome)) { adding = false; name = ""; parent = ""; isTransfer = false; isIncome = false; }
+  }
   async function open() { adding = !adding; await Promise.resolve(); nameInput?.focus(); }
 
   const KINDS: [string, (c: Category) => boolean][] = [
