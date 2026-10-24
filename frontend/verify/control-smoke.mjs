@@ -141,6 +141,19 @@ const leaked = [session.pid, ...readFileSync(`/proc/${session.pid}/task/${sessio
   .filter((pid) => { try { return readFileSync(`/proc/${pid}/environ`, "utf8").includes(FAKE_SECRET); } catch { return false; } });
 expect(!leaked.length, `no credential from the caller's environment in the session's processes (leaked into ${leaked.join(", ") || "none"})`);
 
+// What an acting command sets off still saves: the Retirement planner saves itself 700 ms after typing stops, after
+// `type` has answered; the guard comes back on only after that (a command sent sooner waits for it).
+control("goto", "networth/retirement");
+r = control("click", "button", "Show my projection");
+expect(r.code === 0, "the Retirement planner, its first plan saved");
+control("network");
+r = control("type", "spinbutton", "Plan until age", "96");
+const typed = r;
+r = control("snapshot");
+const saved = control("network");
+expect(typed.code === 0 && !typed.json.warning && r.code === 0 && !r.json.warning
+  && saved.json?.requests?.some((q) => q.method === "POST" && q.path === "/api/investments/plan" && q.status === 200), "a field that saves itself after typing still saves");
+
 r = control("reset");
 expect(r.json?.ok && r.json.reset, "reset before the flow: the data make verify starts it from");
 r = control("flow", "transactions-delete", "--viewport", "desktop");

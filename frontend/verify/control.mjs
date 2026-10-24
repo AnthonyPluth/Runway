@@ -191,7 +191,7 @@ export const COMMANDS = {
     options: { write: { type: "boolean", help: "allow it to change the app's data (requests other than GET)" } },
     details: ["An expression (`document.title`) or a function (`() => [...document.querySelectorAll('h2')].map(h => h.textContent)`); the result as JSON.",
       "Read-only by default: a request it makes to the app's data (other than GET or HEAD) is blocked before it's sent, and the eval fails with not_read_only. It waits half a second, and for the network to go quiet, before it answers, so a change set off on a short timer fails it too; one set off later is blocked all the same, and reported as a warning by the next command. A change it makes to the page is reported (domChanges).",
-      "With --write it may change the demo data. The guard is off only while a command that acts runs (goto, viewport, click, type, press, scroll, flow, reset, eval --write): a timer an expression leaves running that fires during one of those is not blocked. Reload the page (goto --reload) to clear what an expression left behind.",
+      "With --write it may change the demo data. The guard is off only while a command that acts runs (goto, viewport, click, type, press, scroll, flow, reset, eval --write) and for a second after it (a field that saves itself once you stop typing): a timer an expression leaves running that fires then is not blocked. Reload the page (goto --reload) to clear what an expression left behind.",
       "Like every command it reaches only the session's own server: a request anywhere else is blocked before it's sent.",
       "Prefer snapshot, click and type: they act as a person would."],
     examples: ["eval document.title", "eval \"() => getComputedStyle(document.body).backgroundColor\""],

@@ -26,6 +26,10 @@ const BUFFER = 500;   // console messages and requests kept between two reads (t
 // it didn't return) before it answers: one caught in that time fails the eval (not_read_only); a later one is blocked all
 // the same, and the next command says so.
 const EVAL_SETTLE_MS = 500;
+// How long after an acting command the page may still change the data on its own, for what that command set off: a
+// field that saves itself a moment after typing stops (the Retirement planner waits 700 ms). The write guard comes back
+// on after it (a command that doesn't act, sent sooner, waits it out first).
+const ACT_GRACE_MS = 1000;
 
 const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
 const firstLine = (e) => String(e?.message ?? e).split("\n")[0];
@@ -76,6 +80,7 @@ async function main() {
     ending = true;
     log(`stopping: ${reason}`);
     clearTimeout(idle);
+    clearTimeout(graceTimer);
     if (listener) await new Promise((r) => listener.close(() => r())).catch(() => { /* already closed */ });
     rmSync(socket, { force: true });
     if (browser) await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 10000))]).catch(() => { /* gone already */ });
@@ -101,11 +106,16 @@ async function main() {
     refused.push(`${m} ${scrubUrl(r.request().url(), base)}`);
     return r.abort("blockedbyclient");
   };
-  let guarding = false;
-  async function guardWrites(on) {
-    if (!ctx || on === guarding) return;
-    if (on) await ctx.route(guarded, refuseWrite); else await ctx.unroute(guarded, refuseWrite);
-    guarding = on;
+  let guarding = false, graceTimer = null, graceUntil = 0;
+  let guardOp = Promise.resolve();
+  /** Turns the write guard on or off, one change at a time (the grace timer's and a command's never interleave). */
+  function guardWrites(on) {
+    guardOp = guardOp.catch(() => { /* the last change's caller was told */ }).then(async () => {
+      if (!ctx || on === guarding) return;
+      if (on) await ctx.route(guarded, refuseWrite); else await ctx.unroute(guarded, refuseWrite);
+      guarding = on;
+    });
+    return guardOp;
   }
 
   async function newServer() {
@@ -453,17 +463,23 @@ async function main() {
     // Not idle while a command runs (a long flow can outlast a short --idle-minutes): the clock starts again when it ends.
     clearTimeout(idle);
     // What was blocked since the last command (a timer an eval left running, a page saving on its own) is reported now.
+    clearTimeout(graceTimer);
+    const acting = actingRequest(request);
+    if (!acting && graceUntil > Date.now()) await page.waitForTimeout(graceUntil - Date.now());
     const earlier = refused.splice(0);
     const warned = () => { const w = blockedWarnings(earlier); return w.length ? { warning: w.join("; ") } : {}; };
     try {
-      await guardWrites(!actingRequest(request));
+      await guardWrites(!acting);
       const reply = await handler({ args: request.args ?? [], options: request.options ?? {}, path: request.path });
       return { ok: true, ...reply, ...warned() };
     } catch (e) {
       const err = bad(e);
       return { ...errorResult(request.command, err), ...(e.data ?? {}), ...warned() };
     } finally {
-      await guardWrites(true).catch((e) => log(`guarding writes: ${firstLine(e)}`));
+      if (acting) {
+        graceUntil = Date.now() + ACT_GRACE_MS;
+        graceTimer = setTimeout(() => guardWrites(true).catch((e) => log(`guarding writes: ${firstLine(e)}`)), ACT_GRACE_MS);
+      } else await guardWrites(true).catch((e) => log(`guarding writes: ${firstLine(e)}`));
       touch();
     }
   }

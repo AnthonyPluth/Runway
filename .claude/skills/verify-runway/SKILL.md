@@ -24,10 +24,10 @@ Use it while you work, to see what you changed. `make verify` is still the batch
 
 ## Safety
 
-- Demo data only, on the session's own loopback server. It refuses other URLs and never touches a real instance.
+- Demo data only, on the session's own loopback server. It refuses other URLs, blocks any request elsewhere (another port on the machine included) before it's sent, and never touches a real instance.
 - The repository is public: put no real data in commands, flows, screenshots or PR text.
 - Everything it writes is under `artifacts/control/`, ignored by git. Never commit it, and never copy an image into `screenshots/` by hand.
-- `eval` is read-only unless you pass `--write`. `reset`, `stop` and `cleanup` take `--dry-run`.
+- `eval` is read-only unless you pass `--write`: a write it sets off, even on a timer, is blocked (`not_read_only`, or a warning on the next command). `reset`, `stop` and `cleanup` take `--dry-run`.
 
 ## References
 
