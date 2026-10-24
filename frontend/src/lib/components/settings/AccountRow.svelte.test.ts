@@ -10,7 +10,7 @@ vi.mock("$lib/app.svelte", () => ({ app: { state: { owners: [], primary_account:
 import { api } from "$lib/api";
 import { app, refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
-import type { SettingsAccount } from "./types";
+import type { AccountRemoval, SettingsAccount } from "./types";
 import { acct, resetRow, show, undoOf } from "../../../test/accountRow";
 import AccountRow from "./AccountRow.svelte";
 
@@ -158,17 +158,81 @@ describe("a card's statement, from Settings", () => {
   });
 });
 
+// GET /api/accounts/{id}/removal's reply: nothing depending on the account unless given.
+const removal = (over: Partial<AccountRemoval> = {}): AccountRemoval => ({
+  name: "Savings", transactions: 0, statements: 0, holdings: 0, plaid: false, recurring: 0, rules: 0, budgets: 0, cards_paid: 0,
+  assets: 0, churning: 0, forecast: false, bank_bonuses: 0, choose: false, targets: [], ...over,
+});
+const depending = (over: Partial<AccountRemoval> = {}) => removal({
+  transactions: 12, recurring: 2, rules: 1, budgets: 1, forecast: true, choose: true,
+  targets: [{ id: "sav2", name: "Rainy day", kind: "savings" }, { id: "chk", name: "Checking", kind: "checking" }], ...over,
+});
+
+describe("deleting an account that things depend on", () => {
+  async function openWith(reply: AccountRemoval) {
+    vi.mocked(api).mockImplementation(async (path: string) => (path.endsWith("/removal") ? reply : { ok: true }) as never);
+    show(acct());
+    await userEvent.click(screen.getByRole("button", { name: "Delete account…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
+    await waitFor(() => expect(dialog).toHaveTextContent("12 transactions"));
+    return dialog;
+  }
+  const items = (dialog: HTMLElement) => within(within(dialog).getByTestId("account-depends")).getAllByRole("listitem").map((li) => li.textContent);
+
+  it("has no answer until you pick one, and moves them to the account you pick", async () => {
+    const dialog = await openWith(depending());
+    expect(dialog).toHaveTextContent("Depends on it, and needs a place to go:");
+    expect(items(dialog)).toEqual(["2 recurring items", "1 rule that only applies to it", "1 budget paid with it", "The forecast’s account"]);
+    const select = within(dialog).getByRole("combobox", { name: "Move these to…" });
+    expect(select).toHaveValue("");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose an account", "Rainy day", "Checking"]);
+    expect(within(dialog).getByRole("checkbox", { name: "Delete them with the account instead" })).not.toBeChecked();
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeDisabled();
+    await userEvent.selectOptions(select, "Rainy day");
+    expect(dialog).toHaveTextContent("Moves to Rainy day:");
+    expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/sav/remove", { method: "POST", body: { move_to: "sav2" } }));
+    expect(toast.success).toHaveBeenCalledWith("Savings deleted; what depended on it moved to Rainy day");
+  });
+
+  it("deletes them with it only when you say so, saying what's lost", async () => {
+    const dialog = await openWith(depending({ cards_paid: 2, assets: 1, churning: 1 }));
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Delete them with the account instead" }));
+    expect(within(dialog).getByRole("combobox", { name: "Move these to…" })).toBeDisabled();
+    expect(dialog).toHaveTextContent("Deleted with it, or let go:");
+    expect(items(dialog)).toEqual(["2 recurring items: deleted", "1 rule that only applies to it: deleted",
+      "1 budget paid with it: back to the card or account used most", "2 cards paid from it: left with no account to pay from",
+      "1 home or car it’s the loan for: left with no loan", "1 churning card linked to it: unlinked",
+      "The forecast’s account: unset until you choose another"]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/sav/remove", { method: "POST", body: { drop_dependents: true } }));
+  });
+
+  it("with nowhere to move them, still lets you delete them with it", async () => {
+    const dialog = await openWith(depending({ targets: [] }));
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    expect(dialog).toHaveTextContent("There’s no other account of its kind to move them to.");
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Delete them with the account instead" }));
+    expect(confirm).toBeEnabled();
+  });
+});
+
 describe("deleting an account, from Settings", () => {
   it("says what goes with it, offers a backup, and deletes it", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => path.endsWith("/removal")
-      ? { name: "Savings", transactions: 120, recurring: 2, rules: 1, statements: 0, holdings: 0, plaid: true } as never : { ok: true } as never);
+      ? removal({ transactions: 120, plaid: true, bank_bonuses: 1 }) as never : { ok: true } as never);
     show(acct());
     await userEvent.click(screen.getByText("Savings"));
     await userEvent.click(screen.getByRole("button", { name: "Delete account…" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
     await waitFor(() => expect(dialog).toHaveTextContent("120 transactions, with their categories and splits"));
-    expect(dialog).toHaveTextContent("2 recurring items on this account");
-    expect(dialog).toHaveTextContent("1 rule that only applies to it");
+    expect(dialog).toHaveTextContent("1 bank bonus linked to it lets go of it");
+    expect(within(dialog).queryByRole("combobox")).toBeNull();   // nothing depends on it: nothing to choose
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
     expect(dialog).toHaveTextContent("SimpleFIN and Plaid leave it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.");
     expect(dialog).not.toHaveTextContent("can’t be undone");
     expect(within(dialog).getByRole("link", { name: "Download a backup first" })).toHaveAttribute("href", "#setup/advanced");
@@ -192,7 +256,7 @@ describe("deleting an account: what the dialog waits for", () => {
     const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
     expect(dialog).toHaveTextContent("Counting what goes with it…");
     expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
-    answer({ name: "Savings", transactions: 50, recurring: 0, rules: 0, statements: 0, holdings: 0, plaid: false });
+    answer(removal({ transactions: 50 }));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled());
     expect(within(dialog).queryByRole("textbox")).toBeNull();
     expect(dialog).toHaveTextContent("Syncs leave it out until you restore it");

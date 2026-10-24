@@ -337,6 +337,10 @@ class ProtocolTests(unittest.TestCase):
                  ("remove_budget", {"category": "Dining"}, ("budget", {}, {"category": "Dining", "amount": 0})),
                  ("unlink_transaction_recurring", {"transaction_id": "t"}, ("transactions/t/recurring", {}, {})),
                  ("remove_statement", {"account_id": "card", "statement_date": "2026-09-01"}, ("accounts/card/statements/2026-09-01/remove", {}, {})),
+                 # (with anything depending on the account, the route itself refuses it without move_to or drop_dependents)
+                 ("remove_account", {"account_id": "cc"}, ("accounts/cc/remove", {}, {})),
+                 ("remove_account", {"account_id": "cc", "move_to": "cc3"}, ("accounts/cc/remove", {}, {"move_to": "cc3"})),
+                 ("remove_account", {"account_id": "cc", "drop_dependents": True}, ("accounts/cc/remove", {}, {"drop_dependents": True})),
                  ("delete_rule", {"rule_id": 7}, ("rules/7", {}, {}, "DELETE")),
                  ("clear_forecast_amount", {"key": "rec:1:2026-10-01"}, ("overrides", {}, {"key": "rec:1:2026-10-01"}, "DELETE")),
                  ("save_retirement_plan", {"plan": None}, ("investments/plan", {}, {"plan": None})),
