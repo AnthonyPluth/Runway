@@ -199,5 +199,64 @@ class Sync(unittest.TestCase):
         self.assertEqual([p.name for p in self.dest.parent.iterdir() if p.name.startswith(".screenshots-sync-")], [])
 
 
+class Check(unittest.TestCase):
+    """--check: the same plan as a sync, changing nothing, and saving the evidence for an artifact."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.src, self.dest = Path(tmp.name) / "verify", Path(tmp.name) / "screenshots"
+        self.src.mkdir()
+        self.dest.mkdir()
+
+    def shot(self, folder, name, body):
+        (folder / name).write_bytes(png(body))
+
+    def report(self, ok=True, failed=None):
+        names = sorted(p.name for p in self.src.glob("*.png"))
+        (self.src / "report.json").write_text(json.dumps({"ok": ok, "limited": False, "files": names if ok else [],
+                                                          "failed": failed or {}}))
+
+    def test_matching_directory_passes(self):
+        self.shot(self.src, "a-phone.png", b"same")
+        self.shot(self.dest, "a-phone.png", b"same")
+        self.report()
+        self.assertEqual(sync_screenshots.check(self.src, self.dest), [])
+
+    def test_lists_each_kind_of_mismatch_and_writes_nothing_to_dest(self):
+        self.shot(self.src, "a-phone.png", b"new")
+        self.shot(self.src, "b-phone.png", b"new")
+        self.shot(self.dest, "a-phone.png", b"old")
+        self.shot(self.dest, "gone-phone.png", b"x")
+        self.report()
+        out = self.dest.parent / "out"
+        lines = sync_screenshots.check(self.src, self.dest, out)
+        self.assertEqual(lines, ["differs from the committed image: a-phone.png", "not committed: b-phone.png",
+                                 "committed, but no page or flow writes it: gone-phone.png"])
+        self.assertEqual((out / "mismatches.txt").read_text().splitlines(), lines)
+        self.assertEqual(sorted(p.name for p in (out / "regenerated").iterdir()), ["a-phone.png", "b-phone.png"])
+        self.assertEqual({p.name: p.read_bytes() for p in self.dest.iterdir()},
+                         {"a-phone.png": png(b"old"), "gone-phone.png": png(b"x")})
+
+    def test_main_check_fails_with_the_fix_and_passes_when_it_matches(self):
+        self.shot(self.src, "a-phone.png", b"new")
+        self.shot(self.dest, "a-phone.png", b"old")
+        self.report()
+        with mock.patch.object(sync_screenshots, "VERIFY_DIR", self.src), mock.patch.object(sync_screenshots, "DEST", self.dest), \
+                mock.patch("builtins.print") as said:
+            self.assertEqual(sync_screenshots.main(["--check"]), 1)
+            self.assertIn("a-phone.png", said.call_args_list[1].args[0])
+            self.assertIn("make screenshots", said.call_args_list[2].args[0])
+            self.shot(self.dest, "a-phone.png", b"new")
+            self.assertEqual(sync_screenshots.main(["--check"]), 0)
+            self.assertEqual(sync_screenshots.main(["--bogus"]), 2)
+
+    def test_main_check_fails_on_a_run_that_did_not_pass(self):
+        self.report(ok=False, failed={"page:setup": ["x"]})
+        with mock.patch.object(sync_screenshots, "VERIFY_DIR", self.src), mock.patch.object(sync_screenshots, "DEST", self.dest), \
+                mock.patch("builtins.print"):
+            self.assertEqual(sync_screenshots.main(["--check"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

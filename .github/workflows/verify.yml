@@ -4,6 +4,9 @@ name: Verify flows
 # to the web app that moves a button, a label or the Tab order fails here instead of leaving a flow broken on main (the
 # budget-rollover-menu flow did). Only a change that can reach a flow runs it: the web app, the demo data, the verify
 # runner or this file. A pull request without one has no run at all, which the merge gate treats as nothing to wait for.
+# It also fails when the committed screenshots/ differ from the images that same run writes (tools/sync_screenshots.py
+# --check), so a pull request that changes the UI without `make screenshots`, or leaves a diff on a page it didn't touch,
+# is caught; a change to screenshots/ alone runs it too. The merge gate already waits on this workflow's result.
 # A push to main runs it too, for two pull requests that each pass alone and break a flow together.
 # It sends nothing out and needs no secret: the demo server is made-up data on the loopback address.
 on:
@@ -11,6 +14,8 @@ on:
     branches: [main]
     paths:
       - frontend/**
+      - screenshots/**
+      - tools/sync_screenshots.py
       - runway/domain/demo.py
       - runway/verify.py
       - .github/workflows/verify.yml
@@ -18,6 +23,8 @@ on:
     branches: [main]
     paths:
       - frontend/**
+      - screenshots/**
+      - tools/sync_screenshots.py
       - runway/domain/demo.py
       - runway/verify.py
       - .github/workflows/verify.yml
@@ -69,6 +76,20 @@ jobs:
       # 5xx, and prints each as a FAIL line naming the flow and the width.
       - name: Run the pages and flows
         run: poetry run python run.py verify
+      # The committed screenshots/ are the baselines, so they must be what this very run writes, byte for byte (the clock
+      # is frozen, so they are). Reuses the run above rather than a second `make verify`; changes nothing. On a mismatch
+      # it lists the files and says to run `make screenshots` and commit.
+      - name: Check screenshots/ is what make verify writes
+        id: screenshots
+        run: poetry run python tools/sync_screenshots.py --check --out "$RUNNER_TEMP/screenshots-check"
+      # On a mismatch only: the list and this run's whole set of images, to compare with or take from by hand.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        if: ${{ failure() && steps.screenshots.outcome == 'failure' }}
+        with:
+          name: screenshots-regenerated
+          path: ${{ runner.temp }}/screenshots-check
+          retention-days: 14
+          if-no-files-found: warn
       # tools/control (the session agents drive the app with) end to end on the same demo data and frozen clock: doctor,
       # start, snapshot, screenshot, a flow, reset, stop, and nothing left running (frontend/verify/control-smoke.mjs).
       - name: Drive the app with tools/control

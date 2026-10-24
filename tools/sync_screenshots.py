@@ -1,6 +1,7 @@
 """Copies `make verify`'s full-page screenshots into screenshots/, the one committed directory of them all.
 
     python tools/sync_screenshots.py
+    python tools/sync_screenshots.py --check [--out DIR]
 
 Every page and flow screenshot, at phone and desktop widths, lives there as `<name>-<width>.png`, and each page's first screen
 as `<page>-top-<width>.png` (what the README and the docs site show). A pull request that
@@ -9,7 +10,9 @@ pull request. It copies only from a run that passed whole (artifacts/verify/repo
 report lists; after a failed run it copies nothing and says why. After a full run, files in screenshots/ the run didn't
 write are removed; after a limited one (`PAGES=...`) only that run's images are updated, an image of a page or flow it ran
 that it no longer writes (a screenshot step renamed or removed) is removed, and every other page's and flow's are left as
-they are. The new files are written beside screenshots/ first and moved in once all are ready, so a sync that fails part way
+they are. `--check` (the Verify flows workflow runs it after a full `make verify`) writes nothing to screenshots/: it
+exits 1, listing each image that differs, is missing from screenshots/ or is there without a page or flow to write it,
+when a sync would change anything, and with `--out DIR` it saves that list and the run's images there for an artifact. The new files are written beside screenshots/ first and moved in once all are ready, so a sync that fails part way
 leaves no half-copied file. Only `make verify`'s made-up demo data is ever copied (the repository is public)."""
 from __future__ import annotations
 
@@ -75,15 +78,38 @@ def verified(src: Path) -> tuple[dict[str, Path], Callable[[str], bool]]:
     return shots, lambda name: bool(known) and owner(name, known) in ran
 
 
+def plan(src: Path, dest: Path) -> tuple[dict[str, Path], list[str], list[str]]:
+    """What a sync would do: the run's images, the names that differ from (or are missing in) dest, and the names it
+    would remove. Refuses (SystemExit) as `verified` does."""
+    shots, answers_for = verified(src)
+    changed = [name for name, path in shots.items()
+               if not (dest / name).is_file() or (dest / name).read_bytes() != path.read_bytes()]
+    removed = sorted(p.name for p in dest.glob("*.png") if p.name not in shots and answers_for(p.name))
+    return shots, changed, removed
+
+
+def check(src: Path = VERIFY_DIR, dest: Path = DEST, out: Path | None = None) -> list[str]:
+    """The lines naming each way dest differs from what a sync would make (none: dest is what the run writes, byte for
+    byte), changing nothing in dest. With out, saves them there as mismatches.txt, and the run's images under
+    regenerated/, for an artifact."""
+    shots, changed, removed = plan(src, dest)
+    lines = [f"differs from the committed image: {n}" if (dest / n).is_file() else f"not committed: {n}"
+             for n in sorted(changed)]
+    lines += [f"committed, but no page or flow writes it: {n}" for n in removed]
+    if out is not None and lines:
+        (out / "regenerated").mkdir(parents=True, exist_ok=True)
+        for name, path in shots.items():
+            shutil.copyfile(path, out / "regenerated" / name)
+        (out / "mismatches.txt").write_text("\n".join(lines) + "\n")
+    return lines
+
+
 def sync(src: Path = VERIFY_DIR, dest: Path = DEST) -> tuple[list[str], list[str]]:
     """Copies the last passing `make verify`'s screenshots into dest, leaving a file alone when its bytes are the same (so
     git sees no change), and removes the files the run answers for (verified) but didn't write. Returns the names
     written and the names removed."""
-    shots, answers_for = verified(src)
+    shots, changed, removed = plan(src, dest)
     dest.mkdir(exist_ok=True)
-    changed = [name for name, path in shots.items()
-               if not (dest / name).is_file() or (dest / name).read_bytes() != path.read_bytes()]
-    removed = sorted(p.name for p in dest.glob("*.png") if p.name not in shots and answers_for(p.name))
     # Every new file is written into a folder beside dest first; only then is each moved in (a rename, which doesn't
     # fail part way through a file), and the stale ones removed.
     with tempfile.TemporaryDirectory(prefix=".screenshots-sync-", dir=dest.parent) as stage:
@@ -97,7 +123,22 @@ def sync(src: Path = VERIFY_DIR, dest: Path = DEST) -> tuple[list[str], list[str
 
 
 def main(argv: Sequence[str]) -> int:
-    if argv:
+    args = list(argv)
+    if args[:1] == ["--check"] and (len(args) == 1 or (len(args) == 3 and args[1] == "--out")):
+        try:
+            lines = check(VERIFY_DIR, DEST, Path(args[2]) if len(args) == 3 else None)
+        except SystemExit as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        if lines:
+            print(f"screenshots/ doesn't match what this tree's make verify writes ({len(lines)} images):", file=sys.stderr)
+            print("\n".join(f"  {line}" for line in lines), file=sys.stderr)
+            print("Run `make screenshots` and commit what changed in screenshots/ (a diff on a page you didn't touch is a "
+                  "leak or nondeterminism: report it).", file=sys.stderr)
+            return 1
+        print("screenshots/ matches what make verify writes, byte for byte.")
+        return 0
+    if args:
         print(__doc__, file=sys.stderr)
         return 2
     try:
