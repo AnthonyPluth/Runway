@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { applyBaseline, axeProblems, BASELINE, focusProblems, inheritedWhere, inheritProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
+import { applyBaseline, axeOverlayProblems, axeProblems, focusStops, BASELINE, focusProblems, inheritedWhere, inheritProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
 
 describe("axeProblems", () => {
   it("names each failing element with its rule", () => {
@@ -171,14 +171,51 @@ describe("tapBoxes", () => {
     });
     try {
       // The page's evaluate runs its callback right here, in the jsdom document.
-      const boxes = await tapBoxes({ evaluate: async (fn) => fn() });
+      const boxes = await tapBoxes({ evaluate: async (fn, arg) => fn(arg) });
       expect(boxes.map((b) => b.target)).toEqual(['rect "Bar"']);
       expect(tapProblems(boxes, "phone")).toHaveLength(1);
     } finally { rect.mockRestore(); }
   });
 });
 
+describe("findings inside what a flow opened", () => {
+  it("tapBoxes marks a control inside a dialog", async () => {
+    document.body.innerHTML = `<button id="page">Page</button><div role="dialog"><button id="in">In</button></div>`;
+    const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(() => ({ width: 30, height: 30 }));
+    try {
+      const boxes = await tapBoxes({ evaluate: async (fn, arg) => fn(arg) });
+      expect(boxes.map((b) => [b.target, b.overlay])).toEqual([['button#page "Page"', false], ['button#in "In"', true]]);
+    } finally { rect.mockRestore(); }
+  });
+  it("focusStops marks a tab stop inside a dialog", async () => {
+    document.body.innerHTML = `<button id="a">A</button><div role="alertdialog"><button id="b">B</button></div>`;
+    const order = [...document.querySelectorAll("button")];
+    let at = -1;
+    const page = { keyboard: { press: async () => { order[++at]?.focus(); } }, evaluate: async (x) => (typeof x === "string" ? (0, eval)(x) : x()) };
+    expect((await focusStops(page)).map((s) => [s.target, s.overlay])).toEqual([['button#a "A"', false], ['button#b "B"', true]]);
+  });
+  it("axeOverlayProblems keeps only the nodes inside it", () => {
+    const violations = [{ id: "color-contrast", help: "h", nodes: [{ target: ["p.page"], overlay: false }, { target: ["[role=dialog] p"], overlay: true }] }];
+    expect(axeOverlayProblems(violations)).toEqual(["color-contrast: [role=dialog] p (h)"]);
+    expect(axeProblems(violations)).toHaveLength(2);
+  });
+});
+
 describe("a flow that inherits its page's baseline", () => {
+  it("does not excuse a finding of an element inside the dialog that reads like a page line (tap target, focus ring, axe)", () => {
+    const page = "setup @ phone", flow = "flow x @ phone";
+    const tap = 'tap-target: button.focus-visible:border-ring "Delete" is 40×36 px, under 44';
+    const focus = "focus: button#in-dialog \"In\" shows no focus ring";
+    const axe = "color-contrast: [role=dialog] p (h)";
+    const entries = parseBaseline([`${page} | tap-target: button.focus-visible:border-ring | page`, `${page} | ${focus} | page`, `${page} | ${axe} | page`].join("\n")).entries;
+    // The same findings from the page behind the dialog are tolerated...
+    expect(visitProblems([tap, focus, axe], flow, entries, page, new Set())).toEqual([]);
+    // ...from inside it they fail, whatever the page's lines say.
+    expect(visitProblems([tap, focus, axe], flow, entries, page, new Set([tap, focus, axe]))).toEqual([`${flow}: a11y ${tap}`, `${flow}: a11y ${focus}`, `${flow}: a11y ${axe}`]);
+    // The flow's own lines still excuse its own overlay findings (the list only shrinks, so none is added for a new one).
+    const own = parseBaseline(`${flow} | tap-target: button.focus-visible:border-ring | own`).entries;
+    expect(visitProblems([tap], flow, own, page, new Set([tap]))).toEqual([]);
+  });
   const page = "setup @ phone";
   const flow = "flow account-delete @ phone";
   const known = "tap-target: button.block is 40×44 px, under 44";

@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { auditPage, inheritedWhere, inheritProblems, readBaseline, visitProblems } from "./a11y.mjs";
+import { auditVisit, inheritedWhere, inheritProblems, readBaseline, visitProblems } from "./a11y.mjs";
 import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
@@ -585,7 +585,10 @@ async function main() {
     try {
       await work(page, shot);
       // Every page and flow, at the end of its steps (a11y.mjs): axe, tap targets on the phone, a focus ring on each tab stop.
-      if (label !== DEVICE_CACHE) result.problems.push(...visitProblems(await auditPage(page, viewport), where, a11yBaseline.entries, inheritFrom));
+      if (label !== DEVICE_CACHE) {
+        const { found, overlay } = await auditVisit(page, viewport);
+        result.problems.push(...visitProblems(found, where, a11yBaseline.entries, inheritFrom, overlay));
+      }
     } catch (e) {
       result.problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
       console.error(`${where}: ${e.message}`);   // the whole message, with Playwright's call log, for finding why
