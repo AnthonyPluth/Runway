@@ -79,6 +79,7 @@
   // What the switch says once saved: the server's reply replaces the row's copy here, so only the switch and its pause
   // note change. Reloading the page for it would redraw every connection (and the rest of the tab) under your finger.
   let saved = $state<PlaidRefresh | null>(null);
+  $effect(() => { void it; saved = null; });   // fresher data from the server (a sync paused it) replaces what the switch last said
   const refreshOn = $derived(saved ? saved.refresh : !!it.refresh);
   const pausedWhy = $derived(saved ? saved.refresh_paused : it.refresh_paused);
   const pausedAt = $derived(saved ? saved.refresh_paused_at : it.refresh_paused_at);

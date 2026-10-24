@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import { tick } from "svelte";
   import PlaidItemRow from "./PlaidItemRow.svelte";
@@ -21,7 +22,7 @@
   // After the keys are saved: the status again, swapped in where it is (the rows stay, the keys fold away once set).
   async function keysSaved() {
     try { const s = await api<PlaidStatus>("/api/plaid/status"); st = s; keysOpen = !s.configured; }
-    catch { /* saved; the status catches up on the next visit */ }
+    catch { reload(); }   // saved, but the status can't be read: draw the page afresh, which shows what's wrong
   }
   let connecting = $state("");
 

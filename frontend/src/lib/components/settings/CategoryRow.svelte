@@ -41,7 +41,7 @@
 
   // + Sub
   let subName = $state("");
-  const addSub = () => addCategory(subName, name, false, false);
+  async function addSub() { if (await addCategory(subName, name, false, false)) { mode = ""; subName = ""; } }
 
   // Move: only under parents this branch fits beneath (it and its subcategories must stay within CAT_MAX_DEPTH levels).
   let moveTo = $state("");
@@ -51,6 +51,7 @@
     await act(async () => {
       await api("/api/categories/move", { method: "POST", body: { name, parent } });
       toast.success(parent ? `Moved ${name} under ${parent}` : `${name} is now a top-level category`);
+      mode = "";
       await categoriesChanged();
     });
   }

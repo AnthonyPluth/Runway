@@ -10,9 +10,9 @@ export async function categoriesChanged(): Promise<void> {
   try { await refreshState(); await loadCategories(); } catch { reload(); }
 }
 
-/** Add a category (the Add form on Settings → Categories, and "+ Sub" on a row). */
-export async function addCategory(name: string, parent: string | null, isTransfer: boolean, isIncome: boolean): Promise<void> {
-  await act(async () => {
+/** Add a category (the Add form on Settings → Categories, and "+ Sub" on a row). Whether it was added, so the form can close. */
+export async function addCategory(name: string, parent: string | null, isTransfer: boolean, isIncome: boolean): Promise<boolean> {
+  return act(async () => {
     await api("/api/categories", { method: "POST", body: { name, parent, is_transfer: isTransfer, is_income: isIncome } });
     toast.success(parent ? `Added ${name} under ${parent}` : `Added ${name}`);
     await categoriesChanged();

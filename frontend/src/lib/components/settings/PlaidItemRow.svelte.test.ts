@@ -141,6 +141,16 @@ describe("refreshing a Plaid connection early", () => {
     expect(seen.flatMap((m) => [...m.removedNodes]).every((n) => (n as Element).textContent?.includes("Refresh paused") || n.nodeType === 3)).toBe(true);
   });
 
+  it("shows a pause that arrives with fresher data after a toggle", async () => {
+    vi.mocked(api).mockResolvedValue({ refresh: true, refresh_paused: null, refresh_paused_at: null });
+    const it0 = item({ refresh: false });
+    const r = row(it0);
+    await userEvent.click(screen.getByRole("checkbox", { name: "Refresh transactions early" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Refresh transactions early" })).not.toBeDisabled());
+    await r.rerender({ it: item({ refresh: true, refresh_paused: "Plaid: too many refreshes", refresh_paused_at: "2026-09-30 15:00:00" }), items: [it0] });
+    expect(await screen.findByText(/^Refresh paused: Plaid: too many refreshes/)).toBeInTheDocument();
+  });
+
   it("puts the switch back when saving fails", async () => {
     vi.mocked(api).mockRejectedValue(new Error("Connection not found"));
     row(item({ refresh: false }));
