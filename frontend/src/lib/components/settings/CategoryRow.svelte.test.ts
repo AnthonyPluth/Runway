@@ -13,14 +13,41 @@ import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import CategoryRow from "./CategoryRow.svelte";
 
-const calls = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path).map((c) => (c[1] as { body?: unknown }).body);
+const calls = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { body?: unknown } | undefined)?.body !== undefined).map((c) => (c[1] as { body?: unknown }).body);
 const removeButton = () => screen.getByRole("button", { name: "Remove Pharmacy" });
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
-  vi.mocked(api).mockResolvedValue({ ok: true, moved: 0 } as never);
+  vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/categories" ? categories.list : { ok: true, moved: 0 })) as never);
   vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
   categories.list = [category("Medical"), category("Pharmacy", { parent: "Medical", path: ["Medical", "Pharmacy"], depth: 1, top: "Medical" })];
+});
+
+import { reload } from "$lib/app.svelte";
+import CategoriesSection from "./CategoriesSection.svelte";
+
+describe("a change to the categories", () => {
+  it("is loaded again where it is: the other rows stay the same elements and the page isn't redrawn", async () => {
+    categories.list = [category("Medical"), category("Pharmacy", { parent: "Medical", path: ["Medical", "Pharmacy"], depth: 1, top: "Medical" }), category("Food")];
+    vi.mocked(api).mockImplementation((async (path: string, o?: { body?: { new_name?: string } }) => {
+      if (path === "/api/categories/rename") {
+        categories.list = categories.list.map((c) => (c.name === "Food" ? { ...c, name: o!.body!.new_name! } : c));
+        return { ok: true };
+      }
+      return path === "/api/categories" ? categories.list : { ok: true };
+    }) as never);
+    vi.mocked(reload).mockClear();
+    render(CategoriesSection, { accounts: [] });
+    const pharmacy = screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Pharmacy")!;
+    const food = screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Food")! as HTMLInputElement;
+    await userEvent.clear(food);
+    await userEvent.type(food, "Groceries{Tab}");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Renamed"));
+    await waitFor(() => expect(screen.getAllByLabelText("Category name").some((i) => (i as HTMLInputElement).value === "Groceries")).toBe(true));
+    expect(reload).not.toHaveBeenCalled();
+    expect(screen.getAllByLabelText("Category name").find((i) => (i as HTMLInputElement).value === "Pharmacy")).toBe(pharmacy);
+    expect(pharmacy.isConnected).toBe(true);
+  });
 });
 
 describe("removing a category", () => {

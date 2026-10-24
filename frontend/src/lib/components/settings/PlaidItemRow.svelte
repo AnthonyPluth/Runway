@@ -12,6 +12,7 @@
   import { openPlaidLink } from "./plaid.svelte";
   import { plaidProblem } from "./plaidErrors";
   import type { PlaidItem } from "./types";
+  import type { PlaidRefresh } from "$lib/api-types";
   import { checkCls, linkCls, warnText } from "./ui";
   import { act } from "$lib/act";
   import { apiCall } from "$lib/contract";
@@ -75,9 +76,15 @@
   // Refreshing early (Plaid's Transactions Refresh, before the daily sync): only a connection that brings in transactions.
   // Turning it on again after a pause tries again; the server clears the pause either way.
   const refreshable = $derived(it.bank && it.products.includes("transactions"));
-  const paused = $derived(it.refresh && it.refresh_paused ? it.refresh_paused : "");
+  // What the switch says once saved: the server's reply replaces the row's copy here, so only the switch and its pause
+  // note change. Reloading the page for it would redraw every connection (and the rest of the tab) under your finger.
+  let saved = $state<PlaidRefresh | null>(null);
+  const refreshOn = $derived(saved ? saved.refresh : !!it.refresh);
+  const pausedWhy = $derived(saved ? saved.refresh_paused : it.refresh_paused);
+  const pausedAt = $derived(saved ? saved.refresh_paused_at : it.refresh_paused_at);
+  const paused = $derived(refreshOn && pausedWhy ? pausedWhy : "");
   const pausedOn = $derived.by(() => {
-    const d = it.refresh_paused_at ? utc(it.refresh_paused_at) : null;
+    const d = pausedAt ? utc(pausedAt) : null;
     return d && !isNaN(d.getTime()) ? ` · since ${fmtDateTime(d)}` : "";
   });
   let savingRefresh = $state(false);
@@ -85,12 +92,11 @@
     const box = e.currentTarget as HTMLInputElement;
     const on = box.checked;
     const ok = await act(async () => {
-      await apiCall<"POST /api/plaid/items/{id}/refresh">(`/api/plaid/items/${encodeURIComponent(it.item_id)}/refresh`,
+      saved = await apiCall<"POST /api/plaid/items/{id}/refresh">(`/api/plaid/items/${encodeURIComponent(it.item_id)}/refresh`,
         { method: "POST", body: { on } });
       toast.success(on ? "Refreshes early from now on" : "Waits for the daily sync from now on");
     }, { busy: (b) => (savingRefresh = b) });
     if (!ok) box.checked = !on;   // as it was: nothing changed
-    else reload();
   }
   async function reconnect() {
     await act(async () => { if (await openPlaidLink(it.item_id, "update")) reload(); });
@@ -128,7 +134,7 @@
       href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}{/if}</p>
     {#if refreshable}
       <label class={cn(checkCls, "mt-1")} title="Asks Plaid to fetch new transactions from the bank before the daily sync. Off, they come in with the daily sync as usual.">
-        <input type="checkbox" checked={!!it.refresh} disabled={savingRefresh} onchange={setRefresh} />
+        <input type="checkbox" checked={refreshOn} disabled={savingRefresh} onchange={setRefresh} />
         Refresh transactions early</label>
       {#if paused}<p class={cn("text-sm", warnText)}>Refresh paused: {paused}{pausedOn}</p>{/if}
     {/if}

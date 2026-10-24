@@ -61,8 +61,9 @@
   }
 
   // The logo picker chooses by the item's name (the one the logo comes from, else its last matched transaction's), the
-  // same choice Transactions keeps by merchant name. A new one shows here and in Upcoming, so reload both.
-  async function logoChanged() { reload(); await refresh(); }
+  // same choice Transactions keeps by merchant name. The fresh list brings the new logo, which replaces this row's in place
+  // (Upcoming, on Overview, draws it afresh when you get there); redrawing the page would close the item you're editing.
+  const logoChanged = () => refresh();
 
   // Everything as it is now, to the server. Nothing saves until the fields are complete: throwing (rather than
   // returning) keeps "Saved ✓" from flashing.

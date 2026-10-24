@@ -1,7 +1,6 @@
 <script lang="ts">
   import { isBankKind, isCash, isPlaidStub, KIND_GROUPS } from "$lib/accounts";
   import { api } from "$lib/api";
-  import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { plural } from "$lib/format";
@@ -47,7 +46,7 @@
     await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(d.id)}/restore`, { method: "POST" });
       toast.success(`${d.name || "The account"} comes back with the next sync`);
-      reload();
+      deleted = deleted.filter((x) => x.id !== d.id);   // off the list in place: it only returns with the next sync
     }, { busy: (on) => (restoring = on ? d.id : "") });
   }
 </script>

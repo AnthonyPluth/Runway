@@ -14,10 +14,15 @@
   // connect another bank or card, or an investment account. The connections' accounts are matched to yours under Accounts.
   // The row says how many banks it's connected to ("Keys saved" before the first), and turns to the warning tone (and
   // opens) when one needs reconnecting or is a duplicate. Until a bank is connected it sits collapsed beside SimpleFIN.
-  const status = api<PlaidStatus>("/api/plaid/status");
   let st = $state<PlaidStatus | null>(null);
+  let failure = $state<Error | null>(null);
   let keysOpen = $state(false);
-  status.then((s) => { st = s; keysOpen = !s.configured; }, () => {});
+  api<PlaidStatus>("/api/plaid/status").then((s) => { st = s; keysOpen = !s.configured; }, (err) => { failure = err; });
+  // After the keys are saved: the status again, swapped in where it is (the rows stay, the keys fold away once set).
+  async function keysSaved() {
+    try { const s = await api<PlaidStatus>("/api/plaid/status"); st = s; keysOpen = !s.configured; }
+    catch { /* saved; the status catches up on the next visit */ }
+  }
   let connecting = $state("");
 
   const items = $derived(st?.items ?? []);
@@ -38,9 +43,11 @@
 
 <ServiceRow name="Plaid" purpose="Needs your own Plaid developer keys" on={items.length > 0} group="banks"
   status={trouble ? "Needs attention" : count} warn={trouble}>
-  {#await status}
+  {#if failure}
+    <ProblemNote text="Plaid’s connections didn’t load. Reload the page to try again." detail={failure.message} />
+  {:else if !st}
     <p class="text-sm text-muted-foreground">Loading…</p>
-  {:then st}
+  {:else}
     {#if st.items.length}
       <div class="flex flex-col gap-3">
         {#each st.items as it (it.item_id)}<PlaidItemRow {it} items={st.items} />{/each}
@@ -64,8 +71,6 @@
           class="rounded bg-muted px-1 text-foreground select-all">{l.request}</code>{/if}</p>
       </details>
     {/if}
-    <PlaidKeys {st} bind:open={keysOpen} />
-  {:catch err}
-    <ProblemNote text="Plaid’s connections didn’t load. Reload the page to try again." detail={err.message} />
-  {/await}
+    <PlaidKeys {st} bind:open={keysOpen} onsaved={keysSaved} />
+  {/if}
 </ServiceRow>
