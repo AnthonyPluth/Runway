@@ -177,16 +177,39 @@
   const TYPE_ABOVE = 50;
   let removing = $state(false);
   let removal = $state<AccountRemoval | null>(null);
+  // What depends on it (removal.choose) moves to another account, or goes with it: no answer until you pick one.
+  let moveTo = $state("");
+  let dropThem = $state(false);
+  const moveName = $derived(removal?.targets.find((t) => t.id === moveTo)?.name);
+  const decided = $derived(!!removal && (!removal.choose || !!moveName || dropThem));
+  // What depends on it, in words: as it is, moved, or (dropped) what becomes of it.
+  const depends = $derived.by(() => {
+    const r = removal;
+    if (!r?.choose) return [];
+    const items: [number, string, string][] = [
+      [r.recurring, plural(r.recurring, "recurring item"), "deleted"],
+      [r.rules, `${plural(r.rules, "rule")} that only ${r.rules === 1 ? "applies" : "apply"} to it`, "deleted"],
+      [r.budgets, `${plural(r.budgets, "budget")} paid with it`, "back to the card or account used most"],
+      [r.cards_paid, `${plural(r.cards_paid, "card")} paid from it`, "left with no account to pay from"],
+      [r.assets, `${r.assets} ${r.assets === 1 ? "home or car" : "homes or cars"} it’s the loan for`, "left with no loan"],
+      [r.churning, `${plural(r.churning, "churning card")} linked to it`, "unlinked"],
+      [r.forecast ? 1 : 0, "The forecast’s account", "unset until you choose another"],
+    ];
+    return items.filter(([n]) => n).map(([, what, dropped]) => (dropThem ? `${what}: ${dropped}` : what));
+  });
   async function askRemove() {
     removal = null;
+    moveTo = "";
+    dropThem = false;
     removing = true;
     try { removal = await api<AccountRemoval>(`/api/accounts/${encodeURIComponent(a.id)}/removal`); }
     catch (err) { toast.error(errMsg(err)); removing = false; }
   }
   async function remove() {
     if (!(await act(async () => {
-      await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, { method: "POST" });
-      toast.success(`${label} deleted`);
+      const body = !removal?.choose ? undefined : moveName ? { move_to: moveTo } : { drop_dependents: true };
+      await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, body ? { method: "POST", body } : { method: "POST" });
+      toast.success(moveName ? `${label} deleted; what depended on it moved to ${moveName}` : `${label} deleted`);
       openAccounts.delete(a.id);
       reload();
     }))) return false;
@@ -271,22 +294,45 @@
   </div>
 </details>
 
-<!-- Waits for the count of what goes with it; with a long history, for the account's name typed too. -->
+<!-- Waits for the count of what goes with it; with a long history, for the account's name typed too; with anything that
+     depends on it, for where that goes (another account, or with it). -->
 <ConfirmDialog bind:open={removing} title={`Delete ${label}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive onconfirm={remove}
-  disabled={!removal} typeToConfirm={removal && removal.transactions > TYPE_ABOVE ? label : undefined}>
+  disabled={!decided} typeToConfirm={removal && removal.transactions > TYPE_ABOVE ? label : undefined}>
   {#snippet description()}
     <p>Deletes the account and everything Runway keeps for it:</p>
     {#if removal}
       <ul class="list-disc space-y-1 pl-5">
         <li>{removal.transactions ? `${plural(removal.transactions, "transaction")}, with their categories and splits` : "No transactions"}</li>
-        {#if removal.recurring}<li>{plural(removal.recurring, "recurring item")} on this account</li>{/if}
-        {#if removal.rules}<li>{plural(removal.rules, "rule")} that only {removal.rules === 1 ? "applies" : "apply"} to it</li>{/if}
         {#if removal.statements}<li>{plural(removal.statements, "statement")} you entered</li>{/if}
         {#if removal.holdings}<li>{plural(removal.holdings, "holding")}, with the account’s investment history</li>{/if}
-        <li>Budgets, cards and loans that point at it let go of it.</li>
+        {#if removal.bank_bonuses}<li>{removal.bank_bonuses} {removal.bank_bonuses === 1 ? "bank bonus" : "bank bonuses"} linked to it {removal.bank_bonuses === 1 ? "lets" : "let"} go of it</li>{/if}
       </ul>
+      {#if depends.length}
+        <p class="text-foreground">{moveName ? `Moves to ${moveName}:` : dropThem ? "Deleted with it, or let go:" : "Depends on it, and needs a place to go:"}</p>
+        <ul class="list-disc space-y-1 pl-5" data-testid="account-depends">
+          {#each depends as line (line)}<li>{line}</li>{/each}
+        </ul>
+      {/if}
     {:else}<p>Counting what goes with it…</p>{/if}
     <p>{removal?.plaid ? "SimpleFIN and Plaid leave" : "Syncs leave"} it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.</p>
     <p><a class={linkCls} href="#setup/advanced" onclick={() => (removing = false)}>Download a backup first</a></p>
   {/snippet}
+  {#if removal?.choose}
+    <div class="flex flex-col gap-2">
+      {#if removal.targets.length}
+        <label class={fieldCls}>
+          <span>Move these to…</span>
+          <select class={`${selectCls} phone:h-11 w-full`} bind:value={moveTo} disabled={dropThem}>
+            <option value="" disabled>Choose an account</option>
+            {#each removal.targets as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+          </select>
+        </label>
+      {:else}
+        <p class="text-sm text-muted-foreground">There’s no other account of its kind to move them to.</p>
+      {/if}
+      <label class={`${checkCls} text-muted-foreground`}>
+        <input type="checkbox" bind:checked={dropThem} onchange={() => { if (dropThem) moveTo = ""; }} /> Delete them with the account instead
+      </label>
+    </div>
+  {/if}
 </ConfirmDialog>

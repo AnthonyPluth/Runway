@@ -7,6 +7,15 @@ you set), its recurring items and the rules that only apply to it, the one-off a
 and its settings (how a card is paid, its APR). Whatever else pointed at it lets go: a budget paid with it, a home's
 loan, a churning card or bank bonus linked to it, a card paid from it, and the forecast's account.
 
+Unless you move them: what you set up around the account rather than what the bank sent for it (MOVES) can go to
+another of your accounts instead, typically the card that replaces a reissued one. Its recurring items (with their
+linked payments on other accounts, edits, skips and dismissals, which are by the item; their payments now come in on
+that account, and matching only looks on an item's own account), the rules that only apply to it, the budgets paid with
+it, the cards paid from it, the home or car it's the loan for, the churning card it is, and the forecast's account. A
+bank bonus stays behind (its deposits and balance are the account's own: another account's don't count toward it), and
+so do the account's own settings and the one-off amounts on its forecast (the account you move to has its own). When
+anything would move, deleting asks which: an account to move it to, or to delete it with the account (NeedsChoice).
+
 The database's foreign keys (schema.py, migration 0040) do part of it when the account's row goes: its transactions,
 recurring items, rules and entered statements go with it (ON DELETE CASCADE), and the columns pointing at it let go
 (SET NULL). The rest is kept by id in places a foreign key can't reach (settings keys, forecast overrides, Plaid and
@@ -32,8 +41,8 @@ from ..storage import db
 from ..providers import plaidbank, sfinvest
 from ..storage import settings_keys as sk
 from ..storage.schema import now_text
-from ..storage.models import (Account, CardStatement, CostOverride, DeletedAccount, Holding, HoldingSnapshot,
-                              InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition, ManualState,
+from ..storage.models import (Account, Asset, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride,
+                              DeletedAccount, Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition, ManualState,
                               ManualStatement, Override, PlaidAccount, Recurring, RecurringDismissed, RetailCharge,
                               Rule, Setting, Transaction, TxSplit)
 
@@ -54,31 +63,125 @@ def _tx_ids(account_id: str):
     return select(Transaction.id).where(Transaction.account_id == account_id)
 
 
+# What can move to another account instead of going with this one (see above): each one's column pointing at the
+# account, by the name impact() counts it under. The forecast's account (a setting) is "forecast".
+MOVES = {"recurring": (Recurring, "account_id"), "rules": (Rule, "account_id"), "budgets": (Category, "pay_with"),
+         "cards_paid": (Account, "pay_from"), "assets": (Asset, "loan_account_id"), "churning": (ChurnCard, "account_id")}
+# The kinds of account it can move to: a card's to another card, a checking or savings account's to either.
+_KIND_GROUP = {"checking": "cash", "savings": "cash"}
+_GROUP_NAME = {"cash": "a checking or savings account", "credit": "another credit card", "loan": "another loan",
+               "investment": "another investment account"}
+
+
+def _group(kind: str | None) -> str:
+    return _KIND_GROUP.get(kind or "", kind or "")
+
+
+class NeedsChoice(ValueError):
+    """Deleting an account that something would move from (see above) without saying where it goes: to another account,
+    or with it. `depends` counts what (as impact() does)."""
+    def __init__(self, message: str, depends: dict):
+        super().__init__(message)
+        self.depends = depends
+
+
+def _count(conn, q) -> int:
+    return conn.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
+
+
+def _pointing(model, col: str, account_id: str) -> list:
+    """The rows of `model` whose `col` points at the account (a card paid from itself isn't one that moves)."""
+    return [getattr(model, col) == account_id, *([Account.id != account_id] if model is Account else [])]
+
+
+def _depends(conn, account_id: str) -> dict:
+    """What would move (MOVES, and the forecast's account), counted."""
+    out: dict = {name: _count(conn, select(getattr(model, col)).where(*_pointing(model, col, account_id)))
+                 for name, (model, col) in MOVES.items()}
+    out["forecast"] = db.get_setting(conn, sk.PRIMARY_ACCOUNT) == account_id
+    return out
+
+
+def targets(conn, acct) -> list[dict]:
+    """The accounts what depends on this one can move to: your others of its kind (a card's: another card; a checking or
+    savings account's: either) that aren't hidden."""
+    kinds = [k for k in ("checking", "savings", "credit", "loan", "investment") if _group(k) == _group(acct["kind"])]
+    rows = conn.execute(select(Account).where(Account.id != acct["id"], Account.hidden == 0, Account.kind.in_(kinds))).fetchall()
+    return sorted(({"id": r["id"], "name": db.account_label(r), "kind": r["kind"]} for r in rows),
+                  key=lambda t: (t["name"].lower(), t["id"]))
+
+
 def impact(conn, account_id: str) -> dict | None:
-    """What deleting the account takes with it, for the confirmation (None: no such account)."""
+    """What deleting the account takes with it, what could move instead (and where to), and whether you have to choose
+    (`choose`: something would move), for the confirmation (None: no such account)."""
     acct = conn.execute(select(Account).where(Account.id == account_id)).fetchone()
     if not acct:
         return None
-    count = lambda q: conn.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
     inv = _inv_ids(conn, acct)
+    depends = _depends(conn, account_id)
     return {
         "name": db.account_label(acct),
-        "transactions": count(_tx_ids(account_id)),
-        "recurring": count(select(Recurring.id).where(Recurring.account_id == account_id)),
-        "rules": count(select(Rule.id).where(Rule.account_id == account_id)),
-        "statements": count(select(ManualStatement.statement_date).where(ManualStatement.account_id == account_id)),
-        "holdings": count(select(Holding.security_id).where(Holding.account_id.in_(inv))) if inv else 0,
+        "transactions": _count(conn, _tx_ids(account_id)),
+        "statements": _count(conn, select(ManualStatement.statement_date).where(ManualStatement.account_id == account_id)),
+        "holdings": _count(conn, select(Holding.security_id).where(Holding.account_id.in_(inv))) if inv else 0,
         "plaid": bool(acct["plaid_account_id"]) or account_id.startswith("pl:"),
+        **depends,
+        "bank_bonuses": _count(conn, select(ChurnBankBonus.id).where(ChurnBankBonus.account_id == account_id)),
+        "choose": any(depends.values()),
+        "targets": targets(conn, acct),
     }
 
 
-def remove(conn, account_id: str) -> dict:
-    """Delete the account and everything that belongs to it, and keep it deleted (see above). Raises LookupError if
-    there's no such account."""
+def _described(depends: dict) -> str:
+    """What would move, in words: "2 recurring items and 1 budget"."""
+    words = {"recurring": ("recurring item", "recurring items"), "rules": ("rule", "rules"),
+             "budgets": ("budget paid with it", "budgets paid with it"), "cards_paid": ("card paid from it", "cards paid from it"),
+             "assets": ("home or car it's the loan for", "homes or cars it's the loan for"),
+             "churning": ("churning card", "churning cards")}
+    parts = [f"{n} {words[k][n != 1]}" for k, n in depends.items() if k in words and n]
+    if depends.get("forecast"):
+        parts.append("the forecast's account")
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _check_target(conn, acct, move_to: str):
+    """The account to move to, checked (ValueError, with what to do instead)."""
+    to = conn.execute(select(Account).where(Account.id == move_to)).fetchone()
+    if not to:
+        raise ValueError("Pick one of your accounts to move them to")
+    if to["id"] == acct["id"]:
+        raise ValueError("Pick another account to move them to, not the one you're deleting")
+    if to["hidden"]:
+        raise ValueError("That account is hidden: show it again first, or pick another")
+    if _group(to["kind"]) != _group(acct["kind"]):
+        raise ValueError(f"Pick {_GROUP_NAME.get(_group(acct['kind']), 'an account of the same kind')} to move them to")
+    return to
+
+
+def remove(conn, account_id: str, move_to: str | None = None, drop: bool = False) -> dict:
+    """Delete the account and everything that belongs to it, and keep it deleted (see above). What would move goes to
+    `move_to`, or (`drop`) with the account; one of them is needed when there's any (NeedsChoice). Raises LookupError if
+    there's no such account, ValueError if `move_to` can't be used. Nothing is changed before those checks pass, and
+    the caller commits it all at once."""
     acct = conn.execute(select(Account).where(Account.id == account_id)).fetchone()
     if not acct:
         raise LookupError("Account not found")
+    if move_to and drop:
+        raise ValueError("Move them to another account, or delete them with this one: not both")
     gone = impact(conn, account_id) or {}
+    depends = {k: gone[k] for k in (*MOVES, "forecast")}
+    to = _check_target(conn, acct, move_to) if move_to else None
+    if any(depends.values()) and not to and not drop:
+        raise NeedsChoice(f"{_described(depends)} depend on {gone['name']}: choose an account to move them to (move_to), "
+                          "or delete them with it (drop_dependents: true).", depends)
+    moved: dict = {}
+    if to:
+        # Moved before anything is deleted, so what follows finds none of it on this account.
+        for name, (model, col) in MOVES.items():
+            moved[name] = conn.execute(update(model).where(*_pointing(model, col, account_id)).values({col: to["id"]})).rowcount
+        if depends["forecast"]:
+            db.set_setting(conn, sk.PRIMARY_ACCOUNT, to["id"])
+        moved["forecast"] = depends["forecast"]
     inv = _inv_ids(conn, acct)
     pid = acct["plaid_account_id"] or (account_id[3:] if account_id.startswith("pl:") and conn.execute(
         select(PlaidAccount.plaid_account_id).where(PlaidAccount.plaid_account_id == account_id[3:])).fetchone() else None)
@@ -120,7 +223,11 @@ def remove(conn, account_id: str) -> dict:
     db.upsert(conn, DeletedAccount, {"id": account_id, "name": db.account_label(acct), "kind": acct["kind"],
                                      "plaid_account_id": pid, "inv_ids": json.dumps(inv) if inv else None, "restored_at": None},
               key=["id"], update=["name", "kind", "plaid_account_id", "inv_ids", "restored_at"])
-    return {"ok": True, **gone}
+    out = {"ok": True, **{k: v for k, v in gone.items() if k not in ("targets", "choose")}}
+    if to:
+        out["moved_to"] = {"id": to["id"], "name": db.account_label(to)}
+        out["moved"] = moved
+    return out
 
 
 def listed(conn) -> list[dict]:

@@ -17,8 +17,13 @@ export type { LoanTerms, ManualStatement } from "$lib/api-types";
 /** A card's statement: Plaid's (with its bank), or one you entered (whether a newer one should have been entered by
  *  now, and when the next is expected to close). */
 export type CardStatementInfo = PlaidStatement | EnteredStatement;
-/** GET /api/accounts/{id}/removal: what deleting it takes with it. */
-export interface AccountRemoval { name: string; transactions: number; recurring: number; rules: number; statements: number; holdings: number; plaid: boolean }
+/** GET /api/accounts/{id}/removal: what deleting it takes with it, what depends on it (and can move to one of `targets`
+ * instead), and whether you have to choose (`choose`: anything depends on it). */
+export interface AccountRemoval {
+  name: string; transactions: number; statements: number; holdings: number; plaid: boolean;
+  recurring: number; rules: number; budgets: number; cards_paid: number; assets: number; churning: number; forecast: boolean;
+  bank_bonuses: number; choose: boolean; targets: { id: string; name: string; kind: string }[];
+}
 /** GET /api/accounts/deleted */
 export interface DeletedAccount { id: string; name?: string | null; kind?: string | null; deleted_at?: string | null }
 

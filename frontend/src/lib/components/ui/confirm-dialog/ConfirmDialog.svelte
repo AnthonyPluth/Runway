@@ -14,13 +14,14 @@
   //   confirmLabel  the button that does it ("Remove"); cancelLabel is "Cancel" unless given
   //   busyLabel     the button while onconfirm runs ("Removing…")
   //   destructive   the confirm button in red
+  //   children      fields the answer needs (a choice to make), under the description; `disabled` holds it until made
   //   typeToConfirm a word ("RESTORE") or name the confirm button waits for, typed exactly
   //   disabled      holds the confirm button back (while what it would do is still being worked out)
   //   onconfirm     does it; the dialog stays open and busy until it settles, then closes, unless it returns false (a
   //                 failure it has already shown). Catch errors inside it: a throw leaves the dialog open.
   let { open = $bindable(false), title, description, confirmLabel = "Confirm", cancelLabel = "Cancel", busyLabel, destructive = false,
-    typeToConfirm, disabled = false, onconfirm }: {
-    open?: boolean; title: string; description?: string | Snippet; confirmLabel?: string; cancelLabel?: string; busyLabel?: string;
+    typeToConfirm, disabled = false, onconfirm, children }: {
+    open?: boolean; title: string; description?: string | Snippet; children?: Snippet; confirmLabel?: string; cancelLabel?: string; busyLabel?: string;
     destructive?: boolean; typeToConfirm?: string; disabled?: boolean; onconfirm: () => unknown;
   } = $props();
 
@@ -53,6 +54,7 @@
             {#if typeof description === "string"}<p>{description}</p>{:else}{@render description()}{/if}
           </Dialog.Description>
         {/if}
+        {@render children?.()}
         {#if typeToConfirm}
           <label class="flex flex-col gap-1.5 text-sm text-muted-foreground">
             <span>Type <strong class="text-foreground font-mono">{typeToConfirm}</strong> to confirm</span>
