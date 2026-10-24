@@ -99,12 +99,34 @@ def frozen_env(env: dict[str, str], lib: str) -> dict[str, str]:
             "FAKETIME_DONT_FAKE_MONOTONIC": "1", "PYTHONPATH": path, FROZEN_CLOCK_ENV: "1"}
 
 
-def clean_env(data: str, base: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment for the demo server: its own folder and SQLite database, nothing from the caller's setup that
-    could point it at real data (Postgres, sign-in, bank providers)."""
-    env = {k: v for k, v in (os.environ if base is None else base).items()
-           if not k.startswith(("OIDC_", "SIMPLEFIN", "PLAID", "RUNWAY_SECRET_KEY"))
-           and k not in ("DATABASE_URL", "RUNWAY_PUBLIC_URL", "RUNWAY_ALLOW_NO_AUTH")}
+# What the demo processes (the seed, each demo server, verify.mjs's browser run and tools/control's session) keep of the
+# caller's environment: an allowlist, so no credential in a developer's shell (a provider's API key, a GitHub or cloud
+# token, Runway's own database, sign-in or bank settings) ever reaches them, whatever it's called. What's here is what
+# Python, Node, Chromium and the frozen clock need to run as they do for the caller: where programs, the home folder,
+# temporary files, the time zone (the demo's "today" and the browser's noon are both local time), the locale, fonts and
+# certificates are.
+KEPT_ENV = frozenset({"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "TZ", "TZDIR", "LANG", "LANGUAGE",
+                      "VIRTUAL_ENV", "LD_LIBRARY_PATH", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "CI"})
+KEPT_ENV_PREFIXES = ("LC_", "PYTHON", "PLAYWRIGHT_", "XDG_", "FONTCONFIG_")
+# Outbound HTTP from a demo process goes to a proxy that isn't there (the discard port on the loopback address), so it
+# fails at once instead of reaching the internet; the loopback addresses (its own server, the signed-in demo's issuer)
+# are reached directly.
+NO_OUTSIDE = "http://127.0.0.1:9"
+NO_PROXY_FOR = "127.0.0.1,localhost"
+
+
+def kept_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The caller's environment (os.environ by default) cut down to KEPT_ENV and KEPT_ENV_PREFIXES, with the dead proxy."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if k in KEPT_ENV or k.startswith(KEPT_ENV_PREFIXES)}
+    env.update(HTTP_PROXY=NO_OUTSIDE, HTTPS_PROXY=NO_OUTSIDE, http_proxy=NO_OUTSIDE, https_proxy=NO_OUTSIDE,
+               NO_PROXY=NO_PROXY_FOR, no_proxy=NO_PROXY_FOR)
+    return env
+
+
+def clean_env(data: str, base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for the demo seed, server and browser run: kept_env (nothing from the caller's setup that could
+    point it at real data or carry a credential), its own folder and SQLite database, and no syncing."""
+    env = kept_env(base)
     env.update(RUNWAY_DATA=data, RUNWAY_NO_SYNC="1", PYTHONUNBUFFERED="1")
     return env
 
@@ -775,5 +797,8 @@ if __name__ == "__main__":
     if sys.argv[1:2] == ["status"]:
         print(json.dumps(status()))
         sys.exit(0)
+    if sys.argv[1:2] == ["env"]:   # what control.mjs starts its session with: kept_env, never the caller's whole environment
+        print(json.dumps(kept_env()))
+        sys.exit(0)
     sys.exit("usage: python -m runway.verify serve --parent PID --seed S --data D --port P [--signed-in] (make verify runs it), "
-             "seed --data D [--investments ...] or status (frontend/verify/control.mjs runs those two)")
+             "seed --data D [--investments ...], status or env (frontend/verify/control.mjs runs those three)")

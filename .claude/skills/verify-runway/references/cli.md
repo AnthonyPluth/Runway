@@ -76,6 +76,7 @@ Without a seed option it seeds what make verify does (ai-buttons, investments, r
 The server and the seed run under libfaketime at make verify's frozen day, and the browser's clock is fixed at noon that day.
 One session per checkout, on ports and data of its own: it never takes make verify's machine lock, and a running make verify is left alone.
 Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first.
+Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them.
 
 Options:
   --ai-buttons  seed what the AI buttons need
@@ -340,7 +341,9 @@ tools/control eval <js…> [options]
 Evaluate JavaScript in the page and print the result (read-only unless --write).
 
 An expression (`document.title`) or a function (`() => [...document.querySelectorAll('h2')].map(h => h.textContent)`); the result as JSON.
-Read-only by default: a request it makes other than GET or HEAD is blocked, and a change it makes to the page is reported (domChanges).
+Read-only by default: a request it makes to the app's data (other than GET or HEAD) is blocked before it's sent, and the eval fails with not_read_only. It waits half a second, and for the network to go quiet, before it answers, so a change set off on a short timer fails it too; one set off later is blocked all the same, and reported as a warning by the next command. A change it makes to the page is reported (domChanges).
+With --write it may change the demo data. The guard is off only while a command that acts runs (goto, viewport, click, type, press, scroll, flow, reset, eval --write): a timer an expression leaves running that fires during one of those is not blocked. Reload the page (goto --reload) to clear what an expression left behind.
+Like every command it reaches only the session's own server: a request anywhere else is blocked before it's sent.
 Prefer snapshot, click and type: they act as a person would.
 
 Options:

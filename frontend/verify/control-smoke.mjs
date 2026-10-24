@@ -1,16 +1,19 @@
 // tools/control end to end, on the real demo server under the frozen clock (`make control-smoke`; the Verify flows
-// workflow runs it): doctor, start, info, snapshot, screenshot, a flow, reset, stop, then checks nothing is left
-// running. It uses a control folder of its own (artifacts/control-smoke/), so it never touches a session you have open.
+// workflow runs it): doctor, start, info, snapshot, screenshot, what the session must never do (reach another server,
+// change the data from a read-only eval), a flow, reset, stop, then checks nothing is left running. It uses a control folder of its own (artifacts/control-smoke/), so it never touches a session you have open.
 // Prints each command and its answer; exits 1 on the first that isn't what it should be.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
 const dir = join(root, "artifacts", "control-smoke");
-const env = { ...process.env, RUNWAY_CONTROL_DIR: dir };
+// Credentials in the caller's environment, which the session must never pass on to its processes (checked below).
+const FAKE_SECRET = "control-smoke-not-a-real-key";
+const env = { ...process.env, RUNWAY_CONTROL_DIR: dir, OPENROUTER_API_KEY: FAKE_SECRET, GITHUB_TOKEN: FAKE_SECRET, SOME_SERVICE_TOKEN: FAKE_SECRET };
 
 function control(...args) { return controlWith(env, ...args); }
 
@@ -24,11 +27,35 @@ function controlWith(withEnv, ...args) {
   return { code: r.status, json, out };
 }
 
-function expect(ok, what) {
+function expect(ok, what, explain = () => {}) {
   if (ok) { console.log(`  ok: ${what}`); return; }
   console.error(`  FAIL: ${what}`);
+  explain();
   control("stop");
   process.exit(1);
+}
+
+/** For a flow that should have passed: the step that failed and why, in full, and the page's last 20 console lines. */
+function explainFlow(r) {
+  return () => {
+    console.error(`  the flow's answer: ${r.json?.error ? `${r.json.error.code}: ${r.json.error.message}` : "(no error)"}`);
+    for (const s of r.json?.steps ?? []) if (!s.ok) console.error(`  step ${s.n} failed: ${s.step}\n    ${s.error}`);
+    const c = spawnSync(process.execPath, [join(here, "control.mjs"), "console"], { cwd: root, env, encoding: "utf8", timeout: 60000 });
+    let messages = [];
+    try { messages = JSON.parse(c.stdout).messages ?? []; } catch { console.error(`  (no console: ${c.stdout.trim().slice(0, 300)})`); }
+    console.error(`  the page's last ${Math.min(20, messages.length)} console lines:`);
+    for (const m of messages.slice(-20)) console.error(`    [${m.type}] ${m.route ?? ""} ${m.text}`);
+  };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** A server on another loopback port that counts what reaches it: the session must never send it anything. */
+async function countingServer() {
+  const seen = [];
+  const server = createServer((req, res) => { seen.push(`${req.method} ${req.url}`); res.end("<a href='/'>counted</a>"); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { seen, url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => { server.close(r); server.closeAllConnections(); }) };
 }
 
 const pngWidth = (file) => readFileSync(file).readUInt32BE(16);
@@ -75,11 +102,49 @@ expect(r.code === 1 && r.json?.error?.code === "refused", "goto anywhere but its
 
 r = control("eval", "() => fetch('/api/control-smoke', { method: 'POST' }).then((r) => r.status)");
 expect(r.code === 1 && r.json?.error?.code === "not_read_only", "eval is read-only without --write: a POST is blocked, and said so");
+r = control("eval", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'POST', headers: { 'X-Runway': '1' } }), 100); return 'later'; }");
+expect(r.code === 1 && r.json?.error?.code === "not_read_only", "a write an eval sets off on a short timer fails it too (not_read_only)");
+r = control("eval", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'DELETE', headers: { 'X-Runway': '1' } }), 2500); return 'much later'; }");
+expect(r.code === 0 && r.json?.value === "much later", "an eval whose write comes later answers first");
+await sleep(3500);
+r = control("info");
+expect(r.code === 0 && /change to the app's data .*was blocked before it was sent: DELETE \/api\/control-smoke/.test(r.json?.warning ?? ""),
+  "the later write was blocked all the same, and the next command says so");
+r = control("network");
+expect(r.json?.requests?.some((q) => q.method === "DELETE" && q.path === "/api/control-smoke" && q.failed) && !r.json.requests.some((q) => q.path === "/api/control-smoke" && q.status),
+  "the server never answered it: it was never sent");
 control("console");
-control("network");
 
+// Nothing reaches another server, not even one on this machine (your own Runway, say): a link to it, a fetch, an image.
+const counting = await countingServer();
+r = control("eval", "--write", `() => { const a = document.createElement('a'); a.href = '${counting.url}/#elsewhere'; a.textContent = 'Smoke elsewhere'; a.style = 'position:fixed;top:40%;left:20px;z-index:99999;padding:20px;background:#fff'; document.body.append(a); return true; }`);
+expect(r.code === 0, "a link to another loopback server is put on the page");
+r = control("click", "link", "Smoke elsewhere");
+await sleep(500);
+expect(r.code === 0 && counting.seen.length === 0 && /127\.0\.0\.1:\d+\/, which isn't the session's server, were blocked before they were sent/.test(r.json?.warning ?? ""),
+  `a click on it sends nothing (the other server saw ${counting.seen.length} request(s)), and the answer says it was blocked before it was sent`);
+r = control("info");
+expect(r.code === 0 && r.json.route.startsWith("/") && r.json.session.server !== counting.url, "the page stays on the session's server");
+r = control("eval", `() => { new Image().src = '${counting.url}/pixel.png'; return fetch('${counting.url}/data', { mode: 'no-cors' }).then(() => 'sent', () => 'blocked'); }`);
+await sleep(500);
+// (The app's own Content-Security-Policy stops these in the page, before the session's guard sees them.)
+expect(r.code === 0 && r.json.value === "blocked" && counting.seen.length === 0, `a fetch or an image from it is never sent (the other server saw ${counting.seen.length})`);
+r = control("eval", "() => fetch('https://example.com/').then(() => 'reached', () => 'blocked')");
+expect(r.code === 0 && r.json.value === "blocked", "and nothing on the internet is reached");
+await fetch(`${counting.url}/control`).then((x) => x.text());
+expect(counting.seen.length === 1, "(the counting server does count what reaches it)");
+await counting.close();
+
+// The session's processes never see the caller's credentials (runway/verify.py's KEPT_ENV).
+const session = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+const leaked = [session.pid, ...readFileSync(`/proc/${session.pid}/task/${session.pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number)]
+  .filter((pid) => { try { return readFileSync(`/proc/${pid}/environ`, "utf8").includes(FAKE_SECRET); } catch { return false; } });
+expect(!leaked.length, `no credential from the caller's environment in the session's processes (leaked into ${leaked.join(", ") || "none"})`);
+
+r = control("reset");
+expect(r.json?.ok && r.json.reset, "reset before the flow: the data make verify starts it from");
 r = control("flow", "transactions-delete", "--viewport", "desktop");
-expect(r.code === 0 && r.json?.steps?.every((s) => s.ok) && r.json.files.length === 4, "flow: transactions-delete passes, step by step, with its 4 images");
+expect(r.code === 0 && r.json?.steps?.every((s) => s.ok) && r.json.files.length === 4, "flow: transactions-delete passes, step by step, with its 4 images", explainFlow(r));
 
 // A flow that fails keeps its step report: at the phone's width the rows' Delete buttons only show on hover (gotchas.md).
 r = control("flow", "transactions-delete", "--viewport", "phone");

@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } 
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ARTIFACTS, ControlError, PROG, ROOT, closest, errorResult, jsExpression, lastShotNumber, parseTarget, readState, rel, removeState, routeUrl, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
+import { ARTIFACTS, ControlError, PROG, ROOT, UNREACHABLE_ARGS, actingRequest, allowedRequest, closest, errorResult, isGuardedPath, jsExpression, lastShotNumber, parseTarget, readState, rel, removeState, routeUrl, sameServer, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
 import { startServer } from "./jobs.mjs";
 import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, recheck, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
 
@@ -22,6 +22,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MODAL = "[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible";
 const SHOT_TRIES = 4;
 const BUFFER = 500;   // console messages and requests kept between two reads (the oldest dropped first)
+// How long a read-only eval waits, after its expression returns, for a change the expression set off (a timer, a promise
+// it didn't return) before it answers: one caught in that time fails the eval (not_read_only); a later one is blocked all
+// the same, and the next command says so.
+const EVAL_SETTLE_MS = 500;
 
 const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
 const firstLine = (e) => String(e?.message ?? e).split("\n")[0];
@@ -63,7 +67,7 @@ async function main() {
   save();
 
   let server = null, browser = null, listener = null, page = null, ctx = null, base = "", servers = 0, idle = null, ending = false;
-  const consoleBuffer = [], requests = [], offsite = [];
+  const consoleBuffer = [], requests = [], offsite = [], offServer = [], refused = [];
   let shots = 0;
 
   /** `keepState`: a start that failed leaves its state ("failed", and why) for `start` to read, which then removes it. */
@@ -85,6 +89,25 @@ async function main() {
   process.on("unhandledRejection", (e) => { log(`unhandled: ${e?.stack ?? e}`); shutdown("an internal error", 1); });
   const touch = () => { clearTimeout(idle); idle = setTimeout(() => shutdown(`idle for ${opt.idleMinutes} minutes`), opt.idleMinutes * 60000); };
 
+  // A request to anything but the session's server, aborted before it's sent (and reported with the next answer).
+  const notOurs = (url) => !allowedRequest(url.href, base);
+  const abortNotOurs = (r) => { offServer.push(scrubUrl(r.request().url(), base) ?? "a data address"); return r.abort("blockedbyclient"); };
+  // The write guard: whenever no acting command runs (between commands, and during read-only ones such as a plain eval),
+  // a request other than GET or HEAD to one of the server's paths that take one is aborted before it's sent.
+  const guarded = (url) => allowedRequest(url.href, base) && isGuardedPath(url.pathname);
+  const refuseWrite = (r) => {
+    const m = r.request().method();
+    if (["GET", "HEAD", "OPTIONS"].includes(m)) return r.fallback();
+    refused.push(`${m} ${scrubUrl(r.request().url(), base)}`);
+    return r.abort("blockedbyclient");
+  };
+  let guarding = false;
+  async function guardWrites(on) {
+    if (!ctx || on === guarding) return;
+    if (on) await ctx.route(guarded, refuseWrite); else await ctx.unroute(guarded, refuseWrite);
+    guarding = on;
+  }
+
   async function newServer() {
     server = await startServer({
       command: (port, folder) => [opt.python, "-m", "runway.verify", "serve", "--parent", String(process.pid), "--seed", seedDir, "--data", folder, "--port", String(port), ...(opt.signedIn ? ["--signed-in"] : [])],
@@ -102,9 +125,13 @@ async function main() {
       { ...process.env, RUNWAY_VERIFY_SESSION: sessionToken });
     await newServer();
     log(`demo server at ${base}`);
-    browser = await chromium.launch(launchOptions());
+    const launch = launchOptions();
+    browser = await chromium.launch({ ...launch, args: [...launch.args, ...UNREACHABLE_ARGS] });
     browser.on("disconnected", () => shutdown("the browser closed", 1));
     ctx = await browser.newContext({ viewport: VIEWPORTS[opt.viewport] });
+    // Before anything loads: a request to anything but the session's own server is aborted before it's sent (the
+    // launch's dead proxy already keeps it off the internet; this keeps it off the machine's other servers too).
+    await ctx.route(notOurs, abortNotOurs);
     await prepareContext(ctx, { day: opt.day });
     page = await ctx.newPage();
     page.t = (ms) => Math.round(ms * scale);
@@ -122,14 +149,17 @@ async function main() {
       const path = scrubUrl(r.url(), base), why = r.failure()?.errorText ?? "failed";
       if (path) keep(requests, { method: r.method(), path, ...(why === "net::ERR_ABORTED" ? { aborted: true } : { failed: why }), type: r.resourceType() });
     });
-    // Only ever its own server: a page that navigates elsewhere is brought back (and the next command says so); popups are closed.
+    // Only ever its own server, a second time: a page that navigates elsewhere anyway (or lands on the error page of a
+    // navigation that was blocked) is brought back, and the command says so; popups are closed.
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame() || ending) return;
-      let origin;
-      try { origin = new URL(frame.url()).origin; } catch { return; /* about:blank and the like */ }
-      if (origin !== "null" && origin !== new URL(base).origin) {
-        offsite.push(origin);
-        page.goto(`${base}/#overview`).catch((e) => log(`coming back from ${origin}: ${firstLine(e)}`));
+      let url;
+      try { url = new URL(frame.url()); } catch { return; /* about:blank and the like */ }
+      if (url.protocol === "chrome-error:") {
+        page.goBack().then((r) => r ?? page.goto(`${base}/#overview`)).catch((e) => log(`coming back from a blocked address: ${firstLine(e)}`));
+      } else if (url.origin !== "null" && !sameServer(url, base)) {
+        offsite.push(url.origin);
+        page.goto(`${base}/#overview`).catch((e) => log(`coming back from ${url.origin}: ${firstLine(e)}`));
       }
     });
     ctx.on("page", (p) => { if (p !== page) p.close().catch(() => { /* closed already */ }); });
@@ -295,16 +325,12 @@ async function main() {
       await page.waitForTimeout(300);   // the wheel scrolls over a few frames
       return { scrolled: where, scrollY: await page.evaluate(() => globalThis.scrollY), route: route() };
     },
+    // Read-only unless --write: handle() keeps the write guard on while a plain eval runs, and after its expression
+    // returns it waits a moment, and for the network to go quiet, so a change the expression set off on a timer is
+    // caught here too. One set off later still is blocked, and reported by the next command.
     async eval({ args, options: o }) {
       const code = args.join(" ");
-      const blocked = [];
-      const guard = (r) => {
-        const m = r.request().method();
-        if (["GET", "HEAD", "OPTIONS"].includes(m)) return r.fallback();
-        blocked.push(`${m} ${scrubUrl(r.request().url(), base)}`);
-        return r.abort("blockedbyclient");
-      };
-      if (!o.write) await page.route("**/*", guard);
+      const before = refused.length;
       await page.evaluate(() => {
         globalThis.__controlChanges = 0;
         globalThis.__controlObserver?.disconnect();
@@ -315,11 +341,14 @@ async function main() {
       try {
         value = await page.evaluate(jsExpression(code));
       } catch (e) {
-        if (blocked.length) throw notReadOnly(blocked);   // the blocked request is what made it fail
+        if (refused.length > before) throw notReadOnly(refused.splice(before));   // the blocked request is what made it fail
         throw new ControlError("eval_error", scrubText(firstLine(e)).replace(/^page\.evaluate: /, ""), "check the expression: it runs in the page (document, window), as an expression or a () => function");
-      } finally {
-        if (!o.write) await page.unroute("**/*", guard);
       }
+      if (!o.write) {
+        await page.waitForTimeout(EVAL_SETTLE_MS);
+        await page.waitForLoadState("networkidle", { timeout: page.t(5000) }).catch(() => { /* a page that keeps a request open */ });
+      }
+      const blocked = refused.splice(before);
       const domChanges = await page.evaluate(() => { globalThis.__controlObserver?.disconnect(); return globalThis.__controlChanges ?? 0; }).catch(() => 0);
       if (blocked.length) throw notReadOnly(blocked);
       const json = JSON.stringify(value);
@@ -400,6 +429,18 @@ async function main() {
     return result;
   }
 
+  const unique = (list) => [...new Set(list)];
+  /** The warnings an answer carries: where the page went, what was blocked before it was sent, and the changes to the
+   *  app's data blocked while no command was acting (`earlier`, before this one; this command's own, from an acting one). */
+  function blockedWarnings(earlier) {
+    const away = offsite.splice(0), stopped = offServer.splice(0), late = [...earlier, ...refused.splice(0)];
+    return [
+      ...(away.length ? [`the page went to ${unique(away).join(", ")}, which isn't the session's server: it was brought back`] : []),
+      ...(stopped.length ? [`requests to ${unique(stopped).slice(0, 5).join(", ")}, which isn't the session's server, were blocked before they were sent`] : []),
+      ...(late.length ? [`${late.length} change${late.length === 1 ? "" : "s"} to the app's data made while no command was acting (a timer an earlier eval left running, or the page saving after a command ended) ${late.length === 1 ? "was" : "were"} blocked before ${late.length === 1 ? "it was" : "they were"} sent: ${unique(late).slice(0, 3).join(", ")}`] : []),
+    ];
+  }
+
   let queue = Promise.resolve();
   const sameToken = (t) => typeof t === "string" && t.length === token.length && timingSafeEqual(Buffer.from(t), Buffer.from(token));
 
@@ -411,14 +452,18 @@ async function main() {
     log(`${request.command}`);
     // Not idle while a command runs (a long flow can outlast a short --idle-minutes): the clock starts again when it ends.
     clearTimeout(idle);
+    // What was blocked since the last command (a timer an eval left running, a page saving on its own) is reported now.
+    const earlier = refused.splice(0);
+    const warned = () => { const w = blockedWarnings(earlier); return w.length ? { warning: w.join("; ") } : {}; };
     try {
+      await guardWrites(!actingRequest(request));
       const reply = await handler({ args: request.args ?? [], options: request.options ?? {}, path: request.path });
-      const away = offsite.splice(0);
-      return { ok: true, ...reply, ...(away.length ? { warning: `the page went to ${away.join(", ")}, which isn't the session's server: it was brought back` } : {}) };
+      return { ok: true, ...reply, ...warned() };
     } catch (e) {
       const err = bad(e);
-      return { ...errorResult(request.command, err), ...(e.data ?? {}) };
+      return { ...errorResult(request.command, err), ...(e.data ?? {}), ...warned() };
     } finally {
+      await guardWrites(true).catch((e) => log(`guarding writes: ${firstLine(e)}`));
       touch();
     }
   }
@@ -441,6 +486,7 @@ async function main() {
   chmodSync(socket, 0o600);
   // Screenshots are numbered on from what's already there, so a new session doesn't overwrite the last one's.
   try { shots = lastShotNumber(readdirSync(join(dir, "shots"))); } catch { shots = 0; /* no screenshots yet */ }
+  await guardWrites(true);
   touch();
   save({ status: "ready", base, port: server.port, route: route(), clock: { frozenDay: opt.day, browser: await page.evaluate(() => new Date().toString()) } });
   log(`ready at ${base}`);
