@@ -1,0 +1,22 @@
+{
+  "name": "setup-account-delete",
+  "page": "setup",
+  "inherits_page_baseline": true,
+  "steps": [
+    { "goto": "#setup/accounts" },
+    { "wait_for": "summary:has-text('Everyday Checking')" },
+    { "click": "summary:has-text('Everyday Checking')" },
+    { "click": "button:has-text('Delete account…')" },
+    { "wait_for": "[data-slot=confirm-dialog]" },
+    { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Depends on it, and needs a place to go:" } },
+    { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Move these to…" } },
+    { "expect_text": { "selector": "[data-slot=confirm-dialog]", "text": "Delete them with the account instead" } },
+    { "wait_for": "[data-slot=confirm-dialog] button:text-is('Delete'):disabled" },
+    { "screenshot": "undecided" },
+    { "click": "[data-slot=confirm-dialog] input[type=checkbox]" },
+    { "wait_for": "[data-slot=confirm-dialog] button:text-is('Delete'):enabled" },
+    { "screenshot": "delete-with-it" },
+    { "click": "[data-slot=confirm-dialog] input[type=checkbox]" },
+    { "wait_for": "[data-slot=confirm-dialog] button:text-is('Delete'):disabled" }
+  ]
+}

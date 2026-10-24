@@ -170,10 +170,12 @@ export function readBaseline(file = BASELINE) {
 
 /** Splits the findings of one visit (`where` = "<page or flow> @ <width>") against the baseline: `fresh` is what is not on it
  *  (these fail), `tolerated` how many it covers, `stale` the baseline's lines for this visit that no longer occur (these fail
- *  too, so the list only shrinks). */
-export function applyBaseline(found, where, entries) {
+ *  too, so the list only shrinks). A flow that inherits its page's baseline (`inheritFrom` = "<page> @ <width>", from
+ *  inheritedWhere) also has the findings baselined for that page at that width tolerated: only those, so a finding of the
+ *  flow's own (a dialog's) is fresh. The page's lines are never stale here: the page's own visit is what checks them. */
+export function applyBaseline(found, where, entries, inheritFrom) {
   const mine = entries.filter((e) => e.where === where);
-  const known = new Set(mine.map((e) => e.problem));
+  const known = new Set([...mine, ...(inheritFrom ? entries.filter((e) => e.where === inheritFrom) : [])].map((e) => e.problem));
   const seen = new Set(found.map(canonical));
   return {
     fresh: found.filter((p) => !known.has(canonical(p))),
@@ -182,9 +184,32 @@ export function applyBaseline(found, where, entries) {
   };
 }
 
+/** How a flow says it runs on a page whose accessibility baseline it shares: `"inherits_page_baseline": true`, with the page
+ *  it starts on (`page`, which must be written out, not left to the default) as the page it inherits from. Returns the
+ *  problems with that: [] when the flow doesn't ask, or asks properly. A flow shot at a width no page is (landscape) has
+ *  no page baseline there, so that is refused rather than silently tolerating nothing. */
+export function inheritProblems(flow, pages, widths) {
+  if (flow?.inherits_page_baseline === undefined) return [];
+  if (typeof flow.inherits_page_baseline !== "boolean") return ["inherits_page_baseline is true or false"];
+  if (!flow.inherits_page_baseline) return [];
+  const out = [];
+  if (typeof flow.page !== "string") out.push('inherits_page_baseline needs "page": the page whose baseline it inherits, written out');
+  else if (!pages.includes(flow.page)) out.push(`inherits_page_baseline: unknown page ${flow.page}`);
+  for (const v of flow.viewports ?? []) if (!widths.includes(v)) out.push(`inherits_page_baseline: no page is visited at ${v}, so there is no baseline to inherit`);
+  return out;
+}
+
+/** The visit whose baseline a flow's findings may also use at `viewport`: "<page> @ <width>", or undefined for a flow that
+ *  doesn't inherit. Throws on a flow inheritProblems refuses (verify checks every flow when it starts). */
+export function inheritedWhere(flow, viewport, pages, widths) {
+  const bad = inheritProblems(flow, pages, widths);
+  if (bad.length) throw new Error(`flow ${flow?.name}: ${bad.join("; ")}`);
+  return flow?.inherits_page_baseline ? `${flow.page} @ ${viewport}` : undefined;
+}
+
 /** What a visit reports as problems: each new finding, and each baseline line that no longer occurs. */
-export function visitProblems(found, where, entries) {
-  const { fresh, stale } = applyBaseline(found, where, entries);
+export function visitProblems(found, where, entries, inheritFrom) {
+  const { fresh, stale } = applyBaseline(found, where, entries, inheritFrom);
   return [
     ...fresh.map((p) => `${where}: a11y ${p}`),
     ...stale.map((e) => `${where}: a11y-baseline.txt lists "${e.problem}", which no longer occurs: delete the line`),

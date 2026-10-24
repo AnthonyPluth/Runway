@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { applyBaseline, axeProblems, BASELINE, focusProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
+import { applyBaseline, axeProblems, BASELINE, focusProblems, inheritedWhere, inheritProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
 
 describe("axeProblems", () => {
   it("names each failing element with its rule", () => {
@@ -175,5 +175,52 @@ describe("tapBoxes", () => {
       expect(boxes.map((b) => b.target)).toEqual(['rect "Bar"']);
       expect(tapProblems(boxes, "phone")).toHaveLength(1);
     } finally { rect.mockRestore(); }
+  });
+});
+
+describe("a flow that inherits its page's baseline", () => {
+  const page = "setup @ phone";
+  const flow = "flow account-delete @ phone";
+  const known = "tap-target: button.block is 40×44 px, under 44";
+  const own = "tap-target: a.dialog-link is 40×44 px, under 44";
+  // A baseline line holds the canonical form of a finding (a tap target without its size).
+  const entries = parseBaseline([`${page} | ${canonical(known)} | page`, `${page} | focus: a P shows no focus ring | page`, `${flow} | ${canonical(own)} | flow`].join("\n")).entries;
+  it("tolerates the page's finding at the same width", () => {
+    expect(applyBaseline([known], flow, entries, page)).toMatchObject({ fresh: [], tolerated: 1 });
+    expect(visitProblems([known, own], flow, entries, page)).toEqual([]);
+  });
+  it("fails a finding only the flow has (the dialog's own)", () => {
+    expect(visitProblems([known, "color-contrast: [role=dialog] p (Elements must meet minimum color contrast ratio thresholds)"], flow, entries, page)).toEqual([
+      `${flow}: a11y color-contrast: [role=dialog] p (Elements must meet minimum color contrast ratio thresholds)`,
+      `${flow}: a11y-baseline.txt lists "${canonical(own)}", which no longer occurs: delete the line`,
+    ]);
+  });
+  it("fails a finding baselined for the page at another width", () => {
+    expect(visitProblems([known], "flow account-delete @ desktop", entries, "setup @ desktop")).toEqual([`flow account-delete @ desktop: a11y ${known}`]);
+  });
+  it("does not inherit without being asked", () => {
+    expect(visitProblems([known], flow, entries).slice(0, 1)).toEqual([`${flow}: a11y ${known}`]);
+  });
+  it("does not report the page's lines stale: its own visit checks them", () => {
+    expect(visitProblems([own], flow, entries, page)).toEqual([]);
+  });
+  it("still flags a page line whose finding is gone, in the page's own visit", () => {
+    expect(visitProblems([], page, entries)).toEqual([
+      `${page}: a11y-baseline.txt lists "${canonical(known)}", which no longer occurs: delete the line`,
+      `${page}: a11y-baseline.txt lists "focus: a P shows no focus ring", which no longer occurs: delete the line`,
+    ]);
+  });
+  const PAGES = ["budget", "setup"];
+  const WIDTHS = ["phone", "desktop"];
+  it("takes its page from the flow's own page field, written out", () => {
+    expect(inheritedWhere({ name: "f", page: "setup", inherits_page_baseline: true }, "phone", PAGES, WIDTHS)).toBe("setup @ phone");
+    expect(inheritedWhere({ name: "f", page: "setup" }, "phone", PAGES, WIDTHS)).toBeUndefined();
+  });
+  it("fails loudly when the page can't be determined", () => {
+    expect(inheritProblems({ name: "f", inherits_page_baseline: true }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(inheritProblems({ name: "f", page: "nope", inherits_page_baseline: true }, PAGES, WIDTHS)).toEqual(["inherits_page_baseline: unknown page nope"]);
+    expect(inheritProblems({ name: "f", page: "setup", inherits_page_baseline: true, viewports: ["landscape"] }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(inheritProblems({ name: "f", page: "setup", inherits_page_baseline: "yes" }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(() => inheritedWhere({ name: "f", inherits_page_baseline: true }, "phone", PAGES, WIDTHS)).toThrow(/flow f:/);
   });
 });

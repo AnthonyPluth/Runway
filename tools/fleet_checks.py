@@ -218,6 +218,31 @@ def verify_visits(text: str | None = None, flows: Path = FLOWS) -> set[str]:
     return visits
 
 
+def check_flow_inheritance(text: str | None = None, flows: Path = FLOWS) -> list[str]:
+    """A flow that inherits its page's baseline (`"inherits_page_baseline": true`, frontend/verify/a11y.mjs) names the page it
+    starts on, written out, and runs only at widths pages are visited at: the same rules verify applies when it starts, so
+    a mistake fails here before CI's verify run."""
+    text = VERIFY.read_text() if text is None else text
+    pages, widths = _verify_list(text, "PAGES"), _verify_list(text, "DEFAULT_VIEWPORTS")
+    problems = []
+    for path in sorted(flows.glob("*.json")):
+        flow = json.loads(path.read_text())
+        want = flow.get("inherits_page_baseline")
+        if want is None or want is False:
+            continue
+        where = f"frontend/verify/flows/{path.name}"
+        if want is not True:
+            problems.append(f"{where}: inherits_page_baseline is true or false")
+            continue
+        if not isinstance(flow.get("page"), str):
+            problems.append(f"{where}: inherits_page_baseline needs `page`, written out: the page whose baseline it inherits")
+        elif flow["page"] not in pages:
+            problems.append(f"{where}: inherits_page_baseline: `{flow['page']}` is not a page make verify visits")
+        problems += [f"{where}: inherits_page_baseline: no page is visited at {w}, so there is no baseline to inherit"
+                     for w in flow.get("viewports") or [] if w not in widths]
+    return problems
+
+
 def check_a11y_baseline(text: str, visits: set[str]) -> list[str]:
     problems = []
     seen: set[str] = set()
@@ -374,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     problems = check_migrations(migrations(), MIGRATION_TESTS.read_text())
     problems += check_workflows()
     problems += check_a11y_baseline(A11Y_BASELINE.read_text() if A11Y_BASELINE.exists() else "", verify_visits())
+    problems += check_flow_inheritance()
     problems += check_skills()
     generated, why = generated_cli_reference()
     problems += check_cli_reference(CLI_REFERENCE.read_text() if CLI_REFERENCE.exists() else None, generated, why)

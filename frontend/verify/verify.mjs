@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { auditPage, readBaseline, visitProblems } from "./a11y.mjs";
+import { auditPage, inheritedWhere, inheritProblems, readBaseline, visitProblems } from "./a11y.mjs";
 import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
@@ -211,7 +211,7 @@ export const signedInItem = (item) => (item.flow ? !!item.flow.signed_in : !item
 const CHECKS = ["expect_text", "expect_focus"];
 const ACTS = ["goto", "click", "fill", "press", "tab", "reload", "scroll_to", "authenticator"];
 
-/** A flow is { name, page?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
+/** A flow is { name, page?, inherits_page_baseline?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
 const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string", tab: "object", expect_focus: "string", expect_inert: "string",
   reload: "boolean", authenticator: "string" };
@@ -232,6 +232,7 @@ export function flowProblems(flow) {
   }
   if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
+  out.push(...inheritProblems(flow, PAGES, DEFAULT_VIEWPORTS));
   // A flow's name is how a run picks it (`make verify PAGES=budget-edit`), so it can't also be a page's.
   if (typeof flow?.name === "string" && (PAGES.includes(flow.name) || flow.name === DEVICE_CACHE)) out.push(`the name ${flow.name} is taken (a page, or the device cache check)`);
   for (const v of flow?.viewports ?? []) if (!(v in VIEWPORTS) && !(v in LANDSCAPE)) out.push(`unknown viewport ${v}`);
@@ -530,7 +531,7 @@ async function main() {
   const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
   save();
 
-  async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}) {
+  async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}, inheritFrom = undefined) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     const moves = label === DEVICE_CACHE;
     await prepareContext(ctx, { day, moves });
@@ -584,7 +585,7 @@ async function main() {
     try {
       await work(page, shot);
       // Every page and flow, at the end of its steps (a11y.mjs): axe, tap targets on the phone, a focus ring on each tab stop.
-      if (label !== DEVICE_CACHE) result.problems.push(...visitProblems(await auditPage(page, viewport), where, a11yBaseline.entries));
+      if (label !== DEVICE_CACHE) result.problems.push(...visitProblems(await auditPage(page, viewport), where, a11yBaseline.entries, inheritFrom));
     } catch (e) {
       result.problems.push(`${where}: ${String(e.message).split("\n")[0]}`);
       console.error(`${where}: ${e.message}`);   // the whole message, with Playwright's call log, for finding why
@@ -616,7 +617,7 @@ async function main() {
           page.checks = [];
           for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
           await shot(`flow-${flow.name}`);
-        }, !!flow.signed_in);
+        }, !!flow.signed_in, {}, inheritedWhere(flow, viewport, PAGES, DEFAULT_VIEWPORTS));
       }
     } else {
       await visit(browser, urls, result, DEVICE_CACHE, "desktop", (page) => cacheCheck(page, urls.signedIn), true, { prf: true });
