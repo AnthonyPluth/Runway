@@ -18,7 +18,11 @@ from runway.storage.models import (Account, Asset, Budget, CardStatement, Catego
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from runway.server.sync import _sync_lock
-from tests.shared import TODAY, LedgerCase, ts
+from runway.server import routes
+from tests.shared import TODAY, DbCase, LedgerCase, add_acct, ts
+
+# Deleting what depends on the account with it (as deleting did before you could move it).
+DROP = {"drop_dependents": True}
 
 
 class DeleteAccountTests(LedgerCase):
@@ -65,9 +69,13 @@ class DeleteAccountTests(LedgerCase):
 
     def test_a_card_and_everything_that_belongs_to_it(self):
         impact = api.api_account_removal(self.conn, {}, {}, "cc")
-        self.assertEqual({k: impact[k] for k in ("name", "transactions", "recurring", "rules", "statements", "plaid")},
-                         {"name": "cc", "transactions": 2, "recurring": 1, "rules": 1, "statements": 1, "plaid": True})
-        out = api.api_account_remove(self.conn, {}, {}, "cc")
+        self.assertEqual({k: impact[k] for k in ("name", "transactions", "recurring", "rules", "statements", "forecast_amounts",
+                                                 "bank_bonuses", "plaid")},
+                         {"name": "cc", "transactions": 2, "recurring": 1, "rules": 1, "statements": 1, "forecast_amounts": 2,
+                          "bank_bonuses": 0, "plaid": True})
+        self.assertEqual((api.api_account_removal(self.conn, {}, {}, "chk")["bank_bonuses"],
+                          api.api_account_removal(self.conn, {}, {}, "cc2")["forecast_amounts"]), (1, 1))
+        out = api.api_account_remove(self.conn, {}, DROP, "cc")
         self.assertEqual((out["ok"], out["transactions"]), (True, 2))
         c = self.conn
         self.assertEqual(self.count(Account, Account.id == "cc"), 0)
@@ -90,11 +98,23 @@ class DeleteAccountTests(LedgerCase):
         tomb = c.execute(select(DeletedAccount)).fetchone()
         self.assertEqual((tomb["name"], tomb["kind"], tomb["plaid_account_id"], tomb["inv_ids"]), ("cc", "credit", "p-cc", None))
         with self.assertRaises(ApiError) as e:
-            api.api_account_remove(c, {}, {}, "cc")
+            api.api_account_remove(c, {}, DROP, "cc")
         self.assertEqual(e.exception.status, 404)
 
+    def test_the_payment_amounts_changed_on_its_forecast_by_statement_close(self):
+        # forecast.card_cycles keeps a card's payment edits as cardclose:<card>:<close>: counted and deleted with the card,
+        # another card's (and one whose id merely starts the same) left alone.
+        self.acct("cc22", "credit", 0.0)
+        self.conn.execute(insert(Override), [{"key": "cardclose:cc:2026-09-10", "amount": -300.0},
+                                             {"key": "cardclose:cc2:2026-09-10", "amount": -20.0},
+                                             {"key": "cardclose:cc22:2026-09-10", "amount": -10.0}])
+        self.assertEqual(api.api_account_removal(self.conn, {}, {}, "cc2")["forecast_amounts"], 2)   # card:cc2:… and cardclose:cc2:…
+        api.api_account_remove(self.conn, {}, {}, "cc2")
+        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.startswith("cardclose:"))).scalars()),
+                         ["cardclose:cc22:2026-09-10", "cardclose:cc:2026-09-10"])
+
     def test_its_plaid_account_linked_to_another_account_leaves_it_deleted(self):
-        api.api_account_remove(self.conn, {}, {}, "cc")
+        api.api_account_remove(self.conn, {}, DROP, "cc")
         plaidbank.match(self.conn, "p-cc", "cc2", TODAY)
         tomb = self.conn.execute(select(DeletedAccount.id, DeletedAccount.plaid_account_id)).fetchone()
         self.assertEqual(tuple(tomb), ("cc", None))
@@ -103,13 +123,13 @@ class DeleteAccountTests(LedgerCase):
         self.assertEqual(self.conn.execute(select(PlaidAccount.ignored)).scalar(), 0)
 
     def test_what_pointed_at_it_lets_go(self):
-        api.api_account_remove(self.conn, {}, {}, "chk")
+        api.api_account_remove(self.conn, {}, DROP, "chk")
         c = self.conn
         self.assertIsNone(db.get_setting(c, sk.PRIMARY_ACCOUNT))
         self.assertEqual([r[0] for r in c.execute(select(Account.pay_from).where(Account.kind == "credit"))], [None, None])
         self.assertIsNone(c.execute(select(ChurnBankBonus.account_id)).scalar())
         self.assertEqual([r[0] for r in c.execute(select(Recurring.id))], [41])
-        api.api_account_remove(c, {}, {}, "loan")
+        api.api_account_remove(c, {}, DROP, "loan")
         self.assertIsNone(c.execute(select(Asset.loan_account_id)).scalar())
         self.assertEqual(c.execute(select(Asset.name)).scalar(), "Home")
 
@@ -131,7 +151,7 @@ class DeleteAccountTests(LedgerCase):
         db.set_setting(c, sk.sf_raw("brk"), "{}")
         db.set_setting(c, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps({"brk": 3, "other": 1}))
         self.assertEqual(api.api_account_removal(c, {}, {}, "brk")["holdings"], 2)
-        api.api_account_remove(c, {}, {}, "brk")
+        api.api_account_remove(c, {}, DROP, "brk")
         for model in (Holding, InvSnapshot, HoldingSnapshot, InvTransaction, ManualPosition, ManualContribution, ManualState, CostOverride):
             self.assertEqual([r[0] for r in c.execute(select(model.account_id))], ["w2"], model.__name__)
         self.assertEqual([r[0] for r in c.execute(select(InvAccount.id))], ["w2"])
@@ -164,7 +184,7 @@ class DeleteAccountTests(LedgerCase):
             c.execute(insert(t).values(**row))
         for key in sk.PER_ACCOUNT:
             db.set_setting(c, key("gone"), "1")
-        api.api_account_remove(c, {}, {}, "gone")
+        api.api_account_remove(c, {}, DROP, "gone")
         for t, col in refs:
             self.assertEqual(self.count(t, col == "gone"), 0, f"{t.name}.{col.name}")
         self.assertEqual([k for k in c.execute(select(Setting.key)).scalars() if any(k == key("gone") for key in sk.PER_ACCOUNT)], [])
@@ -172,10 +192,157 @@ class DeleteAccountTests(LedgerCase):
     def test_refused_while_a_sync_runs(self):
         with _sync_lock:
             with self.assertRaises(ApiError) as e:
-                api.api_account_remove(self.conn, {}, {}, "cc")
+                api.api_account_remove(self.conn, {}, DROP, "cc")
         self.assertEqual(e.exception.status, 409)
         self.assertEqual(self.count(Account, Account.id == "cc"), 1)
         self.assertFalse(_sync_lock.locked())
+
+    # Moving what depends on it to another account instead (deleted_accounts.MOVES), or saying it goes with it.
+
+    def test_needs_a_choice_when_anything_depends_on_it(self):
+        impact = api.api_account_removal(self.conn, {}, {}, "cc")
+        self.assertEqual({k: impact[k] for k in ("recurring", "rules", "budgets", "cards_paid", "assets", "churning", "forecast", "choose")},
+                         {"recurring": 1, "rules": 1, "budgets": 2, "cards_paid": 0, "assets": 0, "churning": 1, "forecast": False,
+                          "choose": True})
+        with self.assertRaises(ApiError) as e:
+            api.api_account_remove(self.conn, {}, {}, "cc")
+        self.assertEqual(e.exception.status, 409)
+        self.assertIn("1 recurring item, 1 rule, 2 budgets paid with it and 1 churning card depend on cc", str(e.exception))
+        self.assertIn("move_to", str(e.exception))
+        self.assertEqual(e.exception.extra["depends"]["budgets"], 2)
+        self.assertEqual(self.count(Account, Account.id == "cc"), 1)
+        self.assertEqual(self.count(Recurring, Recurring.account_id == "cc"), 1)
+        self.assertEqual(self.count(DeletedAccount), 0)
+        with self.assertRaises(ApiError) as e:   # "false" is no answer
+            api.api_account_remove(self.conn, {}, {"drop_dependents": False}, "chk")
+        self.assertEqual(e.exception.status, 409)
+        self.assertIn("the forecast's account", str(e.exception))
+
+    def test_nothing_depending_on_it_deletes_as_before(self):
+        impact = api.api_account_removal(self.conn, {}, {}, "cc2")   # (it's paid from chk: that's its own, not one that moves)
+        self.assertFalse(impact["choose"])
+        self.assertEqual([t["id"] for t in impact["targets"]], ["cc"])
+        out = api.api_account_remove(self.conn, {}, {}, "cc2")
+        self.assertTrue(out["ok"])
+        self.assertNotIn("moved", out)
+        self.assertEqual(self.count(Account, Account.id == "cc2"), 0)
+
+    def test_a_reissued_card_moves_to_its_replacement(self):
+        c = self.conn
+        self.acct("cc3", "credit", 0.0)
+        c.execute(insert(Transaction).values(id="chk|9", account_id="chk", posted="2026-09-05", amount=-15.0, description="NETFLIX",
+                                             payee="Netflix", recurring_id=41))
+        out = api.api_account_remove(c, {}, {"move_to": "cc3"}, "cc")
+        self.assertEqual(out["moved_to"], {"id": "cc3", "name": "cc3"})
+        self.assertEqual(out["moved"], {"recurring": 1, "rules": 1, "budgets": 2, "cards_paid": 0, "assets": 0, "churning": 1,
+                                        "forecast": False})
+        self.assertEqual(self.count(Account, Account.id == "cc"), 0)
+        rec = c.execute(select(Recurring.id, Recurring.account_id, Recurring.name).where(Recurring.id == 41)).fetchone()
+        self.assertEqual(tuple(rec), (41, "cc3", "Netflix"))
+        # What's by the item comes with it: its edits, dismissals and payments linked on other accounts.
+        self.assertEqual(sorted(c.execute(select(Override.key)).scalars()), ["card:cc2:2026-10-05", "rec:41:2026-10-05", "rec:42:2026-10-01"])
+        self.assertEqual(sorted(c.execute(select(RecurringDismissed.key)).scalars()), ["rec:41:2026-08-05", "rec:42:2026-08-01"])
+        self.assertEqual(c.execute(select(Transaction.recurring_id).where(Transaction.id == "chk|9")).scalar(), 41)
+        self.assertEqual(self.count(Rule, Rule.account_id == "cc3"), 1)
+        self.assertEqual(self.count(Category, Category.pay_with == "cc3"), 2)
+        self.assertEqual(c.execute(select(ChurnCard.account_id)).scalar(), "cc3")
+        # What belonged to the card itself still goes: its transactions, statements and the amounts on its forecast.
+        self.assertEqual(self.count(Transaction, Transaction.account_id == "cc"), 0)
+        self.assertEqual(self.count(CardStatement), 0)
+
+    def test_a_checking_account_moves_to_another(self):
+        c = self.conn
+        self.acct("sav", "savings", 100.0)
+        api.api_account_remove(c, {}, {"move_to": "sav"}, "chk")
+        self.assertEqual(db.get_setting(c, sk.PRIMARY_ACCOUNT), "sav")
+        self.assertEqual(sorted(c.execute(select(Account.pay_from).where(Account.kind == "credit")).scalars()), ["sav", "sav"])
+        self.assertEqual(c.execute(select(Recurring.account_id).where(Recurring.id == 42)).scalar(), "sav")
+        self.assertIsNone(c.execute(select(ChurnBankBonus.account_id)).scalar())   # a bank bonus stays behind
+
+    def test_a_loan_moves_to_another(self):
+        self.acct("loan2", "loan", -19000.0)
+        out = api.api_account_remove(self.conn, {}, {"move_to": "loan2"}, "loan")
+        self.assertEqual(out["moved"]["assets"], 1)
+        self.assertEqual(self.conn.execute(select(Asset.loan_account_id)).scalar(), "loan2")
+
+    def test_where_it_can_move_to(self):
+        self.acct("sav", "savings", 100.0)
+        self.acct("old", "checking", 1.0, hidden=1)
+        self.acct("cc3", "credit", 0.0, display_name="Aa card")
+        self.assertEqual(api.api_account_removal(self.conn, {}, {}, "chk")["targets"], [{"id": "sav", "name": "sav", "kind": "savings"}])
+        self.assertEqual([t["id"] for t in api.api_account_removal(self.conn, {}, {}, "cc")["targets"]], ["cc3", "cc2"])
+
+    def test_a_target_it_cant_move_to_changes_nothing(self):
+        c = self.conn
+        self.acct("hid", "credit", 0.0, hidden=1)
+        cases = [({"move_to": "nope"}, "Pick one of your accounts to move them to"),
+                 ({"move_to": "cc"}, "Pick another account to move them to, not the one you're deleting"),
+                 ({"move_to": "hid"}, "That account is hidden: show it again first, or pick another"),
+                 ({"move_to": "chk"}, "Pick another credit card to move them to"),
+                 ({"move_to": "cc2", "drop_dependents": True}, "Move them to another account, or delete them with this one: not both"),
+                 ({"move_to": 5}, 'Send "move_to" as text')]
+        for body, message in cases:
+            with self.subTest(body=body), self.assertRaises(ApiError) as e:
+                api.api_account_remove(c, {}, body, "cc")
+            self.assertEqual((e.exception.status, str(e.exception)), (400, message))
+        with self.assertRaises(ApiError) as e:
+            api.api_account_remove(c, {}, {"move_to": "cc"}, "chk")
+        self.assertEqual(str(e.exception), "Pick a checking or savings account to move them to")
+        self.assertEqual(self.count(Account, Account.id == "cc"), 1)
+        self.assertEqual(self.count(Recurring, Recurring.account_id == "cc"), 1)
+        self.assertEqual(self.count(Category, Category.pay_with == "cc"), 2)
+        self.assertEqual(self.count(DeletedAccount), 0)
+        self.assertFalse(_sync_lock.locked())
+
+    def test_restoring_it_leaves_what_moved_where_it_went(self):
+        c = self.conn
+        self.acct("cc3", "credit", 0.0)
+        api.api_account_remove(c, {}, {"move_to": "cc3"}, "cc")
+        api.api_account_restore(c, {}, {}, "cc")
+        self.acct("cc", "credit", -900.0)   # the next sync brings it back
+        self.assertEqual(c.execute(select(Recurring.account_id).where(Recurring.id == 41)).scalar(), "cc3")
+        self.assertEqual(self.count(Category, Category.pay_with == "cc"), 0)
+        self.assertEqual(self.count(Rule, Rule.account_id == "cc"), 0)
+        self.assertEqual(c.execute(select(ChurnCard.account_id)).scalar(), "cc3")
+        self.assertFalse(api.api_account_removal(c, {}, {}, "cc")["choose"])
+
+
+class MoveIsOneTransactionTests(DbCase):
+    """Through the server's own dispatch (a session committed on success, rolled back on failure): a delete that fails
+    after the move has begun leaves everything where it was."""
+
+    def setUp(self):
+        super().setUp()
+        with db.session() as c:
+            for aid in ("cc", "cc3"):
+                add_acct(c, aid, "credit", balance=0.0)
+            c.execute(insert(Recurring).values(id=41, name="Netflix", account_id="cc", amount=-15.0, frequency="monthly",
+                                               anchor_date="2026-09-05"))
+            c.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+
+    def where(self):
+        with db.session() as c:
+            return (c.execute(select(Recurring.account_id)).scalar(), c.execute(select(Category.pay_with).where(Category.name == "Groceries")).scalar(),
+                    sorted(c.execute(select(Account.id)).scalars()))
+
+    def remove(self, body):
+        return routes.dispatch(routes.match("POST", "/api/accounts/cc/remove"), {}, body)
+
+    def test_a_failure_after_the_move_rolls_it_back(self):
+        with mock.patch.object(deleted_accounts.db, "upsert", side_effect=RuntimeError("boom")), \
+                mock.patch("runway.server.routes.server_error", side_effect=lambda e, *_a: ApiError("failed", 500)):
+            with self.assertRaises(ApiError) as e:
+                self.remove({"move_to": "cc3"})
+        self.assertEqual(e.exception.status, 500)
+        self.assertEqual(self.where(), ("cc", "cc", ["cc", "cc3"]))
+
+    def test_refused_without_a_choice_and_moved_with_one(self):
+        with self.assertRaises(ApiError) as e:
+            self.remove({})
+        self.assertEqual(e.exception.status, 409)
+        self.assertEqual(self.where(), ("cc", "cc", ["cc", "cc3"]))
+        self.remove({"move_to": "cc3"})
+        self.assertEqual(self.where(), ("cc3", "cc3", ["cc3"]))
 
 
 class StaysDeletedTests(LedgerCase):

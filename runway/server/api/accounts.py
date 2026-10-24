@@ -125,15 +125,25 @@ def api_account_removal(conn, _q, _b, acct_id):
     return out
 
 
-def api_account_remove(conn, _q, _b, acct_id):
-    """Delete an account and everything that belongs to it; syncs leave it out until it's restored."""
+def api_account_remove(conn, _q, body, acct_id):
+    """Delete an account and everything that belongs to it; syncs leave it out until it's restored. What depends on it
+    (its recurring items, budgets paid with it, ...: deleted_accounts.MOVES) moves to `move_to`, another of your accounts
+    of its kind, or goes with it when `drop_dependents` is true; with any of it and neither, a 409 says what depends on
+    it (`depends`). The move and the delete are one transaction: a refusal changes nothing."""
+    body = body if isinstance(body, dict) else {}
+    move_to = text(body.get("move_to"), "move_to").strip() or None
+    drop = validate.on(body.get("drop_dependents"))
     _no_sync_running()
     try:
         try:
-            out = deleted_accounts.remove(conn, acct_id)
+            out = deleted_accounts.remove(conn, acct_id, move_to=move_to, drop=drop)
         except LookupError as e:
             raise ApiError(str(e), 404) from e
-        conn.commit()   # before a sync can start and read the accounts to leave out
+        except deleted_accounts.NeedsChoice as e:
+            raise ApiError(str(e), 409, {"depends": e.depends}) from e
+        except ValueError as e:
+            raise ApiError(str(e)) from e
+        conn.commit()   # before a sync can start and read the accounts to leave out (the move with it, all at once)
     finally:
         _release()
     return out

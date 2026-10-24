@@ -34,6 +34,7 @@ Every account from your banks, with its source, balance and last sync.
 - **Loans:** the interest rate and monthly payment, from the lender through Plaid or entered by you, for the loan's paydown on Net worth and in the retirement plan.
 - **Owner:** whose account it is, a label for Churning and the retirement plan.
 - **Delete** an account, its transactions, statements and the rules that only apply to it. It stays deleted through syncs; **Restore** under the list brings it back with the next sync.
+  - When something depends on the account (its recurring items, the rules that only apply to it, budgets paid with it, cards paid from it, the home or car it's the loan for, the churning card it is, or the forecast's account), the confirmation lists it with counts and **Delete** waits for you to say where it goes: pick an account in **Move these to…** (another card for a card, typically the one that replaces a reissued card; a checking or savings account for either; another loan for a loan), or tick **Delete them with the account instead**. Moved recurring items keep their edits, skips and the payments linked to them on other accounts; their payments now match on the new account. A bank bonus linked to the account, the account's own payment settings and the amounts you changed on its forecast don't move: they're listed with their counts too, and the bonus stays without an account. The move and the delete happen together, or not at all, and restoring the account later doesn't take back what moved.
 
 ## Categories and rules
 

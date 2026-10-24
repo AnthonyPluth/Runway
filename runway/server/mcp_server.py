@@ -543,8 +543,14 @@ ANY_TOOLS: list[dict[str, Any]] = [
               {"account_id": _ACCOUNT, "statement_date": _DAY}, ["account_id", "statement_date"], ids=("account_id", "statement_date"),
               text_id=True),
     _endpoint("remove_account", "Delete an account and everything that belongs to it (its transactions, balances, statements); "
-              "syncs leave it out until it's restored. GET /api/accounts/{id}/removal says what it takes.", "POST",
-              "accounts/{id}/remove", {"account_id": _ACCOUNT}, ["account_id"], ids="account_id", text_id=True),
+              "syncs leave it out until it's restored. GET /api/accounts/{id}/removal says what it takes, and what depends on "
+              "it (its recurring items, rules, budgets paid with it, cards paid from it, the home or car it's the loan for, "
+              "its churning card, the forecast's account). When anything does (`choose`), a choice is required, or it's refused: "
+              "move_to (one of `targets`) moves all of it to that account, or drop_dependents true deletes it with the account. "
+              "The choice is the person's: ask them which, and get their yes, before sending either.", "POST", "accounts/{id}/remove",
+              {"account_id": _ACCOUNT, "move_to": _text("The account to move what depends on it to (an id from the removal's targets)."),
+               "drop_dependents": {"type": "boolean", "description": "Delete what depends on it with the account instead of moving it."}},
+              ["account_id"], ids="account_id", extra=("move_to", "drop_dependents"), text_id=True),
     _endpoint("restore_account", "Bring back a deleted account (from GET /api/accounts/deleted).", "POST", "accounts/{id}/restore",
               {"account_id": _ACCOUNT}, ["account_id"], ids="account_id", text_id=True),
     # net worth
