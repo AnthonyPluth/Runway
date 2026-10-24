@@ -184,7 +184,7 @@
       </div>
       {#if parts.length}
         <div class="flex flex-col gap-2">
-          {#each parts as p, i (i)}
+          {#each parts as p, i (p)}
             <div class="flex items-center gap-2">
               <CategorySelect bind:value={p.category} label={`Part ${i + 1} category`} class="min-w-0 flex-1" onchange={() => (touched = true)} />
               <input class={`${inputCls} w-24 text-right aria-invalid:border-destructive`} type="number" min="0" max="100" step="0.01" aria-label={`Part ${i + 1} percent`}
