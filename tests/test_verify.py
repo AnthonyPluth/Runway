@@ -1,6 +1,8 @@
 import contextlib
+import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -23,12 +25,127 @@ class ServerCommandTests(unittest.TestCase):
         self.assertEqual(command[command.index("--port") + 1], "8123")
 
 
+# Credentials a developer's shell might hold: Runway's own settings, and any other service's key or token, whatever it's called.
+CREDENTIALS = {"DATABASE_URL": "postgresql://real", "RUNWAY_DATA": "/real", "OIDC_ISSUER": "https://idp", "RUNWAY_SECRET_KEY": "real",
+               "SIMPLEFIN_TOKEN": "t", "PLAID_SECRET": "p", "RUNWAY_PUBLIC_URL": "https://r", "RUNWAY_ALLOW_NO_AUTH": "1",
+               "OPENROUTER_API_KEY": "sk-or-real", "GOOGLE_API_KEY": "g", "GOOGLE_APPLICATION_CREDENTIALS": "/home/me/key.json",
+               "GITHUB_TOKEN": "ghp_real", "GH_TOKEN": "gho_real", "AWS_ACCESS_KEY_ID": "AKIA", "AWS_SECRET_ACCESS_KEY": "s",
+               "AWS_SESSION_TOKEN": "s", "ANTHROPIC_API_KEY": "sk-ant-real", "OPENAI_API_KEY": "sk-real", "NPM_TOKEN": "n",
+               "SOME_NEW_SERVICE_TOKEN": "x", "FINNHUB_KEY": "f", "SENTRY_DSN": "https://k@sentry", "HTTPS_PROXY": "http://user:pw@proxy:3128",
+               "RUNWAY_HOST": "0.0.0.0", "RUNWAY_ALLOWED_HOSTS": "*", "SSH_AUTH_SOCK": "/tmp/ssh-agent"}
+NEEDED = {"PATH": "/usr/bin:/bin", "HOME": "/home/me", "TZ": "America/New_York", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+          "TMPDIR": "/tmp", "VIRTUAL_ENV": "/venv", "PYTHONPATH": "/x", "PLAYWRIGHT_BROWSERS_PATH": "/pw", "XDG_CACHE_HOME": "/c",
+          "FONTCONFIG_PATH": "/f", "SSL_CERT_FILE": "/ca.pem", "NODE_EXTRA_CA_CERTS": "/ca.pem"}
+DEAD_PROXY = {"HTTP_PROXY": verify.NO_OUTSIDE, "HTTPS_PROXY": verify.NO_OUTSIDE, "http_proxy": verify.NO_OUTSIDE,
+              "https_proxy": verify.NO_OUTSIDE, "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+
+
 class CleanEnvTests(unittest.TestCase):
-    def test_the_demo_server_never_sees_real_data_settings(self):
-        base = {"PATH": "/bin", "DATABASE_URL": "postgresql://real", "RUNWAY_DATA": "/real", "OIDC_ISSUER": "https://idp",
-                "RUNWAY_SECRET_KEY": "real", "SIMPLEFIN_TOKEN": "t", "RUNWAY_PUBLIC_URL": "https://r"}
-        env = verify.clean_env("/tmp/demo", base)
-        self.assertEqual(env, {"PATH": "/bin", "RUNWAY_DATA": "/tmp/demo", "RUNWAY_NO_SYNC": "1", "PYTHONUNBUFFERED": "1"})
+    def test_the_demo_processes_get_an_allowlist_of_the_callers_environment_and_no_credential(self):
+        env = verify.clean_env("/tmp/demo", {**NEEDED, **CREDENTIALS})
+        self.assertEqual(env, {**NEEDED, **DEAD_PROXY, "RUNWAY_DATA": "/tmp/demo", "RUNWAY_NO_SYNC": "1", "PYTHONUNBUFFERED": "1"})
+
+    def test_from_the_process_environment_too_and_the_server_and_the_browser_run_get_the_same(self):
+        with mock.patch.dict("os.environ", {**NEEDED, **CREDENTIALS}, clear=True):
+            server = verify.server_env("/tmp/demo", 8123, "/lib/libfaketime.so.1", signed_in=False)
+            kept = verify.kept_env()
+        for env in (server, kept):
+            self.assertEqual(sorted(set(CREDENTIALS) & set(env) - set(DEAD_PROXY) - {"RUNWAY_DATA"}), [])
+            self.assertEqual({k: env[k] for k in NEEDED if k != "PYTHONPATH"}, {k: v for k, v in NEEDED.items() if k != "PYTHONPATH"})
+        self.assertEqual(server["PYTHONPATH"], f"{verify.SITE_DIR}{os.pathsep}/x")   # the frozen clock's verify_site/ first
+        self.assertEqual(kept, {**NEEDED, **DEAD_PROXY})
+        self.assertEqual(server["RUNWAY_DATA"], "/tmp/demo")
+
+    def test_env_prints_what_tools_control_starts_its_session_with(self):
+        done = subprocess.run([sys.executable, "-m", "runway.verify", "env"], cwd=verify.ROOT, capture_output=True, text=True,
+                              timeout=60, env={**NEEDED, "PATH": os.environ["PATH"], **CREDENTIALS})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        printed = json.loads(done.stdout)
+        self.assertEqual(printed, {**NEEDED, "PATH": os.environ["PATH"], **DEAD_PROXY})
+
+    def test_a_seeded_demo_never_sees_the_callers_credentials(self):
+        lib = verify.find_libfaketime()
+        if not lib:
+            self.skipTest("libfaketime isn't installed")
+        probe = "import json, os; print(json.dumps(dict(os.environ)))"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("os.environ", CREDENTIALS):
+            done = subprocess.run([sys.executable, "-c", probe], env=verify.frozen_env(verify.clean_env(tmp), lib),
+                                  capture_output=True, text=True, timeout=60)
+        seen = json.loads(done.stdout)
+        self.assertEqual(sorted(k for k in CREDENTIALS if k in seen and seen[k] == CREDENTIALS[k]), [])
+
+
+def guarded_prefixes() -> list[str]:
+    """frontend/verify/control.mjs's GUARDED_PREFIXES: the paths tools/control's write guard covers."""
+    with open(os.path.join(verify.ROOT, "frontend", "verify", "control.mjs"), encoding="utf-8") as f:
+        source = f.read()
+    found = re.search(r"export const GUARDED_PREFIXES = \[([^\]]*)\]", source)
+    assert found, "GUARDED_PREFIXES isn't in control.mjs"
+    return re.findall(r'"([^"]+)"', found.group(1))
+
+
+def is_guarded(path: str, prefixes: list[str]) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
+
+
+class ControlWriteGuardTests(unittest.TestCase):
+    """tools/control's read-only commands block a request other than GET to the paths in GUARDED_PREFIXES: every path the
+    server takes one on must be among them, or a new one would escape the guard without anyone noticing."""
+
+    @classmethod
+    def setUpClass(cls):
+        from runway import server
+        from tests.shared import own_database
+        own_database(cls)
+        for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER"):
+            os.environ.pop(k, None)
+        class Quiet(server.Handler):
+            def log_message(self, *a):
+                pass
+        cls.httpd = server.Server(("127.0.0.1", 0), Quiet)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def test_the_guard_covers_the_api_sign_in_oauth_and_mcp(self):
+        self.assertEqual(guarded_prefixes(), ["/api", "/auth", "/oauth", "/mcp", "/.well-known"])
+
+    def test_every_route_that_takes_a_change_is_under_a_guarded_prefix(self):
+        from runway.server import oauth_http, routes
+        from runway.server.api import retail
+        prefixes = guarded_prefixes()
+        writes = [(m, p) for m, p, *_ in routes.ROUTES if m != "GET"]
+        self.assertTrue(writes)
+        writes += [("POST", p) for p in retail.EXT_ROUTES]
+        writes += [("POST", p) for p in sorted(oauth_http.OAUTH_PUBLIC)]
+        writes += [("POST", "/mcp"), ("POST", "/auth/logout"), ("POST", "/oauth/authorize")]
+        self.assertEqual([f"{m} {p}" for m, p in writes if not is_guarded(p, prefixes)], [])
+
+    def test_anywhere_else_the_server_answers_a_change_with_405(self):
+        # Every path the server's code names (and a few it doesn't): outside the guarded prefixes, a POST or DELETE is refused.
+        prefixes = guarded_prefixes()
+        server_dir = os.path.join(verify.ROOT, "runway", "server")
+        named = {"/", "/index.html", "/sw.js", "/assets/x.js", "/plaid/oauth", "/carta/callback", "/healthz", "/next/budget", "/apix", "/mcpx"}
+        for root, _, files in os.walk(server_dir):
+            for name in files:
+                if name.endswith(".py"):
+                    with open(os.path.join(root, name), encoding="utf-8") as f:
+                        named |= set(re.findall(r'"(/[A-Za-z.][\w./-]*)"', f.read()))
+        outside = sorted(p for p in named if not is_guarded(p, prefixes))
+        self.assertIn("/carta/callback", outside)
+        for method in ("POST", "DELETE"):
+            for path in outside:
+                conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=20)
+                try:
+                    conn.request(method, path, body=b"{}", headers={"X-Runway": "1", "Content-Type": "application/json",
+                                                                     "Host": f"127.0.0.1:{self.httpd.server_port}"})
+                    status = conn.getresponse().status
+                finally:
+                    conn.close()
+                self.assertEqual(status, 405, f"{method} {path}")
 
 
 class RunPyFileArgumentTests(unittest.TestCase):

@@ -79,6 +79,51 @@ describe("targets, routes and what's reported", () => {
     }
   });
 
+  it("lets the browser reach only its own server, and data it holds itself", () => {
+    const base = "http://127.0.0.1:4000";
+    for (const ok of [`${base}/`, `${base}/api/accounts`, "data:image/png;base64,AAAA", "blob:http://127.0.0.1:4000/x", "about:blank"]) expect(c.allowedRequest(ok, base)).toBe(true);
+    for (const no of ["https://example.com/", "http://127.0.0.1:8000/api/accounts", "http://localhost:4000/", "http://[::1]:4000/", "ws://127.0.0.1:4000/", "file:///etc/passwd", "not a url"]) {
+      expect(c.allowedRequest(no, base)).toBe(false);
+    }
+    expect(c.UNREACHABLE_ARGS.join(" ")).toMatch(/--proxy-server=http:\/\/127\.0\.0\.1:\d+ .*--host-resolver-rules=MAP \* ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127\.0\.0\.1/);
+  });
+
+  it("guards the server's paths that take a change, and lets only the acting commands write", () => {
+    for (const p of ["/api", "/api/transactions/3", "/auth/logout", "/oauth/token", "/mcp", "/.well-known/oauth-authorization-server"]) expect(c.isGuardedPath(p)).toBe(true);
+    for (const p of ["/", "/sw.js", "/assets/index.js", "/apix", "/mcpx", "/healthz"]) expect(c.isGuardedPath(p)).toBe(false);
+    for (const command of ["goto", "viewport", "click", "type", "press", "scroll", "flow", "reset"]) expect(c.actingRequest({ command })).toBe(true);
+    for (const command of ["info", "snapshot", "screenshot", "wait-settle", "console", "network", "eval"]) expect(c.actingRequest({ command, options: {} })).toBe(false);
+    expect(c.actingRequest({ command: "eval", options: { write: true } })).toBe(true);
+  });
+
+  it("names a read-only eval's code, so the page can tell what it left behind", () => {
+    expect(c.readOnlyExpression("() => 1")).toBe(`(() => 1)()\n//# sourceURL=${c.READ_ONLY_EVAL}.js`);
+  });
+
+  it("refuses in the page what a read-only eval's code sends, even later, and keeps its timers for the session to stop", async () => {
+    c.pageGuard("test-read-only-eval");
+    const g = globalThis;
+    // Code "the eval defined": its functions carry the eval's script name in their stack, as in the page.
+    const evalDefined = new Function("return { now: async () => { try { await fetch('http://127.0.0.1:9/api/x', { method: 'POST' }); return 'sent'; } catch (e) { return e.message; } }, later: () => setTimeout(() => fetch('http://127.0.0.1:9/api/y', { method: 'DELETE' }).catch(() => 'refused'), 5) };\n//# sourceURL=test-read-only-eval.js")();
+    expect(await evalDefined.now()).toBe("not_read_only: a read-only eval tried POST http://127.0.0.1:9/api/x");
+    expect(g.__controlGuard.take()).toEqual(["POST http://127.0.0.1:9/api/x"]);
+    evalDefined.later();
+    expect(g.__controlGuard.pending()).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));   // (this timer isn't the eval's: not kept)
+    expect(g.__controlGuard.pending()).toBe(0);   // the eval's fired, so it's no longer pending
+    expect(g.__controlGuard.take()).toEqual(["DELETE http://127.0.0.1:9/api/y"]);   // the callback ran, and its write was refused
+    evalDefined.later();
+    expect(g.__controlGuard.stop()).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(g.__controlGuard.take()).toEqual([]);   // stopped: it never ran
+  });
+
+  it("starts its session with runway/verify.py's allowlist of the environment, never the caller's own", () => {
+    const run = (python, args) => ({ status: 0, stdout: JSON.stringify({ PATH: "/bin", HOME: "/h" }), args });
+    expect(c.sessionEnv("/py", run)).toEqual({ PATH: "/bin", HOME: "/h" });
+    expect(() => c.sessionEnv("/py", () => ({ status: 1, stdout: "", stderr: "No module named runway\n" }))).toThrow(/runway.verify env failed: No module named runway/);
+  });
+
   it("reports paths without query strings or ids, and console text without amounts or tokens", () => {
     const base = "http://127.0.0.1:4000";
     expect(c.scrubUrl(`${base}/api/transactions/123?q=coffee&account=7`, base)).toBe("/api/transactions/:id");

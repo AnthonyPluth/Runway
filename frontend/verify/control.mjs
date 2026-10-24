@@ -96,7 +96,8 @@ export const COMMANDS = {
     details: ["Without a seed option it seeds what make verify does (ai-buttons, investments, receipt, subcategories), so pages look as in screenshots/.",
       "The server and the seed run under libfaketime at make verify's frozen day, and the browser's clock is fixed at noon that day.",
       "One session per checkout, on ports and data of its own: it never takes make verify's machine lock, and a running make verify is left alone.",
-      "Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first."],
+      "Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first.",
+      "Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them."],
     examples: ["start", "start --viewport desktop", "start --plain --signed-in"],
   },
   stop: {
@@ -189,7 +190,11 @@ export const COMMANDS = {
     args: [{ name: "js", required: true, variadic: true }],
     options: { write: { type: "boolean", help: "allow it to change the app's data (requests other than GET)" } },
     details: ["An expression (`document.title`) or a function (`() => [...document.querySelectorAll('h2')].map(h => h.textContent)`); the result as JSON.",
-      "Read-only by default: a request it makes other than GET or HEAD is blocked, and a change it makes to the page is reported (domChanges).",
+      "Read-only by default: a request it makes to the app's data (other than GET or HEAD) is refused before it's sent, and the eval fails with not_read_only. It waits half a second, and for the network to go quiet, before it answers, so a change set off on a short timer fails it too. A change to the page is reported (domChanges).",
+      "What it leaves behind can't change the data either, even during a later command that acts: code it defines (a timer's callback, a listener, a promise's then) can't send a request other than GET or HEAD or open a WebSocket for as long as the page lives (refused in the page, and reported by the command it happens in or the next); the timers it leaves running are reported (timersLeft) and stopped before the next command that acts (goto, viewport, click, type, press, scroll, flow, reset, eval --write).",
+      "Not covered: what it sets off in the app's own code that runs later on its own (a click it makes whose handler saves after an await, the app's debounced save), which can write during a later command that acts, or in the second after it, when the network's write guard is off. goto --reload clears what an expression left behind.",
+      "With --write it may change the demo data while it runs; a write it leaves for later is blocked if it comes while no command acts.",
+      "Like every command it reaches only the session's own server: a request anywhere else is blocked before it's sent.",
       "Prefer snapshot, click and type: they act as a person would."],
     examples: ["eval document.title", "eval \"() => getComputedStyle(document.body).backgroundColor\""],
   },
@@ -385,12 +390,44 @@ export function parseTarget(words) {
   return { kind: "text", text: raw };
 }
 
+// --- What the session's browser may reach ---------------------------------------------------------------------------
+//
+// Only its own demo server, on the loopback address. Three layers, so a request elsewhere never leaves: the browser is
+// launched behind a proxy that isn't there and with every host name but the loopback ones resolving to nothing
+// (UNREACHABLE_ARGS: nothing reaches the internet, whatever the page or Playwright does); a request to anything but the
+// session's server (another loopback port included: your own Runway, say) is aborted before it's sent (allowedRequest,
+// the daemon's route); and a page that navigates away anyway is brought back.
+
+/** Whether `url` (a URL) is on the session's demo server, `base`. */
+export const sameServer = (url, base) => url.origin === new URL(base).origin;
+
+/** Whether the session's browser may send a request to `url` (a string): its own server, or data the page holds itself. */
+export function allowedRequest(url, base) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  return ["data:", "blob:", "about:"].includes(u.protocol) || sameServer(u, base);
+}
+
+/** The session browser's launch arguments on top of make verify's: a proxy that isn't there (the loopback addresses,
+ *  which Chromium never sends through a proxy, are reached directly) and no host name but localhost resolving. */
+export const UNREACHABLE_ARGS = ["--proxy-server=http://127.0.0.1:9", "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1"];
+
+/** The demo server's paths that take a request other than GET (every other path answers one with 405): the API, the
+ *  sign-in pages, OAuth (and its metadata) and MCP. tests/test_verify.py checks every such route the server has is here. */
+export const GUARDED_PREFIXES = ["/api", "/auth", "/oauth", "/mcp", "/.well-known"];
+export const isGuardedPath = (pathname) => GUARDED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+/** The commands that act on the app as a person would, so may change its data; eval does only with --write. Whenever
+ *  none of them is running, a request other than GET or HEAD to a guarded path is blocked. */
+export const ACTING_COMMANDS = ["goto", "viewport", "click", "type", "press", "scroll", "flow", "reset"];
+export const actingRequest = (request) => ACTING_COMMANDS.includes(request.command) || (request.command === "eval" && !!request.options?.write);
+
 /** A route (`budget`, `#setup/categories`, `/#transactions`) as a URL on the session's server; a full URL only on it. */
 export function routeUrl(base, route) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(route)) {
     let url;
     try { url = new URL(route); } catch { throw new ControlError("bad_route", `${route} isn't a URL`, "give a route like budget or #setup/categories"); }
-    if (url.origin !== new URL(base).origin) throw new ControlError("refused", `${url.origin} isn't this session's demo server`, `the session drives only ${base}: give a route like budget or #setup/categories`);
+    if (!sameServer(url, base)) throw new ControlError("refused", `${url.origin} isn't this session's demo server`, `the session drives only ${base}: give a route like budget or #setup/categories`);
     return url.href;
   }
   if (route.startsWith("/")) return `${base}${route}`;
@@ -404,7 +441,7 @@ export function scrubUrl(url, base) {
   try { u = new URL(url); } catch { return "(not a URL)"; }
   if (u.protocol === "data:" || u.protocol === "blob:") return null;
   const path = u.pathname.split("/").map((s) => (/^\d+$|^[0-9a-f]{12,}$|^[0-9a-f-]{36}$/i.test(s) ? ":id" : s)).join("/");
-  return u.origin === new URL(base).origin ? path : `${u.host}${path}`;
+  return sameServer(u, base) ? path : `${u.host}${path}`;
 }
 
 /** A console message as reported: query strings, amounts, email addresses and long tokens taken out. */
@@ -420,6 +457,77 @@ export function scrubText(text) {
  *  (its result awaited), anything else is evaluated as it is. */
 export function jsExpression(code) {
   return /^\s*(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>|^\s*(async\s+)?function\b/.test(code) ? `(${code})()` : code;
+}
+
+/** The script name a read-only eval's code runs under (its `//# sourceURL`): what the page's guard (pageGuard) knows it by. */
+export const READ_ONLY_EVAL = "runway-control-read-only-eval";
+
+/** A read-only eval's code as the page evaluates it: jsExpression, named READ_ONLY_EVAL, so every function it defines (a
+ *  timer's callback, a listener, a promise's then) carries that name in its stack for as long as the page lives. */
+export const readOnlyExpression = (code) => `${jsExpression(code)}\n//# sourceURL=${READ_ONLY_EVAL}.js`;
+
+/**
+ * Runs in every page of the session (an init script): what a read-only eval leaves behind can't change the data, even
+ * while a later command that acts has the network's write guard off. A call is the eval's when its stack has the eval's
+ * script name (`marker`: code the expression defined) or it runs inside a callback the eval scheduled. Such a call can't
+ * send a request other than GET or HEAD (fetch, XMLHttpRequest, sendBeacon, a form's submit) or open a WebSocket: it's
+ * refused in the page and recorded for the session to report. The timers it sets (setTimeout, setInterval,
+ * requestAnimationFrame, requestIdleCallback) are recorded, for the session to stop before the next command that acts.
+ * The app's own calls are left alone. Self-contained: it's serialized into the page.
+ */
+export function pageGuard(marker) {
+  const g = globalThis;
+  if (g.__controlGuard) return;
+  const blocked = [], pending = new Map();
+  let inside = 0;
+  const stack = () => { const limit = Error.stackTraceLimit; Error.stackTraceLimit = Infinity; try { return String(new Error().stack); } finally { Error.stackTraceLimit = limit; } };
+  const theEvals = () => inside > 0 || stack().includes(marker);
+  const within = (fn) => function (...a) { inside++; try { return fn.apply(this, a); } finally { inside--; } };
+  const urlOf = (u) => { try { return new URL(String(u?.url ?? u), g.location.href).href; } catch { return String(u); } };
+  const refuse = (what) => { blocked.push(what); return new g.DOMException(`not_read_only: a read-only eval tried ${what}`, "SecurityError"); };
+  const reads = (method) => ["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
+  for (const [set, clear, once] of [["setTimeout", "clearTimeout", true], ["setInterval", "clearInterval", false],
+    ["requestAnimationFrame", "cancelAnimationFrame", true], ["requestIdleCallback", "cancelIdleCallback", true]]) {
+    const realSet = g[set], realClear = g[clear];
+    if (typeof realSet !== "function") continue;
+    g[set] = function (fn, ...rest) {
+      if (typeof fn !== "function" || !theEvals()) return realSet.call(g, fn, ...rest);
+      const key = {};
+      const id = realSet.call(g, function (...a) { if (once) pending.delete(key); return within(fn).apply(this, a); }, ...rest);
+      pending.set(key, () => realClear.call(g, id));
+      return id;
+    };
+  }
+  const realFetch = g.fetch;
+  if (realFetch) g.fetch = function (input, init) {
+    const method = init?.method ?? (input instanceof g.Request ? input.method : "GET");
+    if (!reads(method) && theEvals()) return Promise.reject(refuse(`${String(method).toUpperCase()} ${urlOf(input)}`));
+    return realFetch.apply(this, arguments);
+  };
+  const xhr = g.XMLHttpRequest?.prototype, opened = new WeakMap();
+  if (xhr) {
+    const realOpen = xhr.open, realSend = xhr.send;
+    xhr.open = function (method, url) { opened.set(this, [method, url]); return realOpen.apply(this, arguments); };
+    xhr.send = function () {
+      const [method, url] = opened.get(this) ?? ["GET", ""];
+      if (!reads(method) && theEvals()) throw refuse(`${String(method).toUpperCase()} ${urlOf(url)}`);
+      return realSend.apply(this, arguments);
+    };
+  }
+  const nav = g.navigator;
+  if (nav?.sendBeacon) { const real = nav.sendBeacon.bind(nav); nav.sendBeacon = (url, data) => (theEvals() ? (refuse(`POST ${urlOf(url)}`), false) : real(url, data)); }
+  const form = g.HTMLFormElement?.prototype;
+  for (const name of ["submit", "requestSubmit"]) {
+    const real = form?.[name];
+    if (real) form[name] = function () { if (!reads(this.method) && theEvals()) throw refuse(`${String(this.method).toUpperCase()} ${urlOf(this.action)}`); return real.apply(this, arguments); };
+  }
+  const RealSocket = g.WebSocket;
+  if (RealSocket) g.WebSocket = new Proxy(RealSocket, { construct(target, args) { if (theEvals()) throw refuse(`a WebSocket to ${urlOf(args[0])}`); return Reflect.construct(target, args); } });
+  Object.defineProperty(g, "__controlGuard", { value: Object.freeze({
+    take: () => blocked.splice(0),
+    pending: () => pending.size,
+    stop: () => { const n = pending.size; for (const cancel of pending.values()) cancel(); pending.clear(); return n; },
+  }) });
 }
 
 /** A route as part of a screenshot's file name: `#setup/categories` → setup-categories. */
@@ -595,6 +703,15 @@ export function findPython(env = process.env, run = spawnSync) {
   return r.status === 0 && r.stdout?.trim() ? r.stdout.trim() : null;
 }
 
+/** The environment the session runs in (its daemon, browser, seed and demo servers): runway/verify.py's kept_env, an
+ *  allowlist of what Python, Node and Chromium need, so no credential in the caller's environment reaches them. */
+export function sessionEnv(python, run = spawnSync) {
+  const r = run(python, ["-m", "runway.verify", "env"], { cwd: ROOT, encoding: "utf8", timeout: 60000 });
+  try { const env = JSON.parse(r.stdout); if (env && typeof env.PATH === "string") return env; } catch { /* said below */ }
+  throw new ControlError("python", `${python} -m runway.verify env failed: ${(r.stderr || r.error?.message || "").trim().split("\n").pop()}`,
+    "install Runway's Python packages: poetry install (or set RUNWAY_PYTHON to a Python that has them)");
+}
+
 /** runway/verify.py's `status`: libfaketime, the frozen day, how busy the machine is and whether make verify is running. */
 export function machineStatus(python, run = spawnSync) {
   const r = run(python, ["-m", "runway.verify", "status"], { cwd: ROOT, encoding: "utf8", timeout: 60000 });
@@ -703,10 +820,11 @@ async function startLocked(options) {
   if (status.busy) notes.push(`the machine is busy (${status.busy_per_cpu} per CPU): waits are stretched`);
   if (status.verify_running) notes.push(`make verify is running (${status.verify_running}); this session doesn't touch it`);
   const seed = seedOptions(options);
+  const env = sessionEnv(python);
   const log = openSync(join(CONTROL_DIR, "daemon.log"), "w", 0o600);
   const child = spawn(process.execPath, [DAEMON, "--dir", CONTROL_DIR, "--python", python, "--day", status.frozen_day, "--viewport", options.viewport,
     "--idle-minutes", String(options["idle-minutes"]), "--seed", seed.join(","), ...(options["signed-in"] ? ["--signed-in"] : [])],
-  { cwd: ROOT, detached: true, stdio: ["ignore", log, log] });
+  { cwd: ROOT, detached: true, stdio: ["ignore", log, log], env });
   closeSync(log);
   child.unref();
   const end = Date.now() + 180000;

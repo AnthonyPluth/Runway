@@ -76,6 +76,7 @@ Without a seed option it seeds what make verify does (ai-buttons, investments, r
 The server and the seed run under libfaketime at make verify's frozen day, and the browser's clock is fixed at noon that day.
 One session per checkout, on ports and data of its own: it never takes make verify's machine lock, and a running make verify is left alone.
 Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first.
+Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them.
 
 Options:
   --ai-buttons  seed what the AI buttons need
@@ -340,7 +341,11 @@ tools/control eval <js…> [options]
 Evaluate JavaScript in the page and print the result (read-only unless --write).
 
 An expression (`document.title`) or a function (`() => [...document.querySelectorAll('h2')].map(h => h.textContent)`); the result as JSON.
-Read-only by default: a request it makes other than GET or HEAD is blocked, and a change it makes to the page is reported (domChanges).
+Read-only by default: a request it makes to the app's data (other than GET or HEAD) is refused before it's sent, and the eval fails with not_read_only. It waits half a second, and for the network to go quiet, before it answers, so a change set off on a short timer fails it too. A change to the page is reported (domChanges).
+What it leaves behind can't change the data either, even during a later command that acts: code it defines (a timer's callback, a listener, a promise's then) can't send a request other than GET or HEAD or open a WebSocket for as long as the page lives (refused in the page, and reported by the command it happens in or the next); the timers it leaves running are reported (timersLeft) and stopped before the next command that acts (goto, viewport, click, type, press, scroll, flow, reset, eval --write).
+Not covered: what it sets off in the app's own code that runs later on its own (a click it makes whose handler saves after an await, the app's debounced save), which can write during a later command that acts, or in the second after it, when the network's write guard is off. goto --reload clears what an expression left behind.
+With --write it may change the demo data while it runs; a write it leaves for later is blocked if it comes while no command acts.
+Like every command it reaches only the session's own server: a request anywhere else is blocked before it's sent.
 Prefer snapshot, click and type: they act as a person would.
 
 Options:
