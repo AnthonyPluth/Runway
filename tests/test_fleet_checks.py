@@ -280,6 +280,46 @@ class A11yBaseline(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("is new", problems[0])
 
+    def test_a_new_line_for_an_inheriting_flow_still_fails(self):
+        # Inheriting the page's baseline adds no way to list a finding: any line the base didn't have is refused.
+        line = "flow dialog @ phone | focus: a X shows no focus ring | why"
+        problems = fc.check_a11y_shrinks(f"{self.LINE}\n", f"{self.LINE}\n{line}\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is new", problems[0])
+
+    def test_an_unknown_or_malformed_line_for_an_inheriting_flow_still_fails(self):
+        self.assertEqual(len(self.problems("flow dialog @ phone | focus: a X shows no focus ring | why")), 1)   # not a visit
+        self.assertEqual(len(self.problems("flow lock @ phone | focus: a X shows no focus ring")), 1)           # no reason
+
+
+class FlowInheritance(unittest.TestCase):
+    VERIFY = 'export const PAGES = ["budget", "setup"];\nexport const DEFAULT_VIEWPORTS = ["phone", "desktop"];\n'
+
+    def problems(self, **flow):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        (Path(tmp.name) / "f.json").write_text(json.dumps({"name": "f", "steps": [], **flow}))
+        return fc.check_flow_inheritance(self.VERIFY, Path(tmp.name))
+
+    def test_the_repository_passes(self):
+        self.assertEqual(fc.check_flow_inheritance(), [])
+
+    def test_a_flow_that_does_not_inherit_passes(self):
+        self.assertEqual(self.problems(), [])
+        self.assertEqual(self.problems(inherits_page_baseline=False), [])
+
+    def test_a_flow_that_names_its_page_passes(self):
+        self.assertEqual(self.problems(inherits_page_baseline=True, page="setup"), [])
+        self.assertEqual(self.problems(inherits_page_baseline=True, page="setup", viewports=["phone"]), [])
+
+    def test_a_page_left_to_the_default_is_refused(self):
+        self.assertEqual(len(self.problems(inherits_page_baseline=True)), 1)
+
+    def test_an_unknown_page_a_width_without_pages_or_a_non_boolean_is_refused(self):
+        self.assertEqual(len(self.problems(inherits_page_baseline=True, page="nope")), 1)
+        self.assertEqual(len(self.problems(inherits_page_baseline=True, page="setup", viewports=["phone", "landscape"])), 1)
+        self.assertEqual(len(self.problems(inherits_page_baseline="yes", page="setup")), 1)
+
 
 GOOD_SKILL = "---\nname: verify-runway\ndescription: Drive the app.\n---\n\n# Body\n\nSee [cli](references/cli.md).\n"
 

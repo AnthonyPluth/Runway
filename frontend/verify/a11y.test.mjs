@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { applyBaseline, axeProblems, BASELINE, focusProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
+import { applyBaseline, axeOverlayProblems, axeProblems, focusStops, BASELINE, focusProblems, inheritedWhere, inheritProblems, MIN_TAP, parseBaseline, readBaseline, shadowRinged, canonical, strokeRinged, tapBoxes, tapProblems, ringedBy, visitProblems } from "./a11y.mjs";
 
 describe("axeProblems", () => {
   it("names each failing element with its rule", () => {
@@ -171,9 +171,93 @@ describe("tapBoxes", () => {
     });
     try {
       // The page's evaluate runs its callback right here, in the jsdom document.
-      const boxes = await tapBoxes({ evaluate: async (fn) => fn() });
+      const boxes = await tapBoxes({ evaluate: async (fn, arg) => fn(arg) });
       expect(boxes.map((b) => b.target)).toEqual(['rect "Bar"']);
       expect(tapProblems(boxes, "phone")).toHaveLength(1);
     } finally { rect.mockRestore(); }
+  });
+});
+
+describe("findings inside what a flow opened", () => {
+  it("tapBoxes marks a control inside a dialog", async () => {
+    document.body.innerHTML = `<button id="page">Page</button><div role="dialog"><button id="in">In</button></div>`;
+    const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(() => ({ width: 30, height: 30 }));
+    try {
+      const boxes = await tapBoxes({ evaluate: async (fn, arg) => fn(arg) });
+      expect(boxes.map((b) => [b.target, b.overlay])).toEqual([['button#page "Page"', false], ['button#in "In"', true]]);
+    } finally { rect.mockRestore(); }
+  });
+  it("focusStops marks a tab stop inside a dialog", async () => {
+    document.body.innerHTML = `<button id="a">A</button><div role="alertdialog"><button id="b">B</button></div>`;
+    const order = [...document.querySelectorAll("button")];
+    let at = -1;
+    const page = { keyboard: { press: async () => { order[++at]?.focus(); } }, evaluate: async (x) => (typeof x === "string" ? (0, eval)(x) : x()) };
+    expect((await focusStops(page)).map((s) => [s.target, s.overlay])).toEqual([['button#a "A"', false], ['button#b "B"', true]]);
+  });
+  it("axeOverlayProblems keeps only the nodes inside it", () => {
+    const violations = [{ id: "color-contrast", help: "h", nodes: [{ target: ["p.page"], overlay: false }, { target: ["[role=dialog] p"], overlay: true }] }];
+    expect(axeOverlayProblems(violations)).toEqual(["color-contrast: [role=dialog] p (h)"]);
+    expect(axeProblems(violations)).toHaveLength(2);
+  });
+});
+
+describe("a flow that inherits its page's baseline", () => {
+  it("does not excuse a finding of an element inside the dialog that reads like a page line (tap target, focus ring, axe)", () => {
+    const page = "setup @ phone", flow = "flow x @ phone";
+    const tap = 'tap-target: button.focus-visible:border-ring "Delete" is 40×36 px, under 44';
+    const focus = "focus: button#in-dialog \"In\" shows no focus ring";
+    const axe = "color-contrast: [role=dialog] p (h)";
+    const entries = parseBaseline([`${page} | tap-target: button.focus-visible:border-ring | page`, `${page} | ${focus} | page`, `${page} | ${axe} | page`].join("\n")).entries;
+    // The same findings from the page behind the dialog are tolerated...
+    expect(visitProblems([tap, focus, axe], flow, entries, page, new Set())).toEqual([]);
+    // ...from inside it they fail, whatever the page's lines say.
+    expect(visitProblems([tap, focus, axe], flow, entries, page, new Set([tap, focus, axe]))).toEqual([`${flow}: a11y ${tap}`, `${flow}: a11y ${focus}`, `${flow}: a11y ${axe}`]);
+    // The flow's own lines still excuse its own overlay findings (the list only shrinks, so none is added for a new one).
+    const own = parseBaseline(`${flow} | tap-target: button.focus-visible:border-ring | own`).entries;
+    expect(visitProblems([tap], flow, own, page, new Set([tap]))).toEqual([]);
+  });
+  const page = "setup @ phone";
+  const flow = "flow account-delete @ phone";
+  const known = "tap-target: button.block is 40×44 px, under 44";
+  const own = "tap-target: a.dialog-link is 40×44 px, under 44";
+  // A baseline line holds the canonical form of a finding (a tap target without its size).
+  const entries = parseBaseline([`${page} | ${canonical(known)} | page`, `${page} | focus: a P shows no focus ring | page`, `${flow} | ${canonical(own)} | flow`].join("\n")).entries;
+  it("tolerates the page's finding at the same width", () => {
+    expect(applyBaseline([known], flow, entries, page)).toMatchObject({ fresh: [], tolerated: 1 });
+    expect(visitProblems([known, own], flow, entries, page)).toEqual([]);
+  });
+  it("fails a finding only the flow has (the dialog's own)", () => {
+    expect(visitProblems([known, "color-contrast: [role=dialog] p (Elements must meet minimum color contrast ratio thresholds)"], flow, entries, page)).toEqual([
+      `${flow}: a11y color-contrast: [role=dialog] p (Elements must meet minimum color contrast ratio thresholds)`,
+      `${flow}: a11y-baseline.txt lists "${canonical(own)}", which no longer occurs: delete the line`,
+    ]);
+  });
+  it("fails a finding baselined for the page at another width", () => {
+    expect(visitProblems([known], "flow account-delete @ desktop", entries, "setup @ desktop")).toEqual([`flow account-delete @ desktop: a11y ${known}`]);
+  });
+  it("does not inherit without being asked", () => {
+    expect(visitProblems([known], flow, entries).slice(0, 1)).toEqual([`${flow}: a11y ${known}`]);
+  });
+  it("does not report the page's lines stale: its own visit checks them", () => {
+    expect(visitProblems([own], flow, entries, page)).toEqual([]);
+  });
+  it("still flags a page line whose finding is gone, in the page's own visit", () => {
+    expect(visitProblems([], page, entries)).toEqual([
+      `${page}: a11y-baseline.txt lists "${canonical(known)}", which no longer occurs: delete the line`,
+      `${page}: a11y-baseline.txt lists "focus: a P shows no focus ring", which no longer occurs: delete the line`,
+    ]);
+  });
+  const PAGES = ["budget", "setup"];
+  const WIDTHS = ["phone", "desktop"];
+  it("takes its page from the flow's own page field, written out", () => {
+    expect(inheritedWhere({ name: "f", page: "setup", inherits_page_baseline: true }, "phone", PAGES, WIDTHS)).toBe("setup @ phone");
+    expect(inheritedWhere({ name: "f", page: "setup" }, "phone", PAGES, WIDTHS)).toBeUndefined();
+  });
+  it("fails loudly when the page can't be determined", () => {
+    expect(inheritProblems({ name: "f", inherits_page_baseline: true }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(inheritProblems({ name: "f", page: "nope", inherits_page_baseline: true }, PAGES, WIDTHS)).toEqual(["inherits_page_baseline: unknown page nope"]);
+    expect(inheritProblems({ name: "f", page: "setup", inherits_page_baseline: true, viewports: ["landscape"] }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(inheritProblems({ name: "f", page: "setup", inherits_page_baseline: "yes" }, PAGES, WIDTHS)).toHaveLength(1);
+    expect(() => inheritedWhere({ name: "f", inherits_page_baseline: true }, "phone", PAGES, WIDTHS)).toThrow(/flow f:/);
   });
 });

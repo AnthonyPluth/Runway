@@ -6,6 +6,10 @@ describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
 
   it("accepts a well formed flow", () => expect(flowProblems(ok)).toEqual([]));
+  it("accepts a flow that inherits its page's baseline, and refuses one with no page written out", () => {
+    expect(flowProblems({ ...ok, inherits_page_baseline: true })).toEqual([]);
+    expect(flowProblems({ name: "x", steps: ok.steps, inherits_page_baseline: true })).toHaveLength(1);
+  });
 
   it("accepts scroll_to, which takes a selector", () => {
     expect(flowProblems({ ...ok, steps: [{ scroll_to: "[data-x]" }] })).toEqual([]);

@@ -329,3 +329,11 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 - **Widths:** phone, desktop.
 - **Expects to see:** `Browser extension needs a sign-in`.
 - **Drive it:** `tools/control flow notifications-extension-signin`; or `make verify PAGES="notifications-extension-signin"`.
+
+#### `setup-account-delete`
+
+- **Starts at:** `#setup`; goes to: `#setup/accounts`.
+- **Widths:** phone, desktop.
+- **Touches:** `Everyday Checking`, `Delete account…`.
+- **Expects to see:** `Depends on it, and needs a place to go:`, `Move these to…`, `Delete them with the account instead`.
+- **Drive it:** `tools/control flow setup-account-delete`; or `make verify PAGES="setup-account-delete"`.
