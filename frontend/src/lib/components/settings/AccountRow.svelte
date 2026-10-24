@@ -305,7 +305,8 @@
         <li>{removal.transactions ? `${plural(removal.transactions, "transaction")}, with their categories and splits` : "No transactions"}</li>
         {#if removal.statements}<li>{plural(removal.statements, "statement")} you entered</li>{/if}
         {#if removal.holdings}<li>{plural(removal.holdings, "holding")}, with the account’s investment history</li>{/if}
-        {#if removal.bank_bonuses}<li>{removal.bank_bonuses} {removal.bank_bonuses === 1 ? "bank bonus" : "bank bonuses"} linked to it {removal.bank_bonuses === 1 ? "lets" : "let"} go of it</li>{/if}
+        {#if removal.forecast_amounts}<li>{plural(removal.forecast_amounts, "amount")} you changed on its forecast{removal.choose ? ", which don’t move" : ""}</li>{/if}
+        {#if removal.bank_bonuses}<li>Its link from {removal.bank_bonuses === 1 ? "1 bank bonus" : `${removal.bank_bonuses} bank bonuses`}, which {removal.bank_bonuses === 1 ? "stays" : "stay"} without an account{removal.choose ? " and doesn’t move" : ""}</li>{/if}
       </ul>
       {#if depends.length}
         <p class="text-foreground">{moveName ? `Moves to ${moveName}:` : dropThem ? "Deleted with it, or let go:" : "Depends on it, and needs a place to go:"}</p>

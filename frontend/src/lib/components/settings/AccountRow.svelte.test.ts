@@ -160,7 +160,7 @@ describe("a card's statement, from Settings", () => {
 
 // GET /api/accounts/{id}/removal's reply: nothing depending on the account unless given.
 const removal = (over: Partial<AccountRemoval> = {}): AccountRemoval => ({
-  name: "Savings", transactions: 0, statements: 0, holdings: 0, plaid: false, recurring: 0, rules: 0, budgets: 0, cards_paid: 0,
+  name: "Savings", transactions: 0, statements: 0, holdings: 0, forecast_amounts: 0, plaid: false, recurring: 0, rules: 0, budgets: 0, cards_paid: 0,
   assets: 0, churning: 0, forecast: false, bank_bonuses: 0, choose: false, targets: [], ...over,
 });
 const depending = (over: Partial<AccountRemoval> = {}) => removal({
@@ -180,8 +180,11 @@ describe("deleting an account that things depend on", () => {
   const items = (dialog: HTMLElement) => within(within(dialog).getByTestId("account-depends")).getAllByRole("listitem").map((li) => li.textContent);
 
   it("has no answer until you pick one, and moves them to the account you pick", async () => {
-    const dialog = await openWith(depending());
+    const dialog = await openWith(depending({ forecast_amounts: 3, bank_bonuses: 1 }));
     expect(dialog).toHaveTextContent("Depends on it, and needs a place to go:");
+    // What doesn't move says so, with its count.
+    expect(dialog).toHaveTextContent("3 amounts you changed on its forecast, which don’t move");
+    expect(dialog).toHaveTextContent("Its link from 1 bank bonus, which stays without an account and doesn’t move");
     expect(items(dialog)).toEqual(["2 recurring items", "1 rule that only applies to it", "1 budget paid with it", "The forecast’s account"]);
     const select = within(dialog).getByRole("combobox", { name: "Move these to…" });
     expect(select).toHaveValue("");
@@ -224,13 +227,15 @@ describe("deleting an account that things depend on", () => {
 describe("deleting an account, from Settings", () => {
   it("says what goes with it, offers a backup, and deletes it", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => path.endsWith("/removal")
-      ? removal({ transactions: 120, plaid: true, bank_bonuses: 1 }) as never : { ok: true } as never);
+      ? removal({ transactions: 120, plaid: true, bank_bonuses: 2, forecast_amounts: 1 }) as never : { ok: true } as never);
     show(acct());
     await userEvent.click(screen.getByText("Savings"));
     await userEvent.click(screen.getByRole("button", { name: "Delete account…" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
     await waitFor(() => expect(dialog).toHaveTextContent("120 transactions, with their categories and splits"));
-    expect(dialog).toHaveTextContent("1 bank bonus linked to it lets go of it");
+    expect(dialog).toHaveTextContent("1 amount you changed on its forecast");
+    expect(dialog).not.toHaveTextContent("don’t move");   // nothing moves anywhere: no need to say so
+    expect(dialog).toHaveTextContent("Its link from 2 bank bonuses, which stay without an account");
     expect(within(dialog).queryByRole("combobox")).toBeNull();   // nothing depends on it: nothing to choose
     expect(within(dialog).queryByRole("checkbox")).toBeNull();
     expect(dialog).toHaveTextContent("SimpleFIN and Plaid leave it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.");

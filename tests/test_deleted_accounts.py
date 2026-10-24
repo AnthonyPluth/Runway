@@ -69,8 +69,12 @@ class DeleteAccountTests(LedgerCase):
 
     def test_a_card_and_everything_that_belongs_to_it(self):
         impact = api.api_account_removal(self.conn, {}, {}, "cc")
-        self.assertEqual({k: impact[k] for k in ("name", "transactions", "recurring", "rules", "statements", "plaid")},
-                         {"name": "cc", "transactions": 2, "recurring": 1, "rules": 1, "statements": 1, "plaid": True})
+        self.assertEqual({k: impact[k] for k in ("name", "transactions", "recurring", "rules", "statements", "forecast_amounts",
+                                                 "bank_bonuses", "plaid")},
+                         {"name": "cc", "transactions": 2, "recurring": 1, "rules": 1, "statements": 1, "forecast_amounts": 2,
+                          "bank_bonuses": 0, "plaid": True})
+        self.assertEqual((api.api_account_removal(self.conn, {}, {}, "chk")["bank_bonuses"],
+                          api.api_account_removal(self.conn, {}, {}, "cc2")["forecast_amounts"]), (1, 1))
         out = api.api_account_remove(self.conn, {}, DROP, "cc")
         self.assertEqual((out["ok"], out["transactions"]), (True, 2))
         c = self.conn

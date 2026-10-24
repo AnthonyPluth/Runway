@@ -73,6 +73,10 @@ _GROUP_NAME = {"cash": "a checking or savings account", "credit": "another credi
                "investment": "another investment account"}
 
 
+# The amounts you changed on its forecast (its payments, its statements), by these prefixes of their keys.
+_OWN_OVERRIDES = ("card", "stmt")
+
+
 def _group(kind: str | None) -> str:
     return _KIND_GROUP.get(kind or "", kind or "")
 
@@ -124,6 +128,8 @@ def impact(conn, account_id: str) -> dict | None:
         "transactions": _count(conn, _tx_ids(account_id)),
         "statements": _count(conn, select(ManualStatement.statement_date).where(ManualStatement.account_id == account_id)),
         "holdings": _count(conn, select(Holding.security_id).where(Holding.account_id.in_(inv))) if inv else 0,
+        "forecast_amounts": _count(conn, select(Override.key).where(or_(*(Override.key.startswith(f"{p}:{account_id}:", autoescape=True)
+                                                                         for p in _OWN_OVERRIDES)))),
         "plaid": bool(acct["plaid_account_id"]) or account_id.startswith("pl:"),
         **depends,
         "bank_bonuses": _count(conn, select(ChurnBankBonus.id).where(ChurnBankBonus.account_id == account_id)),
@@ -200,7 +206,7 @@ def remove(conn, account_id: str, move_to: str | None = None, drop: bool = False
     if rec_ids:
         conn.execute(update(Transaction).where(Transaction.recurring_id.in_(rec_ids)).values(recurring_id=None))
     # Its card statements (the ones you entered go with it), and the amounts you changed on its forecast.
-    for prefix in ("card", "stmt"):
+    for prefix in _OWN_OVERRIDES:
         conn.execute(delete(Override).where(Override.key.startswith(f"{prefix}:{account_id}:", autoescape=True)))
     if pid:
         conn.execute(delete(CardStatement).where(CardStatement.plaid_account_id == pid))

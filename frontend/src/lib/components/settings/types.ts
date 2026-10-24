@@ -20,7 +20,7 @@ export type CardStatementInfo = PlaidStatement | EnteredStatement;
 /** GET /api/accounts/{id}/removal: what deleting it takes with it, what depends on it (and can move to one of `targets`
  * instead), and whether you have to choose (`choose`: anything depends on it). */
 export interface AccountRemoval {
-  name: string; transactions: number; statements: number; holdings: number; plaid: boolean;
+  name: string; transactions: number; statements: number; holdings: number; forecast_amounts: number; plaid: boolean;
   recurring: number; rules: number; budgets: number; cards_paid: number; assets: number; churning: number; forecast: boolean;
   bank_bonuses: number; choose: boolean; targets: { id: string; name: string; kind: string }[];
 }
