@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } 
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ARTIFACTS, ControlError, PROG, ROOT, UNREACHABLE_ARGS, actingRequest, allowedRequest, closest, errorResult, isGuardedPath, jsExpression, lastShotNumber, parseTarget, readState, rel, removeState, routeUrl, sameServer, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
+import { ARTIFACTS, ControlError, PROG, READ_ONLY_EVAL, ROOT, UNREACHABLE_ARGS, actingRequest, allowedRequest, closest, errorResult, isGuardedPath, jsExpression, lastShotNumber, pageGuard, parseTarget, readOnlyExpression, readState, rel, removeState, routeUrl, sameServer, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
 import { startServer } from "./jobs.mjs";
 import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, recheck, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
 
@@ -118,6 +118,12 @@ async function main() {
     return guardOp;
   }
 
+  /** The changes the page's guard refused (what a read-only eval left behind), as reported: method and scrubbed path. */
+  const takeRefused = () => page.evaluate(() => globalThis.__controlGuard?.take() ?? []).catch(() => [])
+    .then((list) => list.map((w) => w.replace(/(\S+:\/\/\S+)$/, (u) => scrubUrl(u, base) ?? u)));
+  /** Stops the timers read-only evals left running in the page; how many there were. */
+  const stopLeftovers = () => page.evaluate(() => globalThis.__controlGuard?.stop() ?? 0).catch(() => 0);
+
   async function newServer() {
     server = await startServer({
       command: (port, folder) => [opt.python, "-m", "runway.verify", "serve", "--parent", String(process.pid), "--seed", seedDir, "--data", folder, "--port", String(port), ...(opt.signedIn ? ["--signed-in"] : [])],
@@ -143,6 +149,8 @@ async function main() {
     // launch's dead proxy already keeps it off the internet; this keeps it off the machine's other servers too).
     await ctx.route(notOurs, abortNotOurs);
     await prepareContext(ctx, { day: opt.day });
+    // After the frozen clock's own script, so its timers are the ones wrapped: what a read-only eval leaves behind.
+    await ctx.addInitScript(pageGuard, READ_ONLY_EVAL);
     page = await ctx.newPage();
     page.t = (ms) => Math.round(ms * scale);
     page.setDefaultTimeout(page.t(30000));
@@ -341,6 +349,7 @@ async function main() {
     async eval({ args, options: o }) {
       const code = args.join(" ");
       const before = refused.length;
+      const expression = o.write ? jsExpression(code) : readOnlyExpression(code);
       await page.evaluate(() => {
         globalThis.__controlChanges = 0;
         globalThis.__controlObserver?.disconnect();
@@ -349,20 +358,27 @@ async function main() {
       });
       let value;
       try {
-        value = await page.evaluate(jsExpression(code));
+        value = await page.evaluate(expression);
       } catch (e) {
-        if (refused.length > before) throw notReadOnly(refused.splice(before));   // the blocked request is what made it fail
+        const stopped = [...refused.splice(before), ...(await takeRefused())];
+        if (stopped.length) throw notReadOnly(stopped);   // the blocked request is what made it fail
         throw new ControlError("eval_error", scrubText(firstLine(e)).replace(/^page\.evaluate: /, ""), "check the expression: it runs in the page (document, window), as an expression or a () => function");
       }
       if (!o.write) {
         await page.waitForTimeout(EVAL_SETTLE_MS);
         await page.waitForLoadState("networkidle", { timeout: page.t(5000) }).catch(() => { /* a page that keeps a request open */ });
       }
-      const blocked = refused.splice(before);
+      const blocked = [...refused.splice(before), ...(o.write ? [] : await takeRefused())];
+      const left = o.write ? 0 : await page.evaluate(() => globalThis.__controlGuard?.pending() ?? 0).catch(() => 0);
       const domChanges = await page.evaluate(() => { globalThis.__controlObserver?.disconnect(); return globalThis.__controlChanges ?? 0; }).catch(() => 0);
       if (blocked.length) throw notReadOnly(blocked);
       const json = JSON.stringify(value);
-      return { value: json === undefined ? null : json.length > 20000 ? `${json.slice(0, 20000)}… (cut)` : value, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, domChanges, ...(domChanges && !o.write ? { warning: "the page changed while it ran (the app re-rendering, or the expression): prefer click and type to change it" } : {}) };
+      const warnings = [
+        ...(domChanges && !o.write ? ["the page changed while it ran (the app re-rendering, or the expression): prefer click and type to change it"] : []),
+        ...(left ? [`it left ${left} timer${left === 1 ? "" : "s"} running: a change to the data from one is refused when it fires, and they are stopped before the next command that acts`] : []),
+      ];
+      return { value: json === undefined ? null : json.length > 20000 ? `${json.slice(0, 20000)}… (cut)` : value, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, domChanges,
+        ...(left ? { timersLeft: left } : {}), ...(warnings.length ? { warning: warnings.join("; ") } : {}) };
     },
     async console() {
       const messages = consoleBuffer.splice(0);
@@ -443,11 +459,12 @@ async function main() {
   /** The warnings an answer carries: where the page went, what was blocked before it was sent, and the changes to the
    *  app's data blocked while no command was acting (`earlier`, before this one; this command's own, from an acting one). */
   function blockedWarnings(earlier) {
-    const away = offsite.splice(0), stopped = offServer.splice(0), late = [...earlier, ...refused.splice(0)];
+    const away = offsite.splice(0), stopped = offServer.splice(0);
+    const late = [...earlier, ...refused.splice(0)];
     return [
       ...(away.length ? [`the page went to ${unique(away).join(", ")}, which isn't the session's server: it was brought back`] : []),
       ...(stopped.length ? [`requests to ${unique(stopped).slice(0, 5).join(", ")}, which isn't the session's server, were blocked before they were sent`] : []),
-      ...(late.length ? [`${late.length} change${late.length === 1 ? "" : "s"} to the app's data made while no command was acting (a timer an earlier eval left running, or the page saving after a command ended) ${late.length === 1 ? "was" : "were"} blocked before ${late.length === 1 ? "it was" : "they were"} sent: ${unique(late).slice(0, 3).join(", ")}`] : []),
+      ...(late.length ? [`${late.length} change${late.length === 1 ? "" : "s"} to the app's data ${late.length === 1 ? "was" : "were"} blocked before ${late.length === 1 ? "it was" : "they were"} sent (made by what a read-only eval left behind, or while no command was acting, such as the page saving after a command ended): ${unique(late).slice(0, 3).join(", ")}`] : []),
     ];
   }
 
@@ -462,19 +479,26 @@ async function main() {
     log(`${request.command}`);
     // Not idle while a command runs (a long flow can outlast a short --idle-minutes): the clock starts again when it ends.
     clearTimeout(idle);
-    // What was blocked since the last command (a timer an eval left running, a page saving on its own) is reported now.
+    // The write guard is off while an acting command runs; a command that doesn't act first waits out the last one's grace.
     clearTimeout(graceTimer);
     const acting = actingRequest(request);
     if (!acting && graceUntil > Date.now()) await page.waitForTimeout(graceUntil - Date.now());
-    const earlier = refused.splice(0);
-    const warned = () => { const w = blockedWarnings(earlier); return w.length ? { warning: w.join("; ") } : {}; };
+    // What was blocked since the last command (a timer an eval left running, a page saving on its own) is reported now.
+    const earlier = [...refused.splice(0), ...(await takeRefused())];
+    // Before a command that acts (the network's write guard then off): nothing a read-only eval left running fires during it.
+    const stopped = acting ? await stopLeftovers() : 0;
+    const warned = async (own) => {
+      const during = await takeRefused();   // refused in the page while this command ran (a listener an eval added, say)
+      const w = [...(stopped ? [`stopped ${stopped} timer${stopped === 1 ? "" : "s"} a read-only eval left running, before this command acted`] : []), ...blockedWarnings([...earlier, ...during]), ...(own ? [own] : [])];
+      return w.length ? { warning: w.join("; ") } : {};
+    };
     try {
       await guardWrites(!acting);
       const reply = await handler({ args: request.args ?? [], options: request.options ?? {}, path: request.path });
-      return { ok: true, ...reply, ...warned() };
+      return { ok: true, ...reply, ...(await warned(reply?.warning)) };
     } catch (e) {
       const err = bad(e);
-      return { ...errorResult(request.command, err), ...(e.data ?? {}), ...warned() };
+      return { ...errorResult(request.command, err), ...(e.data ?? {}), ...(await warned()) };
     } finally {
       if (acting) {
         graceUntil = Date.now() + ACT_GRACE_MS;

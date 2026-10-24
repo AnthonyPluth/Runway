@@ -104,15 +104,39 @@ r = control("eval", "() => fetch('/api/control-smoke', { method: 'POST' }).then(
 expect(r.code === 1 && r.json?.error?.code === "not_read_only", "eval is read-only without --write: a POST is blocked, and said so");
 r = control("eval", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'POST', headers: { 'X-Runway': '1' } }), 100); return 'later'; }");
 expect(r.code === 1 && r.json?.error?.code === "not_read_only", "a write an eval sets off on a short timer fails it too (not_read_only)");
+// The session's server must never get any of these: a request to /api/control-smoke with an answer means one got through.
+const reachedServer = () => (control("network").json?.requests ?? []).filter((q) => q.path === "/api/control-smoke" && q.status);
 r = control("eval", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'DELETE', headers: { 'X-Runway': '1' } }), 2500); return 'much later'; }");
-expect(r.code === 0 && r.json?.value === "much later", "an eval whose write comes later answers first");
+expect(r.code === 0 && r.json?.value === "much later" && r.json.timersLeft === 1 && /left 1 timer running/.test(r.json.warning ?? ""),
+  "an eval whose write comes later answers first, and says it left a timer running");
 await sleep(3500);
 r = control("info");
-expect(r.code === 0 && /change to the app's data .*was blocked before it was sent: DELETE \/api\/control-smoke/.test(r.json?.warning ?? ""),
+expect(r.code === 0 && /change to the app's data was blocked before it was sent .*: DELETE \/api\/control-smoke/.test(r.json?.warning ?? ""),
   "the later write was blocked all the same, and the next command says so");
-r = control("network");
-expect(r.json?.requests?.some((q) => q.method === "DELETE" && q.path === "/api/control-smoke" && q.failed) && !r.json.requests.some((q) => q.path === "/api/control-smoke" && q.status),
-  "the server never answered it: it was never sent");
+expect(!reachedServer().length, "the server never got it");
+
+// The guard is off while a command acts, so what a read-only eval leaves behind must not get through then either.
+r = control("eval", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'POST', headers: { 'X-Runway': '1' } }), 1500); return 'during the next command'; }");
+expect(r.code === 0 && r.json?.timersLeft === 1, "a read-only eval with a 1.5 s write timer answers, saying it left a timer running");
+r = control("goto", "overview");
+expect(r.code === 0 && /stopped 1 timer a read-only eval left running/.test(r.json?.warning ?? ""), "the goto right after it stops that timer first, and says so");
+await sleep(2500);
+control("info");
+expect(!reachedServer().length, "the server never got the POST");
+r = control("eval", "() => { document.addEventListener('click', () => fetch('/api/control-smoke', { method: 'POST', headers: { 'X-Runway': '1' } }), { once: true }); return 'on the next click'; }");
+expect(r.code === 0, "a read-only eval leaves a listener that writes on the next click");
+r = control("click", "heading", "Overview");
+await sleep(1000);
+const after = control("info");
+expect(r.code === 0 && /blocked before it was sent .*POST \/api\/control-smoke/.test(`${r.json?.warning ?? ""} ${after.json?.warning ?? ""}`) && !reachedServer().length,
+  "a click (the write guard off) sets it off, and its write is refused in the page all the same, and said so");
+// The network's guard, the second layer: an eval --write may write while it runs, but not on a timer once it's done.
+r = control("eval", "--write", "() => { setTimeout(() => fetch('/api/control-smoke', { method: 'DELETE', headers: { 'X-Runway': '1' } }), 2500); return 'later'; }");
+expect(r.code === 0 && !r.json.timersLeft, "eval --write can leave a timer (its writes aren't refused in the page)");
+await sleep(3500);
+r = control("info");
+expect(/blocked before it was sent .*DELETE \/api\/control-smoke/.test(r.json?.warning ?? "") && !reachedServer().length,
+  "its write, sent while no command acts, is blocked by the network guard, and the next command says so");
 control("console");
 
 // Nothing reaches another server, not even one on this machine (your own Runway, say): a link to it, a fetch, an image.

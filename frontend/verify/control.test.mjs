@@ -96,6 +96,28 @@ describe("targets, routes and what's reported", () => {
     expect(c.actingRequest({ command: "eval", options: { write: true } })).toBe(true);
   });
 
+  it("names a read-only eval's code, so the page can tell what it left behind", () => {
+    expect(c.readOnlyExpression("() => 1")).toBe(`(() => 1)()\n//# sourceURL=${c.READ_ONLY_EVAL}.js`);
+  });
+
+  it("refuses in the page what a read-only eval's code sends, even later, and keeps its timers for the session to stop", async () => {
+    c.pageGuard("test-read-only-eval");
+    const g = globalThis;
+    // Code "the eval defined": its functions carry the eval's script name in their stack, as in the page.
+    const evalDefined = new Function("return { now: async () => { try { await fetch('http://127.0.0.1:9/api/x', { method: 'POST' }); return 'sent'; } catch (e) { return e.message; } }, later: () => setTimeout(() => fetch('http://127.0.0.1:9/api/y', { method: 'DELETE' }).catch(() => 'refused'), 5) };\n//# sourceURL=test-read-only-eval.js")();
+    expect(await evalDefined.now()).toBe("not_read_only: a read-only eval tried POST http://127.0.0.1:9/api/x");
+    expect(g.__controlGuard.take()).toEqual(["POST http://127.0.0.1:9/api/x"]);
+    evalDefined.later();
+    expect(g.__controlGuard.pending()).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));   // (this timer isn't the eval's: not kept)
+    expect(g.__controlGuard.pending()).toBe(0);   // the eval's fired, so it's no longer pending
+    expect(g.__controlGuard.take()).toEqual(["DELETE http://127.0.0.1:9/api/y"]);   // the callback ran, and its write was refused
+    evalDefined.later();
+    expect(g.__controlGuard.stop()).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(g.__controlGuard.take()).toEqual([]);   // stopped: it never ran
+  });
+
   it("starts its session with runway/verify.py's allowlist of the environment, never the caller's own", () => {
     const run = (python, args) => ({ status: 0, stdout: JSON.stringify({ PATH: "/bin", HOME: "/h" }), args });
     expect(c.sessionEnv("/py", run)).toEqual({ PATH: "/bin", HOME: "/h" });
