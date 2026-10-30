@@ -209,8 +209,10 @@ def ext_start(conn, body):
 
 
 def ext_amazon_transactions(conn, body):
-    seen = body.get("seen")
-    return retail.amazon_transactions(conn, str(body.get("html") or ""), seen if isinstance(seen, dict) else None)
+    seen, data, page = body.get("seen"), body.get("data"), body.get("page")
+    return retail.amazon_transactions(conn, str(body.get("html") or ""), seen if isinstance(seen, dict) else None,
+                                      data=data if isinstance(data, dict) else None,
+                                      page=page if isinstance(page, dict) else None)
 
 
 def ext_amazon_order(conn, body):

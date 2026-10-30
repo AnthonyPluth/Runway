@@ -232,14 +232,14 @@ tz = ["tzdata"]
 
 [[package]]
 name = "amazon-orders"
-version = "4.12.0"
+version = "5.2.0"
 description = "A Python library (and CLI) for Amazon order history, line items, and transactions"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "amazon_orders-4.12.0-py3-none-any.whl", hash = "sha256:90dbf4781c2fe6c5a84a567965a6445ac47ae0c681763e40700ff9521961e09b"},
-    {file = "amazon_orders-4.12.0.tar.gz", hash = "sha256:ea8d95b6657168974952f08bd3e0e630786f193b570c4ccfd749073d56b35147"},
+    {file = "amazon_orders-5.2.0-py3-none-any.whl", hash = "sha256:a0c806089931d3b5cea2ebaeba723708c58fcbac75ba251c904d9d625bcb4950"},
+    {file = "amazon_orders-5.2.0.tar.gz", hash = "sha256:6f7c3fa8b561cd38074a97f9938be3a5f1d2564bbb177eff313d1523c71457d0"},
 ]
 
 [package.dependencies]
@@ -3255,4 +3255,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<4.0"
-content-hash = "00e0206bcd481ee63252d828265a1189ad950642314fa18939831fe5abfddc51"
+content-hash = "71c6fb41b4ea2429ae3d1694511ac569677497ca1a6943bf333edfe11ba42d5d"

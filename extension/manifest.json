@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Runway: Amazon, Target, Costco and Carta",
   "short_name": "Runway",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Sends your Amazon, Target and Costco orders and your Carta equity to your own Runway.",
   "permissions": [
     "scripting",
