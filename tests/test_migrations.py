@@ -595,6 +595,39 @@ class MigrationTests(unittest.TestCase):
             command.downgrade(db.alembic_config(c), "0047")
             self.assertEqual(c.execute(select(func.count()).select_from(Setting).where(Setting.key.in_(keys))).scalar(), 4)
 
+    def test_0049_removes_the_copies_of_an_amazon_charge_the_repeated_page_saved(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0048")
+            c.exec_driver_sql("INSERT INTO retail_orders(id, retailer, order_number) VALUES ('amazon:111-1', 'amazon', '111-1')")
+            c.exec_driver_sql("INSERT INTO retail_orders(id, retailer, order_number) VALUES ('target:9', 'target', '9')")
+            rows = []
+
+            def charges(charge, n, used=()):
+                order = "target:9" if charge.startswith("target") else "amazon:111-1"
+                rows.extend({"id": f"{charge}|{i}", "order_id": order, "date": "2026-10-10", "amount": -4.77,
+                             "tx_id": f"t{i}" if i in used else None} for i in range(1, n + 1))
+            charges("amazon|111-1|2026-10-10|-477", 60, used=(1, 10))   # read 60 times; two of its copies matched
+            charges("amazon|111-1|2026-10-11|-999", 120)                # charged twice that day, read 60 times
+            charges("amazon|111-1|2026-10-12|-500", 61)
+            charges("amazon|111-1|2026-10-13|-100", 2)                  # charged twice, read once: both real
+            charges("target|9|2026-10-10|-477", 60)                     # another store: not Runway's to touch here
+            c.execute(insert(schema.retail_charges), rows)
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+            left = {r[0] for r in c.execute(select(schema.retail_charges.c.id))}
+        amazon = sorted(i for i in left if i.startswith("amazon"))
+        self.assertEqual(amazon, ["amazon|111-1|2026-10-10|-477|1", "amazon|111-1|2026-10-10|-477|10",
+                                  "amazon|111-1|2026-10-11|-999|1", "amazon|111-1|2026-10-11|-999|2",
+                                  "amazon|111-1|2026-10-12|-500|1", "amazon|111-1|2026-10-12|-500|2",
+                                  "amazon|111-1|2026-10-13|-100|1", "amazon|111-1|2026-10-13|-100|2"])
+        self.assertEqual(len(left) - len(amazon), 60)
+        self.assertEqual(drift(self.path), [])
+        with db.engine(self.path).begin() as c:   # and back down, nothing changes
+            command.downgrade(db.alembic_config(c), "0048")
+            self.assertEqual(c.execute(select(func.count()).select_from(schema.retail_charges)).scalar(), len(left))
+
     def test_0047_plaid_refresh_switch_from_the_accounts_already_stored(self):
         from alembic import command
         db.init(self.path)
