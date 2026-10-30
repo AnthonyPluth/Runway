@@ -96,13 +96,14 @@ class AmazonPagesTests(Base):
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 4)
 
     def test_the_same_page_again_in_an_import_is_read_once(self):
-        # Amazon answering the request for the next page with the page it already gave: read once, and paging stops
-        # (rather than saving each charge again every time round, as many times as the extension pages)
+        # Amazon answering the request for the next page with the page it already gave: read once, and the extension
+        # stops (rather than saving each charge again every time round, as many times as it pages). `next_form` stays,
+        # so an extension older than 1.4.1, which doesn't look at `repeated`, doesn't take it for a finished import.
         r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
         self.assertFalse(r["repeated"])
         again = retail.amazon_transactions(self.c, fixture("transactions-page.html"), r["seen"])
         self.assertTrue(again["repeated"])
-        self.assertIsNone(again["next_form"])
+        self.assertEqual(again["next_form"], r["next_form"])
         self.assertEqual(again["orders"], [])
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 2)
 

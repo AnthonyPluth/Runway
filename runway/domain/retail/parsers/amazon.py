@@ -64,9 +64,9 @@ def amazon_transactions(conn, html: str, seen: dict | None = None, data: dict | 
 
     Returns what the extension should do next: `next_form` (what to ask for the next page with: posted back to the
     same page, or, when it has an `exclusiveStartKey`, sent to Amazon's transactions data address; None when this
-    page reaches back past `since`, or repeats one already read), `orders`, the order numbers whose details it should
-    send, `repeated` when this page was one already read, and `seen`, which it sends back with the next page (so the
-    same charge twice across two pages is still two charges)."""
+    page reaches back past `since`), `orders`, the order numbers whose details it should send, `repeated` when this
+    page was one already read (and nothing on it is saved again), and `seen`, which it sends back with the next page
+    (so the same charge twice across two pages is still two charges)."""
     # amazon-orders (and BeautifulSoup) are heavy: loaded only when an Amazon page comes in.
     from amazonorders.exception import AmazonOrdersError
     from amazonorders.transactions import TransactionsPage
@@ -87,7 +87,9 @@ def amazon_transactions(conn, html: str, seen: dict | None = None, data: dict | 
     seen = {str(k): int(v) for k, v in (seen or {}).items() if isinstance(v, int)}
     key = _page_key(txs, next_form)
     if key in seen:   # read already in this import: saving it again would count each of its charges twice
-        return {"next_form": None, "orders": [], "read": len(txs), "seen": seen, "repeated": True}
+        # `next_form` stays as the page gave it: an extension older than 1.4.1 doesn't look at `repeated`, and would
+        # take None for the end of the history and mark the import complete after reading only its first page.
+        return {"next_form": next_form, "orders": [], "read": len(txs), "seen": seen, "repeated": True}
     seen[key] = 1
     start = store.since(conn, "amazon")
     numbers: list[str] = []
