@@ -30,6 +30,7 @@ interface Worker {
   targetUrl: (tpl: string, api: Api, order: string) => string;
   targetApiFromRequests: () => { base: string; key: string; from: string } | null;
   cartaDays: (v: unknown) => number;
+  amazonNextPage: (next: Record<string, string>) => [string, { method: string; headers: Record<string, string>; body: string }];
   inParallel: <T>(items: T[], width: number, fn: (item: T) => Promise<void>) => Promise<void>;
   withTimeout: <T>(p: Promise<T>, ms: number, message: string, ErrorType?: new (m: string) => Error) => Promise<T>;
   stopsImport: (e: unknown) => boolean;
@@ -49,7 +50,7 @@ function load(): Worker {
   };
   const body = Object.values(FILES).join("\n") + `
     return { storeUrl, checkedArgs, costcoWindows, costcoSignedOut, costcoDate, costcoState, costcoReady, targetHistoryUrl, targetUrl, targetApiFromRequests,
-             cartaDays, inParallel, withTimeout, stopsImport, HiddenUnavailable, TARGET_OLD_HISTORY };`;
+             cartaDays, amazonNextPage, inParallel, withTimeout, stopsImport, HiddenUnavailable, TARGET_OLD_HISTORY };`;
   const w = new Function("chrome", body)(chrome) as Worker;
   return { ...w, requested: (url) => onRequest({ url }) };
 }
@@ -247,6 +248,24 @@ describe("cartaDays", () => {
   it("allows daily, weekly and monthly, and falls back to daily", () => {
     expect([1, 7, 30, "7", "30"].map(w.cartaDays)).toEqual([1, 7, 30, 7, 30]);
     expect([undefined, 0, 2, "x", null].map(w.cartaDays)).toEqual([1, 1, 1, 1, 1]);
+  });
+});
+
+describe("amazonNextPage", () => {
+  it("posts the older page's form back to the payments page", () => {
+    const [url, init] = w.amazonNextPage({ "ppw-widgetState": "s", ie: "UTF-8", "ppw-next": "" });
+    expect(url).toBe("https://www.amazon.com/cpe/yourpayments/transactions");
+    expect(init.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(new URLSearchParams(init.body).get("ppw-widgetState")).toBe("s");
+  });
+
+  it("asks the newer page's data address for the transactions after the last key", () => {
+    const [url, init] = w.amazonNextPage({ exclusiveStartKey: "k", token: "t", locale: "en-US", widgetName: "ViewTransactions" });
+    expect(url).toBe("https://www.amazon.com/payments-portal/data/iris/live/v1/data/manage/get-transactions");
+    expect(w.storeUrl(url)).toBe(url);   // an address the extension may read
+    expect(init.method).toBe("POST");
+    expect(init.headers["x-amzn-upx-token"]).toBe("t");
+    expect(JSON.parse(init.body)).toEqual({ type: "GetTransactions", locale: "en-US", exclusiveStartKey: "k", widgetName: "ViewTransactions" });
   });
 });
 
