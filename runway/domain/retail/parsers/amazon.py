@@ -121,9 +121,10 @@ def _data_page(cfg, data: dict, page: dict | None):
         raise RetailError("Runway couldn't read Amazon's transactions: that page wasn't one it asked for")
     try:
         display = data["displayResponse"]
-        # amazon-orders reads this reply in `get_page`, which fetches it too; Runway's extension does the fetching
+        # amazon-orders reads this reply in `get_page`, which fetches it too; Runway's extension does the fetching. The
+        # method is private, so a release that renames it is read as a changed page (AttributeError), not a crash.
         txs = TransactionsPage(cfg)._parse_transaction_list(display["transactionsList"])
-    except (AmazonOrdersError, KeyError, TypeError, ValueError) as e:
+    except (AmazonOrdersError, AttributeError, KeyError, TypeError, ValueError) as e:
         raise RetailError("Runway couldn't read Amazon's transactions: Amazon may have changed the page") from e
     last = display.get("lastEvaluatedKey")
     return txs, ({**page, "exclusiveStartKey": last} if last and txs else None)

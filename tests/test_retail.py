@@ -145,6 +145,9 @@ class AmazonPagesTests(Base):
                 retail.amazon_transactions(self.c, "", data=data, page=page)
         with self.assertRaises(retail.RetailError):   # not Amazon's reply
             retail.amazon_transactions(self.c, "", data={"nothing": 1}, page={"exclusiveStartKey": "k"})
+        with mock.patch("amazonorders.transactions.TransactionsPage._parse_transaction_list", side_effect=AttributeError), \
+                self.assertRaises(retail.RetailError):   # an amazon-orders release without the method it reads with
+            retail.amazon_transactions(self.c, "", data=data, page={"exclusiveStartKey": "k"})
 
     def test_reads_back_to_amazon_orders_whose_details_never_came(self):
         self.since.stop()
