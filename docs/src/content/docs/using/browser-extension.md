@@ -77,8 +77,12 @@ connections.
 ## When a store changes its site
 
 The stores' order pages aren't documented, so an import can stop working when a store changes its site. The extension
-only fetches pages; Runway reads them, so the fix is a Runway update, not a new extension.
+only fetches pages; Runway reads them, so the fix is usually a Runway update, not a new extension.
 
+- **Amazon** now gives its payments history after the first page as data rather than pages; extension 1.4.1 asks for
+  it that way. An older extension reads only the first page again and again: download the extension again from
+  Settings and reload it. If Amazon answers with a page it already gave, the import stops there, reads that page
+  once, and tries again from the same date next time.
 - **Target** says "too many requests" now and then. The extension waits it out and slows down, and gives up until the
   next import if it keeps happening. An order whose page can't be read is tried again on the next few imports, then
   left alone.

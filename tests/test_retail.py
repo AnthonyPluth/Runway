@@ -87,9 +87,64 @@ class AmazonPagesTests(Base):
         self.assertEqual(self.c.execute(select(RetailOrder.attempts)).fetchone()[0], 1)
 
     def test_same_charge_on_two_pages_is_two_charges(self):
-        r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
-        retail.amazon_transactions(self.c, fixture("transactions-page.html"), r["seen"])   # as if it were the next page
+        page = fixture("transactions-page.html")
+        r = retail.amazon_transactions(self.c, page)
+        state = r["next_form"]["ppw-widgetState"]
+        self.assertIn(state, page)
+        nxt = page.replace(state, state + "2")   # the next page: the same charges, but a page of its own
+        retail.amazon_transactions(self.c, nxt, r["seen"])
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 4)
+
+    def test_the_same_page_again_in_an_import_is_read_once(self):
+        # Amazon answering the request for the next page with the page it already gave: read once, and paging stops
+        # (rather than saving each charge again every time round, as many times as the extension pages)
+        r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
+        self.assertFalse(r["repeated"])
+        again = retail.amazon_transactions(self.c, fixture("transactions-page.html"), r["seen"])
+        self.assertTrue(again["repeated"])
+        self.assertIsNone(again["next_form"])
+        self.assertEqual(again["orders"], [])
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 2)
+
+    def test_newer_transactions_page_and_its_data_pages(self):
+        def tx(day, amount, number, card="Visa"):
+            return {"formattedDate": day, "formattedAmount": amount, "statementDescriptor": "AMZN Mktp US",
+                    "orderData": [{"orderDisplayString": f"Order #{number}",
+                                   "orderDetailsUrl": f"/gp/your-account/order-details?orderID={number}"}],
+                    "paymentMethodDisplayStringData": {"paymentMethodName": card,
+                                                       "paymentMethodNumber": {"lastDigits": "1234"}}}
+        state = {"props": {"pageProps": {
+            "token": "made-up-token", "request": {"locale": "en-US", "widgetName": "ViewTransactions"},
+            "state": {"transactionResponseState": {
+                "hasMore": True, "lastEvaluatedPageKey": "key-1",
+                "visibleTransactionResponse": {"transactionList": [tx("October 11, 2024", "-$45.19", ORDER)]}}}}}}
+        html = f'<html><body><script id="__NEXT_DATA__" type="application/json">{json.dumps(state)}</script></body></html>'
+        r = retail.amazon_transactions(self.c, html)
+        self.assertEqual(r["orders"], [ORDER])
+        first = r["next_form"]
+        self.assertEqual((first["exclusiveStartKey"], first["token"], first["locale"], first["widgetName"]),
+                         ("key-1", "made-up-token", "en-US", "ViewTransactions"))
+
+        data = {"displayResponse": {"lastEvaluatedKey": "key-2",
+                                    "transactionsList": [tx("October 9, 2024", "-$28.79", ORDER, "Mastercard")]}}
+        r = retail.amazon_transactions(self.c, "", r["seen"], data=data, page=first)
+        self.assertEqual(r["next_form"], {**first, "exclusiveStartKey": "key-2"})
+        last = {"displayResponse": {"transactionsList": [tx("October 2, 2024", "-$3.50", ORDER)]}}
+        r = retail.amazon_transactions(self.c, "", r["seen"], data=last, page=r["next_form"])
+        self.assertIsNone(r["next_form"])   # Amazon has no more
+        charges = self.c.execute(select(RetailCharge.date, RetailCharge.amount, RetailCharge.payment)
+                                 .order_by(RetailCharge.date)).fetchall()
+        self.assertEqual([tuple(c) for c in charges], [("2024-10-02", -3.5, "Visa ****1234"),
+                                                       ("2024-10-09", -28.79, "Mastercard ****1234"),
+                                                       ("2024-10-11", -45.19, "Visa ****1234")])
+
+    def test_a_data_page_needs_what_it_was_asked_for_with(self):
+        data = {"displayResponse": {"transactionsList": []}}
+        for page in (None, {}, {"exclusiveStartKey": ""}):
+            with self.assertRaises(retail.RetailError):
+                retail.amazon_transactions(self.c, "", data=data, page=page)
+        with self.assertRaises(retail.RetailError):   # not Amazon's reply
+            retail.amazon_transactions(self.c, "", data={"nothing": 1}, page={"exclusiveStartKey": "k"})
 
     def test_reads_back_to_amazon_orders_whose_details_never_came(self):
         self.since.stop()

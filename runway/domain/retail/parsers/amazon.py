@@ -3,6 +3,8 @@ shipment separately), and each order's details page lists its items. Both are re
 parsers."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import tempfile
@@ -46,28 +48,48 @@ def _amazon_blocked(html: str) -> RetailError | None:
 AMAZON_ORDER = re.compile(r"^(?:\d{3}|D\d{2})-\d{7}-\d{7}$")
 
 
-def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
+def _page_key(txs, next_form) -> str:
+    """What a page of transactions holds, so the same page sent twice in one import is known (Amazon answering a
+    request for the next page with the one it already gave)."""
+    rows = [(t.order_number, str(t.completed_date), t.grand_total, t.payment_method) for t in txs]
+    return "page|" + hashlib.sha256(json.dumps([rows, next_form], sort_keys=True, default=str).encode()).hexdigest()
+
+
+def amazon_transactions(conn, html: str, seen: dict | None = None, data: dict | None = None,
+                        page: dict | None = None) -> dict:
     """One page of Amazon's Payments → Transactions. Saves each charge and refund against its order.
 
-    Returns what the extension should do next: `next_form` (post it back to the same page for the next page, or
-    None when this page reaches back past `since`), `orders`, the order numbers whose details it should send, and
-    `seen`, which it sends back with the next page (so the same charge twice across two pages is still two charges)."""
+    The first page is always the page's HTML. Amazon's newer Transactions page then gives further pages as data: the
+    extension sends that reply as `data`, with `page`, the `next_form` it asked for it with.
+
+    Returns what the extension should do next: `next_form` (what to ask for the next page with: posted back to the
+    same page, or, when it has an `exclusiveStartKey`, sent to Amazon's transactions data address; None when this
+    page reaches back past `since`, or repeats one already read), `orders`, the order numbers whose details it should
+    send, `repeated` when this page was one already read, and `seen`, which it sends back with the next page (so the
+    same charge twice across two pages is still two charges)."""
     # amazon-orders (and BeautifulSoup) are heavy: loaded only when an Amazon page comes in.
     from amazonorders.exception import AmazonOrdersError
     from amazonorders.transactions import TransactionsPage
-    from bs4 import BeautifulSoup
-    if _signed_out(html):
-        raise RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.", "signin")
-    blocked = _amazon_blocked(html)
-    if blocked:
-        raise blocked
     cfg = _amazon_config()
-    try:
-        txs, next_form = TransactionsPage(cfg).parse_page(BeautifulSoup(html, cfg.bs4_parser))
-    except AmazonOrdersError as e:
-        raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}") from e
-    start = store.since(conn, "amazon")
+    if data is not None:
+        txs, next_form = _data_page(cfg, data, page)
+    else:
+        from bs4 import BeautifulSoup
+        if _signed_out(html):
+            raise RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.", "signin")
+        blocked = _amazon_blocked(html)
+        if blocked:
+            raise blocked
+        try:
+            txs, next_form = TransactionsPage(cfg).parse_page(BeautifulSoup(html, cfg.bs4_parser))
+        except AmazonOrdersError as e:
+            raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}") from e
     seen = {str(k): int(v) for k, v in (seen or {}).items() if isinstance(v, int)}
+    key = _page_key(txs, next_form)
+    if key in seen:   # read already in this import: saving it again would count each of its charges twice
+        return {"next_form": None, "orders": [], "read": len(txs), "seen": seen, "repeated": True}
+    seen[key] = 1
+    start = store.since(conn, "amazon")
     numbers: list[str] = []
     oldest: str | None = None
     for t in txs:
@@ -87,7 +109,24 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
         numbers.append(number)
     more = bool(next_form and oldest and oldest >= start)
     return {"next_form": next_form if more else None, "orders": need_details(conn, "amazon", numbers), "read": len(txs),
-            "seen": seen}
+            "seen": seen, "repeated": False}
+
+
+def _data_page(cfg, data: dict, page: dict | None):
+    """A further page of Amazon's newer Transactions page: its transactions data reply, read as amazon-orders reads
+    it, and what to ask for the page after it with (`page` with the reply's last key)."""
+    from amazonorders.exception import AmazonOrdersError
+    from amazonorders.transactions import TransactionsPage
+    if not isinstance(page, dict) or not page.get("exclusiveStartKey"):
+        raise RetailError("Runway couldn't read Amazon's transactions: that page wasn't one it asked for")
+    try:
+        display = data["displayResponse"]
+        # amazon-orders reads this reply in `get_page`, which fetches it too; Runway's extension does the fetching
+        txs = TransactionsPage(cfg)._parse_transaction_list(display["transactionsList"])
+    except (AmazonOrdersError, KeyError, TypeError, ValueError) as e:
+        raise RetailError("Runway couldn't read Amazon's transactions: Amazon may have changed the page") from e
+    last = display.get("lastEvaluatedKey")
+    return txs, ({**page, "exclusiveStartKey": last} if last and txs else None)
 
 
 def amazon_order(conn, number: str, html: str, final: bool = True) -> dict:
