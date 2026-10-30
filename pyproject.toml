@@ -12,7 +12,7 @@ dependencies = [
     "pywebpush (>=2.0,<3.0)",            # push notifications (VAPID + encrypted payloads)
     "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
     "holidays (>=0.106,<1.0)",             # bank holidays, for when payments actually land
-    "amazon-orders (>=4.12.0,<5.0)",       # reading Amazon order pages your browser fetched (see extension/)
+    "amazon-orders (>=5.2.0,<6.0)",        # reading Amazon order pages your browser fetched (see extension/)
     "websocket-client (>=1.8,<2.0)",     # live stock prices from Finnhub (only when a key is set; see runway/providers/finnhub.py)
 ]
 
