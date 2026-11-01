@@ -280,8 +280,8 @@
             <ul class="mt-1 divide-y text-sm text-foreground">
               {#each d.excluded as a (a.id)}
                 <li class="flex items-center justify-between gap-3 py-2">
-                  <span><button type="button" class="cursor-pointer underline-offset-2 hover:underline" onclick={() => openAccount(a.id)}><AcctLabel id={a.id} name={a.name} /></button><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {kindLabel(a.kind)}</span></span>
-                  <span class="flex items-center gap-3">
+                  <span class="min-w-0"><button type="button" class="flex max-w-full cursor-pointer underline-offset-2 hover:underline" onclick={() => openAccount(a.id)}><AcctLabel id={a.id} name={a.name} /></button><span class="block text-xs text-muted-foreground">{a.org ? `${a.org} · ` : ""}{kindLabel(a.kind)}</span></span>
+                  <span class="flex shrink-0 items-center gap-3">
                     <span class="tabular-nums">{fmt(a.balance)}</span>
                     <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>
                   </span>

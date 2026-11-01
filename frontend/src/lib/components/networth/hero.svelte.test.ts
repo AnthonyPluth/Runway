@@ -143,7 +143,7 @@ describe("the net worth summary", () => {
     serve({ ...nw([], { "30d": null, "90d": null, "1y": null }), excluded: [{ id: "x", name: "Old card", org: null, kind: "credit", balance: 20 }] });
     render(NetWorth);
     await userEvent.click(await screen.findByRole("button", { name: "Show" }));
-    expect(screen.getByText(/· Credit card/)).toBeInTheDocument();
+    expect(screen.getByText("Credit card")).toBeInTheDocument();
   });
 });
 
