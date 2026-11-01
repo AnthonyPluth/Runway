@@ -145,6 +145,17 @@ describe("the net worth summary", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Show" }));
     expect(screen.getByText("Credit card")).toBeInTheDocument();
   });
+
+  it("lets a long name in the list of accounts left out shrink so the amount and button stay in the row", async () => {
+    const name = "Custodial account with a very long name that cannot fit on a phone";
+    serve({ ...nw([], { "30d": null, "90d": null, "1y": null }), excluded: [{ id: "x", name, org: "Some institution", kind: "investment", balance: 20 }] });
+    render(NetWorth);
+    await userEvent.click(await screen.findByRole("button", { name: "Show" }));
+    // jsdom does no layout, so check the classes that do it: the name's column may shrink, the amount and button may not.
+    const row = screen.getByRole("button", { name: /Count .* in net worth again/ }).closest("li") as HTMLElement;
+    expect(row.querySelector("span.min-w-0")).toHaveTextContent(name);
+    expect(screen.getByRole("button", { name: /Count .* in net worth again/ }).parentElement).toHaveClass("shrink-0");
+  });
 });
 
 describe("a reload that fails", () => {
