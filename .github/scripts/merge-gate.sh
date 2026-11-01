@@ -12,8 +12,8 @@
 #     review, which fails on an agent's pull request with a blocking finding and passes on anyone else's. It must be on
 #     the head commit itself: when the review copies a passing verdict forward (a push that only merged main in), it
 #     sets the status on the new head, and a head without one waits.
-#   - no review thread with a P1 or P2 badge on its first comment is still open (resolve the thread once it's dealt with,
-#     which runs the gate again: .github/workflows/merge-gate-threads.yml).
+#   - no review thread with a P1 or P2 badge on its first comment is still open (resolve the thread once it's dealt with;
+#     resolving it, or a new review or comment, runs the gate again: .github/workflows/merge-gate-threads.yml).
 # Anything still running makes it "pending". Workflows and apps that aren't about whether the change is sound are left
 # out (IGNORED_*). When it passes on one of Dependabot's pull requests, it merges it (see the end).
 #
@@ -118,14 +118,18 @@ evaluate() {
   # 4. Open review threads whose first comment carries a P1 or P2 badge (Codex's "![P1 Badge](…)"): a reviewer's blocking
   # finding stays open until someone resolves its thread, and resolving it re-runs the gate (merge-gate-threads.yml).
   # An outdated thread (its line changed) counts until it is resolved too: a push doesn't say the finding was dealt with.
-  blocking=$(gh api graphql --paginate -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F number="$number" -f query='
+  # A query that fails leaves the gate pending (a status we can't judge), not a script that dies without posting one.
+  if blocking=$(gh api graphql --paginate -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F number="$number" -f query='
       query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
         repository(owner: $owner, name: $name) { pullRequest(number: $number) {
           reviewThreads(first: 100, after: $endCursor) {
             pageInfo { hasNextPage endCursor }
             nodes { isResolved comments(first: 1) { nodes { body } } } } } } }' \
-      --jq "$OPEN_PRIORITY_THREADS" | wc -l)
-  [ "$blocking" -eq 0 ] || failing+=("$blocking open P1/P2 review comment$([ "$blocking" -eq 1 ] || echo s)")
+      --jq "$OPEN_PRIORITY_THREADS" | wc -l); then
+    [ "$blocking" -eq 0 ] || failing+=("$blocking open P1/P2 review comment$([ "$blocking" -eq 1 ] || echo s)")
+  else
+    pending+=("review threads (couldn't be read)")
+  fi
 
   if [ ${#failing[@]} -gt 0 ]; then
     state=failure; description="Failed: $(list "${failing[@]}")"
