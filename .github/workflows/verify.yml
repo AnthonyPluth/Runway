@@ -1,11 +1,17 @@
 name: Verify flows
 
-# Runs `make verify`'s scripted flows (frontend/verify/flows/*.json) in a real browser against the demo server, so a change
-# to the web app that moves a button, a label or the Tab order fails here instead of leaving a flow broken on main (the
-# budget-rollover-menu flow did). Only a change that can reach a flow runs it: the web app, the demo data, the verify
-# runner or this file. A pull request without one has no run at all, which the merge gate treats as nothing to wait for.
-# A push to main runs it too, for two pull requests that each pass alone and break a flow together.
+# Runs `make verify-flows` in a real browser against the demo server, through fleet's reusable workflow
+# (AnthonyPluth/fleet, .github/workflows/verify.yml) at the commit pinned below: `make verify`'s pages and scripted flows
+# (frontend/verify/flows/*.json), so a change to the web app that moves a button, a label or the Tab order fails here
+# instead of leaving a flow broken on main (the budget-rollover-menu flow did), then tools/control end to end
+# (frontend/verify/control-smoke.mjs). fleet's workflow sets up Python 3.14 with Poetry (the main dependencies only),
+# Node from .nvmrc with the web app's packages, Chromium and libfaketime (the frozen clock), then runs the one target.
+# Only a change that can reach a flow runs it: the web app, the demo data, the verify runner or this file. A pull
+# request without one has no run at all, which the merge gate treats as nothing to wait for. A push to main runs it too,
+# for two pull requests that each pass alone and break a flow together.
 # It sends nothing out and needs no secret: the demo server is made-up data on the loopback address.
+# The triggers with their path filters, the concurrency group and the job's name (the status the merge gate lists) stay
+# here, because a called workflow can't declare them.
 on:
   push:
     branches: [main]
@@ -23,11 +29,8 @@ on:
       - .github/workflows/verify.yml
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
-# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
-# the last command in a pipeline counts, and a failed gh or curl passes silently).
 defaults:
   run:
     shell: bash
@@ -40,37 +43,10 @@ concurrency:
 
 jobs:
   flows:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
-        with:
-          cache-name: verify
-          install-args: --only main
-      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
-        with:
-          directory: frontend
-      # The runner has no Chromium where verify.mjs looks (PLAYWRIGHT_BROWSERS_PATH), so take the one the locked
-      # @playwright/test version is built for.
-      - name: Install Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      # make verify freezes the clock of the demo server and its seed with libfaketime (runway/verify.py), so the images
-      # only change when the UI or its data does.
-      - name: Install libfaketime
-        run: sudo apt-get update -q && sudo apt-get install -yq libfaketime
-      - name: Build the web app
-        working-directory: frontend
-        run: npm run build
-      # Exits non-zero on a failed step (a selector that matches nothing, a focus that never arrives), a console error or a
-      # 5xx, and prints each as a FAIL line naming the flow and the width.
-      - name: Run the pages and flows
-        run: poetry run python run.py verify
-      # tools/control (the session agents drive the app with) end to end on the same demo data and frozen clock: doctor,
-      # start, snapshot, screenshot, a flow, reset, stop, and nothing left running (frontend/verify/control-smoke.mjs).
-      - name: Drive the app with tools/control
-        if: ${{ !cancelled() }}
-        run: RUNWAY_PYTHON="$(poetry run python -c 'import sys; print(sys.executable)')" node frontend/verify/control-smoke.mjs
+    name: Verify flows
+    permissions:
+      contents: read
+    uses: AnthonyPluth/fleet/.github/workflows/verify.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      make-target: verify-flows
+      poetry-install-args: --only main

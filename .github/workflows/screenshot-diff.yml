@@ -1,24 +1,24 @@
 name: Screenshot diff
 
-# Shows which pixels of the committed screenshots (screenshots/) a pull request changed (tools/screenshot_diff.py):
+# Shows which pixels of the committed screenshots (screenshots/) a pull request changed, through fleet's reusable
+# workflow (AnthonyPluth/fleet, .github/workflows/screenshot-diff.yml, `fleet screenshot-diff`) at the commit pinned
+# below:
 #   - report.html, one self-contained page (no network, every image inline) with, for each changed screenshot, the tabs
-#     Reference, Actual and Slider and boxes around what changed. It is uploaded as an artifact that is not zipped
-#     (`archive: false`);
-#   - the sticky comment: the link to that page, one line of counts and a note, no list of screenshots;
+#     Reference, Actual and Slider and boxes around what changed, uploaded as an artifact that is not zipped;
+#   - the sticky comment (found again by its marker): the link to that page, one line of counts and a note;
 #   - summary.json (the facts for each file), uploaded the same way, for tools that want them.
-# Informational: it never fails a pull request for a diff, and the merge gate ignores it (.github/scripts/merge-gate.sh).
-# Nothing is committed and no image is hosted anywhere: no service, no branch, no Pages. The artifact's link
-# (`artifact-url`) works only for someone logged in to GitHub with access to the repository, so the comment says so.
+# Informational: it never fails a pull request for a diff, and the merge gate ignores it (merge-gate.yml). Nothing is
+# committed and no image is hosted anywhere. The artifact's link works only for someone logged in to GitHub with access
+# to the repository, so the comment says so.
 #
 # It runs on every pull request, not only on ones whose files include screenshots/: a push that reverts the last
 # screenshot change leaves a pull request with no screenshot in its diff, which a `paths:` filter would never run for,
-# and its comment would keep saying there were changes. A pull request without screenshot changes, and without an earlier
-# comment, stops after a git diff and one API call.
+# and its comment would keep saying there were changes.
 #
-# `pull_request`, not `pull_request_target`: nothing here needs a write token for a fork. The tool runs from the pull
-# request's own checkout, which is fine because a pull request that edits this workflow already decides what runs; the
-# token can only write the comment (and a fork's is read-only, so the comment is skipped there, and the job summary and
-# the artifact are still made).
+# `pull_request`, not `pull_request_target`: nothing here needs a write token for a fork (a fork's token is read-only, so
+# the comment is skipped there and the artifact is still made). The tool is installed from fleet's checkout at the
+# pinned commit and run with `python -I`, so a pull request can't change the tool that reports on it; the images are the
+# only pull request content it reads.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -29,102 +29,15 @@ concurrency:
   group: screenshot-diff-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
-# the last command in a pipeline counts, and a failed gh or curl passes silently).
 defaults:
   run:
     shell: bash
 
 jobs:
   diff:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
-      contents: read         # check out the pull request
+      contents: read         # check out the pull request's images
       pull-requests: write   # the comment
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          fetch-depth: 0   # the merge base of the pull request's base and head
-          persist-credentials: false
-      - name: See whether there is anything to do
-        id: look
-        run: |
-          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
-          if [ -n "$(git diff --name-only "$merge_base" "$HEAD_SHA" -- screenshots/)" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-          # The comment an earlier run left (the newest, if there are several): made by Actions and carrying the marker.
-          ids=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-                  --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- screenshot-diff -->"))) | .id')
-          echo "comment=$(tail -n 1 <<< "$ids")" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
-        if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
-        with:
-          cache-name: screenshot-diff
-          install-args: --only dev   # Pillow, which the tool needs, is in the dev group (pyproject.toml)
-      - name: Compare the screenshots
-        if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
-        env:
-          OUT: ${{ runner.temp }}/screenshot-diff   # the runner context isn't available in a job's env, only in steps
-        run: poetry run python tools/screenshot_diff.py --base "$BASE_SHA" --head "$HEAD_SHA" --out "$OUT" --run-url "$RUN_URL"
-      # The page alone, not zipped: a zip would bury it. With `archive: false` the artifact is named after the file (the
-      # `name` input is ignored) and `artifact-url` is the link to it.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
-        id: report
-        if: steps.look.outputs.changed == 'true'
-        with:
-          path: ${{ runner.temp }}/screenshot-diff/report.html
-          archive: false
-          retention-days: 14
-          if-no-files-found: warn
-      # summary.json, the facts for each file, apart from the report. Nothing reads it today; it is kept for tools that might.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
-        if: steps.look.outputs.changed == 'true'
-        with:
-          path: ${{ runner.temp }}/screenshot-diff/summary.json
-          archive: false
-          retention-days: 14
-          if-no-files-found: warn
-      # The comment's link to the report is only known now, so the comment is rendered again from summary.json.
-      - name: Put the report's link in the comment
-        if: steps.look.outputs.changed == 'true' && steps.report.outputs.artifact-url != ''
-        env:
-          OUT: ${{ runner.temp }}/screenshot-diff
-          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
-        run: poetry run python tools/screenshot_diff.py --from-json "$OUT/summary.json" --out "$OUT" --run-url "$RUN_URL" --report-url "$REPORT_URL"
-      - name: Add the summary to the job
-        if: steps.look.outputs.changed == 'true'
-        env:
-          OUT: ${{ runner.temp }}/screenshot-diff
-        run: cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
-      # One comment, found again by its marker: each push updates it, and a push that leaves no screenshot change turns it
-      # into "no screenshot changes" rather than leaving it stale. A pull request that never had a comment and has no change
-      # gets none. A fork's token can't write, and a failure here (a permission, the API) must not fail the pull request: it
-      # only loses the comment.
-      - name: Post or update the comment
-        if: steps.look.outputs.changed == 'true' || steps.look.outputs.comment != ''
-        continue-on-error: true
-        env:
-          COMMENT: ${{ steps.look.outputs.comment }}
-          OUT: ${{ runner.temp }}/screenshot-diff
-        run: |
-          if [ "$HEAD_REPO" != "$REPO" ]; then
-            echo "::notice::A pull request from a fork has a read-only token: the comment is skipped (see the job summary and the artifact)."
-            exit 0
-          fi
-          if [ -n "$COMMENT" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT" -F body=@"$OUT/summary.md" --silent
-          else
-            gh api -X POST "repos/$REPO/issues/$PR/comments" -F body=@"$OUT/summary.md" --silent
-          fi
+    uses: AnthonyPluth/fleet/.github/workflows/screenshot-diff.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      dir: screenshots/
