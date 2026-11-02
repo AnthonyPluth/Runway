@@ -10,9 +10,11 @@ name: Agent review
 # requires both on every pull request. A re-review reads what changed since the last one, and a push that only merges
 # main in carries a passing verdict forward (fleet's docs/agent-review.md).
 #
-# The models are the owner's decision, recorded here and in fleet's workflow header: the first review of every agent's
-# pull request runs on Sonnet; the second review of a risky pull request runs on Fable (claude-fable-5-1; fleet v1.0.0
-# runs it on claude-opus-5-5 as a temporary exception while Fable is rate-limited, recorded in its CHANGELOG). This
+# The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
+# the first review of every agent's pull request runs on Sonnet; the second review of a risky pull request runs on Fable
+# (claude-fable-5-1). fleet v1.0.0 runs the second review on claude-opus-5-5 as a temporary exception while Fable is
+# rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG entry, and
+# moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here. This
 # supersedes the earlier rule that every review uses Sonnet and never Opus. Both models are fixed in fleet's workflow,
 # which no input here can change: changing one is a fleet pull request.
 #
@@ -52,9 +54,11 @@ jobs:
       budget-usd: ${{ vars.AGENT_REVIEW_BUDGET_USD || '3' }}
       max-turns: ${{ vars.AGENT_REVIEW_MAX_TURNS || '60' }}
       # A change to one of these makes the pull request risky (.github/** and .claude/** always do): sign-in and the app
-      # lock, TLS, money, the encrypted store and backups, the forecast, the bank and equity providers, the server and
-      # its routes, the sync, the MCP server and its OAuth, the connections, lock and backup routes, the browser
-      # extension, the web app's one place that fetches, the lint rules and the security notes.
+      # lock, TLS, money, the encrypted store and backups, the forecast, every provider (the outside services and the
+      # credentials and keys they hold), the server, its routes and every HTTP handler, the sync, the MCP server and its
+      # OAuth, the browser extension, the web app's one place that fetches, the lint rules and the security notes.
+      # tests/test_agent_review_paths.py holds the list to the layout: every provider and handler file matches an entry,
+      # and every entry matches a file that exists.
       second-review-paths: |
         runway/oidc.py
         runway/applock.py
@@ -63,18 +67,13 @@ jobs:
         runway/storage/secretbox.py
         runway/storage/backup.py
         runway/domain/forecast.py
-        runway/providers/plaid*.py
-        runway/providers/simplefin.py
-        runway/providers/sfinvest.py
-        runway/providers/carta*.py
+        runway/providers/**
         runway/server/handler.py
         runway/server/routes.py
         runway/server/sync.py
         runway/server/mcp_*.py
         runway/server/oauth_http.py
-        runway/server/api/connections.py
-        runway/server/api/lock.py
-        runway/server/api/backups.py
+        runway/server/api/**
         extension/**
         frontend/src/lib/api.ts
         .semgrep/**
