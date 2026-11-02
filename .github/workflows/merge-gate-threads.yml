@@ -1,16 +1,19 @@
 name: Merge gate (threads)
 
-# Resolving or reopening a review thread, or a new review or review comment (a reviewer's P1 can land after the other
-# checks went green), starts no workflow the merge gate listens to, so this one asks for the gate to decide the pull
-# request again (fleet's merge-gate.sh fails it while a thread with a P1 or P2 badge from Codex is open). fleet's
-# reusable workflow, pinned by commit below, runs main's merge-gate.yml with the pull request's number, as
-# agent-review.yml does, and does nothing else: it checks out nothing and runs nothing of the pull request's.
+# A new review or review comment (a reviewer's P1 can land after the other checks went green) starts no workflow the
+# merge gate listens to, so this one asks for the gate to decide the pull request again (fleet's merge-gate.sh fails it
+# while a thread with a P1 or P2 badge from Codex is open). fleet's reusable workflow, pinned by commit below, runs
+# main's merge-gate.yml with the pull request's number, as agent-review.yml does, and does nothing else: it checks out
+# nothing and runs nothing of the pull request's.
+#
+# Resolving a thread is not an event GitHub Actions can start a workflow on (`pull_request_review_thread` is a webhook
+# event only; a workflow that names it is invalid and never runs, which is what happened to this file until 2026-11-02),
+# so after resolving the last open P1 or P2 thread, run the gate again by hand (Actions → Merge gate → Run workflow with
+# the pull request's number) or push; the next review comment does it too.
 #
 # A pull request from a fork gets a read-only token here, so the request is skipped for it: its gate looks again on the
-# next push or check, or by hand (Actions → Merge gate → Run workflow).
+# next push or check, or by hand.
 on:
-  pull_request_review_thread:
-    types: [resolved, unresolved]
   pull_request_review:
     types: [submitted]
   pull_request_review_comment:
