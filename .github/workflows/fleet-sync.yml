@@ -1,0 +1,51 @@
+name: Sync fleet content
+
+# Keeps fleet's content in this repository (the AGENTS.md blocks between the fleet markers, the vendored .claude/ files,
+# tools/fleet and .fleet/version) at the version the workflow pins carry. Dependabot bumps the pins (the `fleet` group in
+# .github/dependabot.yml; the merge gate passes such a pull request but leaves it for the owner to merge); fleet's
+# reusable workflow (AnthonyPluth/fleet, .github/workflows/sync.yml) at the commit pinned below then reads every fleet pin
+# here (they must agree), compares with .fleet/version and, when the pins are newer in the same major, runs
+# `fleet sync --to <pin>` from fleet at that tag and opens, or updates, the pull request `chore: fleet content vX.Y.Z`
+# from the branch `fleet/sync`, with the CHANGELOG entries in between in its body. Pins at a newer major open an issue
+# instead, "fleet vN needs a migration: see CHANGELOG", for a person to do by hand.
+#
+# A pull request opened with a workflow's own token starts no workflows, so nothing would check it: the sync pushes and
+# opens its pull request with the fleet-bot GitHub App's installation token (the FLEET_BOT_APP_ID variable and the
+# FLEET_BOT_PRIVATE_KEY secret, passed by name), minted for this repository alone, narrowed to contents and pull
+# requests, and revoked when the job ends. The App has no Workflows permission and the sync writes nothing under
+# .github/workflows/. Nothing merges by itself: the merge gate and the owner decide. It runs on a push to main that
+# touches the workflows (a merged pin bump), weekly (a bump merged by hand, or a run that failed) and by hand.
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/**]
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Print the plan and the pull request instead of opening it"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: fleet-sync
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    permissions:
+      contents: read           # the checkout; the pull request is pushed with the App token
+      issues: write            # the migration issue
+    uses: AnthonyPluth/fleet/.github/workflows/sync.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      app-id: ${{ vars.FLEET_BOT_APP_ID }}
+      dry-run: ${{ inputs.dry-run || false }}
+    secrets:
+      FLEET_BOT_PRIVATE_KEY: ${{ secrets.FLEET_BOT_PRIVATE_KEY }}

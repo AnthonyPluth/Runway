@@ -1,0 +1,23 @@
+name: Deep scan due
+
+# Once a quarter, fleet's reusable workflow (AnthonyPluth/fleet, .github/workflows/deep-scan-due.yml) at the commit
+# pinned below opens one "Deep security scan due" issue (labels `manual`, `security`), unless one is open, with the link
+# to fleet's deep-scan runbook, the revision of the last scan and the number of commits since. The scan itself is run by
+# a person (the claude-security plugin asks a confirmation only the person's own request can answer), so a workflow can
+# only remind. `issues: write` is all it needs, and no secrets.
+on:
+  schedule:
+    - cron: "17 7 3 1,4,7,10 *"   # quarterly
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  remind:
+    permissions:
+      issues: write
+    uses: AnthonyPluth/fleet/.github/workflows/deep-scan-due.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0

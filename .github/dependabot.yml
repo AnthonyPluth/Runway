@@ -17,7 +17,11 @@ updates:
     commit-message:
       prefix: deps
 
-  # Actions used by the workflows (.github/workflows/) and by the composite actions they share (.github/actions/)
+  # Actions used by the workflows (.github/workflows/) and by the composite actions they share (.github/actions/).
+  # fleet's reusable workflows (AnthonyPluth/fleet, pinned by commit with the release in a comment) move in one group of
+  # their own, so every fleet pin moves at once: the merge gate passes such a pull request but leaves it for the owner
+  # to merge, and merging it starts fleet-sync.yml, which opens the content's pull request. A dependency joins the first
+  # group whose patterns match, so fleet's comes first.
   - package-ecosystem: github-actions
     directories:
       - /
@@ -28,6 +32,8 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      fleet:
+        patterns: ["AnthonyPluth/fleet/*"]
       actions:
         patterns: ["*"]
     commit-message:
@@ -65,17 +71,6 @@ updates:
         update-types: [minor, patch]
     commit-message:
       prefix: docs
-
-  # The Claude Code that the independent review runs (.github/agent-review/package.json)
-  - package-ecosystem: npm
-    directory: /.github/agent-review
-    schedule:
-      interval: weekly
-      day: monday
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: ci
 
   # The base images in the Dockerfile (python:3.14-slim, node:26-slim)
   - package-ecosystem: docker

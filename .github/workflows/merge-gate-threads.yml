@@ -2,22 +2,21 @@ name: Merge gate (threads)
 
 # Resolving or reopening a review thread, or a new review or review comment (a reviewer's P1 can land after the other
 # checks went green), starts no workflow the merge gate listens to, so this one asks for the gate to decide the pull
-# request again (.github/scripts/merge-gate.sh fails it while a thread with a P1 or P2 badge is
-# open). It runs main's copy of merge-gate.yml, as agent-review.yml does, and does nothing else.
+# request again (fleet's merge-gate.sh fails it while a thread with a P1 or P2 badge from Codex is open). fleet's
+# reusable workflow, pinned by commit below, runs main's merge-gate.yml with the pull request's number, as
+# agent-review.yml does, and does nothing else: it checks out nothing and runs nothing of the pull request's.
 #
 # A pull request from a fork gets a read-only token here, so the request is skipped for it: its gate looks again on the
 # next push or check, or by hand (Actions → Merge gate → Run workflow).
-
 on:
   pull_request_review_thread:
     types: [resolved, unresolved]
   pull_request_review:
     types: [submitted]
   pull_request_review_comment:
-    types: [created]
+    types: [created, edited, deleted]
 
-permissions:
-  actions: write   # start main's merge-gate.yml
+permissions: {}
 
 defaults:
   run:
@@ -30,12 +29,8 @@ concurrency:
 jobs:
   decide:
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Ask the merge gate to decide again
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: gh workflow run merge-gate.yml --repo "$REPO" --ref main -f pr="$PR"
+    permissions:
+      actions: write   # start main's merge-gate.yml
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      pr: ${{ github.event.pull_request.number }}

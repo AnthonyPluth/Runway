@@ -1,15 +1,18 @@
 name: Merge gate
 
-# One commit status, "Merge gate", on each pull request's head: passing once every check on it has passed (the rules
-# are in .github/scripts/merge-gate.sh). Require it in a ruleset on main
-# (Settings → Rules → Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on.
-# It also merges Dependabot's pull requests once it passes.
+# One commit status, "Merge gate", on each pull request's head, decided by fleet's reusable workflow and its
+# .github/scripts/merge-gate.sh at the commit pinned below: passing once the newest run of every workflow the pull
+# request started has succeeded (and the required ones ran at all), every other app's check run and every commit status
+# has passed (and the required statuses are set), and no review thread with a P1 or P2 badge from Codex is still open;
+# pending while anything is still running; failing otherwise. Require it in a ruleset on main (Settings → Rules →
+# Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on. It also merges
+# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges.
 #
-# It runs from main's copy of this workflow and script, with a write token, and never checks out or runs a pull
-# request's code: it only reads the pull request's checks and threads through the API. So it works for pull requests
-# from forks too.
-# workflow_run is safe here: the job checks out main's script only, never the pull request's code, and hands the event's
-# values to it as environment variables.
+# The triggers, the job's condition and the concurrency group stay here, because a called workflow can't declare them.
+# It runs from main's copy with a write token and never checks out or runs a pull request's code: it only reads the pull
+# request's checks and threads through the API. So it works for pull requests from forks too.
+# workflow_run is safe here: the job runs fleet's script from fleet's checkout, never the pull request's code, and hands
+# the event's values to it as inputs.
 on:  # zizmor: ignore[dangerous-triggers]
   # Each of the pull request's own workflows finishing (the last one to finish decides).
   workflow_run:
@@ -43,24 +46,24 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request') ||
       (github.event_name == 'check_suite' && github.event.check_suite.app.slug != 'github-actions')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15   # waiting for CodeQL takes up to 10 (merge-gate.sh)
     permissions:
       contents: write          # merge Dependabot's pull requests
-      pull-requests: write     # merge them, and read review threads
+      pull-requests: write     # merge them, and read their commits, files and review threads
       statuses: write          # the "Merge gate" status
       actions: write           # read the pull request's workflow runs, and start main's release after a merge
       checks: read             # other apps' check runs
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts
-      - name: Decide
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
-          PR: ${{ inputs.pr }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: .github/scripts/merge-gate.sh
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      sha: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
+      pr: ${{ inputs.pr }}
+      # The workflows that must have run (CodeQL isn't asked of Dependabot's pull requests, whose default setup skips
+      # it), the ones that never count (a preview deployment runs for an hour; the screenshot diff is a comment, never a
+      # verdict) and the statuses that must be set on the head (none on Dependabot's pull requests, which no agent wrote).
+      required-workflows: |
+        Docker image
+        Security scans
+        CodeQL
+      ignored-workflows: Preview|Screenshot diff
+      required-statuses: |
+        Agent review
+        Second review

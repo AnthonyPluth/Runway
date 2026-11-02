@@ -1,46 +1,28 @@
 name: Cancel runs on close
 
-# When a pull request is merged or closed, stop its runs that are still going: the Docker image build and tests,
-# the security scans and the verify flows. Nothing is lost, since a merge starts main's own runs.
+# When a pull request is merged or closed, stop its runs that are still going: the Docker image build and tests, the
+# security scans and the verify flows. Nothing is lost, since a merge starts main's own runs.
 #
 # GitHub doesn't cancel a pull request's runs when it closes. Each of those workflows is in a concurrency group per pull
-# request with cancel-in-progress, which is how a new push already replaces an older run. Each job below joins one of
-# those groups (the names must match the workflows'), so starting it cancels the run in progress; the job itself does
-# nothing. The groups are built from the pull request's number, never from github.ref: once a pull request is merged,
-# github.ref on its closed event is main's, and joining main's groups would cancel main's own release and scans.
-# GitHub's own CodeQL checks come from the repository's settings, not a workflow here, so they aren't covered.
-
+# request with cancel-in-progress, which is how a new push already replaces an older run. fleet's reusable workflow
+# (AnthonyPluth/fleet, .github/workflows/cancel-on-close.yml), pinned by commit below, joins each of the groups listed
+# (the names must match the workflows'; `{0}` is the pull request's number), so starting it cancels the run in progress;
+# the job itself does nothing and needs no permission. The groups are built from the pull request's number, never from
+# github.ref: once a pull request is merged, github.ref on its closed event is main's, and joining main's groups would
+# cancel main's own release and scans. GitHub's own CodeQL checks come from the repository's settings, not a workflow
+# here, so they aren't covered.
 on:
   pull_request:
     types: [closed]
 
 permissions: {}
 
-# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
-# the last command in a pipeline counts, and a failed gh or curl passes silently).
 defaults:
   run:
     shell: bash
 
 jobs:
-  docker:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: docker-image-refs/pull/${{ github.event.pull_request.number }}/merge   # docker.yml
-      cancel-in-progress: true
-    steps:
-      - run: echo "Stopped any Docker image run still going on this pull request."
-  security:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: security-refs/pull/${{ github.event.pull_request.number }}/merge   # security.yml
-      cancel-in-progress: true
-    steps:
-      - run: echo "Stopped any security scan still running on this pull request."
-  verify:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: verify-${{ github.event.pull_request.number }}   # verify.yml
-      cancel-in-progress: true
-    steps:
-      - run: echo "Stopped any verify run still going on this pull request."
+  cancel:
+    uses: AnthonyPluth/fleet/.github/workflows/cancel-on-close.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    with:
+      groups: '["docker-image-refs/pull/{0}/merge", "security-refs/pull/{0}/merge", "verify-{0}"]'   # docker.yml, security.yml, verify.yml

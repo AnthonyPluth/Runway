@@ -1,0 +1,26 @@
+name: Review mining
+
+# Once a month, fleet's reusable workflow (AnthonyPluth/fleet, .github/workflows/review-mining.yml, `fleet review-mine`)
+# at the commit pinned below rewrites the one "Repeated review findings" issue (label `review-mining`): the kinds of
+# review finding that came back on two or more pull requests in the window, read from the reviews' hidden findings
+# records and AGENTS.md's "Mistakes that keep coming back", with the check each should become; the kinds mostly
+# dismissed; and the findings still open at merge. Each row has a "becomes an Agent task" checkbox that keeps its tick.
+# A row there is closed by a check, not by a new sentence in AGENTS.md. No model, no secrets.
+on:
+  schedule:
+    - cron: "17 6 1 * *"   # monthly
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  mine:
+    permissions:
+      contents: read           # AGENTS.md
+      issues: write            # the one issue
+      pull-requests: read      # the pull requests in the window
+    uses: AnthonyPluth/fleet/.github/workflows/review-mining.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0

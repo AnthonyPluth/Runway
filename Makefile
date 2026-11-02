@@ -17,14 +17,16 @@ UNITTEST_PARALLEL ?= $(UNITTEST_PARALLEL_BASE) -j 4
 # processes wait on the database more than on the CPU. Its Postgres needs max_connections of at least 30 per process
 # plus 100 (docs/src/content/docs/contributing/development.md).
 PG_JOBS ?= $(shell tools/test_jobs.sh)
-# Runway's own Semgrep rules (.semgrep/runway.yml), at the version .github/workflows/security.yml pins (change both
-# together). Semgrep isn't in the Poetry environment: it pins dependencies of its own and doesn't run on Python 3.14,
-# so it goes through pipx, on pipx's own Python.
+# Runway's own Semgrep rules (.semgrep/runway.yml), at the version the Security scans workflow runs them at (fleet's
+# .github/scripts/security-semgrep.sh, AnthonyPluth/fleet; keep this pin the same as the fleet version
+# .github/workflows/security.yml pins). Semgrep isn't in the Poetry environment: it pins dependencies of its own and
+# doesn't run on Python 3.14, so it goes through pipx, on pipx's own Python.
 SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg test-timings fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check \
-	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup verify-skill user-feature-map control-smoke
+	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup verify-skill user-feature-map control-smoke \
+	verify-flows
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check api-contract-check fleet-checks test-parallel frontend-check docs-build
@@ -135,6 +137,15 @@ user-feature-map:
 # Verify flows workflow runs it too). Needs what make verify needs; writes only under artifacts/control-smoke/.
 control-smoke: frontend/node_modules frontend-build
 	RUNWAY_PYTHON="$$($(PYTHON) -c 'import sys; print(sys.executable)')" node frontend/verify/control-smoke.mjs
+
+# What the Verify flows workflow runs (.github/workflows/verify.yml, through fleet's verify.yml, which sets up Python,
+# Node, Chromium and libfaketime and then runs this one target): make verify's pages and flows, then control-smoke. The
+# smoke runs even when verify failed, as the workflow's two steps did, so one run shows both results; the exit status is
+# the first failure's.
+verify-flows: frontend/node_modules frontend-build
+	$(PYTHON) run.py verify || status=$$?; \
+	RUNWAY_PYTHON="$$($(PYTHON) -c 'import sys; print(sys.executable)')" node frontend/verify/control-smoke.mjs || status=$${status:-$$?}; \
+	exit $${status:-0}
 
 # The feature map (docs/feature-map.json and its docs page): each route's handler, web app callers, tests and docs.
 # feature-map-check fails when it is out of date or a route has no test (tools/feature_map_allowlist.txt only shrinks).
