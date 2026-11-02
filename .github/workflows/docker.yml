@@ -151,7 +151,7 @@ jobs:
             export TIMINGS_DIR="$RUNNER_TEMP/timings"
             poetry run unittest-parallel -t . -s tests -j "$TEST_JOBS" --result tests.timing_result.TimingResult \
               $(python tests/shard.py "$SHARD") || status=$?
-            poetry run python tools/test_timings.py "$TIMINGS_DIR" | tee -a "$GITHUB_STEP_SUMMARY"
+            tools/fleet test-timings "$TIMINGS_DIR" | tee -a "$GITHUB_STEP_SUMMARY"   # fleet at .fleet/version, as make test-timings
             exit "${status:-0}"
           fi
           # shellcheck disable=SC2046

@@ -10,7 +10,7 @@
 //
 // This file is the command line: the commands, their help (references/cli.md is generated from it: `make verify-skill`),
 // argument parsing, the state file and the session's lifecycle. It imports nothing outside Node until a command needs the
-// browser, so `help` runs anywhere (tools/fleet_checks.py runs it). control-daemon.mjs is the session itself.
+// browser, so `help` runs anywhere (`make fleet-checks` runs it, through pyproject.toml's [[tool.fleet.generated]]). control-daemon.mjs is the session itself.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
