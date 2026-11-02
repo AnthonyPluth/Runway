@@ -44,7 +44,7 @@ jobs:
   # gate too). Anything not listed as the web app's alone, or the backend's alone (the workflows, the Dockerfile, ...),
   # runs everything, and so does every push to main and every manual run.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: only the GitHub API is read
     permissions:
       contents: read
       pull-requests: read      # the pull request's list of changed files
@@ -97,7 +97,7 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: the tests, a throwaway Postgres in Docker and Codecov's uploads run on GitHub's runners
     strategy:
       fail-fast: false         # one shard failing still shows what the others found
       matrix:
@@ -210,7 +210,7 @@ jobs:
   # the web app's lib/api-types.ts, from the routes and runway/server/contract.py), which a change to either side can
   # make stale. Standard library only: no setup beyond Python.
   feature-map:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: standard-library checks, nothing to keep on a runner of its own
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -222,34 +222,24 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 tools/api_contract.py --check
 
-  # Checks that replaced instructions agents kept getting wrong (tools/fleet_checks.py): one Alembic head, a test for
-  # each new migration, the workflows' conventions and, on a pull request, that each of an agent's commits names its
-  # model in a Co-Authored-By trailer. Standard library only.
+  # Checks that replaced instructions agents kept getting wrong, run by fleet's reusable workflow (AnthonyPluth/fleet,
+  # .github/workflows/checks.yml) at the commit pinned below: `fleet checks` with pyproject.toml's [tool.fleet] and
+  # Runway's own tools/app_checks.py (one Alembic head, a test for each new migration, the workflows' conventions, the
+  # skills and the generated verify-runway references, the a11y baseline and, on a pull request, each agent commit's
+  # Co-Authored-By trailer, no test removed or skipped without a trailer saying why, and images only where they belong),
+  # then `fleet drift` (the AGENTS.md blocks and the vendored .claude/ files are fleet's at .fleet/version). The tools come
+  # from fleet at the pinned commit, never from a ref the pull request names.
   fleet-checks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0       # the pull request's commits, back to main
-      - name: Migrations, commit trailers and workflow conventions
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [[ "$BASE" =~ ^[0-9a-f]{40}$ && "$HEAD" =~ ^[0-9a-f]{40}$ ]]; then
-            python3 tools/fleet_checks.py --commits "$BASE..$HEAD"
-          else
-            python3 tools/fleet_checks.py      # main's commits are squashed: their trailers were checked on the pull request
-          fi
+    permissions:
+      contents: read
+    uses: AnthonyPluth/fleet/.github/workflows/checks.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and build it (reporting its bundle sizes to Codecov).
   web:
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: the web app's checks and Codecov's uploads run on GitHub's runners
     defaults:
       run:
         shell: bash
@@ -307,7 +297,7 @@ jobs:
   # and ARM into the build cache. It has no permission to publish anything.
   build:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: builds for ARM under emulation into GitHub's build cache
     outputs:
       version: ${{ steps.next.outputs.version }}
       new: ${{ steps.next.outputs.new }}
@@ -319,9 +309,13 @@ jobs:
           fetch-depth: 0       # full history and tags, to find the last version
           persist-credentials: false
 
+      # fleet's `fleet next-version` (AnthonyPluth/fleet, fleet_tools/next_version.py), run at the version .fleet/version
+      # names through the tools/fleet shim: the step from the highest version ever tagged by the commits since the last
+      # one in this history (feat: a minor, a ! or BREAKING CHANGE: a major, else a patch), and skip when this isn't
+      # main's newest commit. Its outputs are the ones next-version.sh wrote: version, new, newest and skip.
       - name: Work out the next version
         id: next
-        run: .github/scripts/next-version.sh
+        run: tools/fleet next-version
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1   # v4.4.0
         if: steps.next.outputs.skip != 'true'
@@ -368,7 +362,7 @@ jobs:
   publish:
     needs: [test, web, build]
     if: needs.build.outputs.skip != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: publishes to ghcr.io from GitHub's build cache with the workflow's token
     permissions:
       contents: write          # create the tag and the release
       packages: write          # publish to ghcr.io
@@ -437,7 +431,7 @@ jobs:
   # A third-party action, so it runs on its own with only the permission it needs (no access to the repository).
   cleanup:
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: a third-party action on ghcr.io with the workflow's token
     permissions:
       packages: write          # delete old versions from ghcr.io
     steps:
