@@ -309,6 +309,11 @@ jobs:
           fetch-depth: 0       # full history and tags, to find the last version
           persist-credentials: false
 
+      # tools/fleet runs fleet through uvx; without uv on the runner it would pip install it, which PEP 668 can refuse.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884   # v10.3.0
+        with:
+          enable-cache: false
+
       # fleet's `fleet next-version` (AnthonyPluth/fleet, fleet_tools/next_version.py), run at the version .fleet/version
       # names through the tools/fleet shim: the step from the highest version ever tagged by the commits since the last
       # one in this history (feat: a minor, a ! or BREAKING CHANGE: a major, else a patch), and skip when this isn't
