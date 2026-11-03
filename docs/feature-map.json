@@ -155,6 +155,7 @@
         "frontend/src/lib/app.svelte.ts"
       ],
       "tests": [
+        "tests/test_agent_review_paths.py",
         "tests/test_api_handlers.py",
         "tests/test_api_queries.py",
         "tests/test_api_validation.py",
