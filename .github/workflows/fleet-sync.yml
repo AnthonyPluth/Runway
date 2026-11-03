@@ -2,7 +2,7 @@ name: Sync fleet content
 
 # Keeps fleet's content in this repository (the AGENTS.md blocks between the fleet markers, the vendored .claude/ files,
 # tools/fleet and .fleet/version) at the version the workflow pins carry. Dependabot bumps the pins (the `fleet` group in
-# .github/dependabot.yml; the merge gate merges such a pull request once it passes, after fleet v2.1.0); fleet's
+# .github/dependabot.yml; the merge gate passes such a pull request but leaves it for the owner to merge); fleet's
 # reusable workflow (AnthonyPluth/fleet, .github/workflows/sync.yml) at the commit pinned below then reads every fleet pin
 # here (they must agree), compares with .fleet/version and, when the pins are newer in the same major, runs
 # `fleet sync --to <pin>` from fleet at that tag and opens, or updates, the pull request `chore: fleet content vX.Y.Z`
@@ -14,8 +14,7 @@ name: Sync fleet content
 # FLEET_BOT_PRIVATE_KEY secret, passed by name), minted for this repository alone, narrowed to contents and pull
 # requests, and revoked when the job ends. The App has no Workflows permission and the sync writes nothing under
 # .github/workflows/. Nothing merges by itself: the merge gate and the owner decide. It runs on a push to main that
-# touches the workflows (a pin bump merged by hand), when the merge gate starts it after merging a Dependabot pull
-# request (a merge with the gate's token starts no push workflow), weekly (a run that failed) and by hand.
+# touches the workflows (a merged pin bump), weekly (a bump merged by hand, or a run that failed) and by hand.
 on:
   push:
     branches: [main]
