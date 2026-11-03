@@ -208,3 +208,32 @@ warn_redundant_casts = true
 [[tool.mypy.overrides]]
 module = ["amazonorders.*", "py_vapid", "pywebpush"]
 ignore_missing_imports = true
+
+# fleet's checks (`make fleet-checks`, and CI's fleet-checks job through fleet's checks.yml; AnthonyPluth/fleet,
+# docs/adopting.md): a check runs only where its key is set. Runway's own checks (the accessibility baseline's form and
+# that it only shrinks, a flow's inheritance of its page's baseline) are tools/app_checks.py, run through extra-checks.
+# No [tool.fleet.no-comments]: Runway's convention is to match the surrounding comment density. No [tool.fleet.coverage]:
+# there is no coverage floor today (a separate decision).
+[tool.fleet]
+migrations = "runway/storage/migrations/versions"
+migration-tests = "tests/test_migrations.py"
+tested-from = "0036"   # the first migration with a test of its own; the ones before it predate the rule. Never lower it.
+image-homes = ["extension/icons/", "runway/static/"]   # where an image belongs besides the screenshots (see Git and PRs in AGENTS.md)
+image-files = ["docs/src/assets/logo.png"]
+skills = ".claude/skills"
+feature-maps = ["tools/user_feature_map.py"]   # the verify-runway skill's references/feature-map.md (make user-feature-map)
+extra-checks = "tools.app_checks:CHECKS"
+
+# The images make verify writes to screenshots/: <page>-<width>.png, <page>-top-<width>.png and the flows' images, the
+# names read from verify.mjs's PAGES and the flows at the branch's head.
+[tool.fleet.screenshots]
+dir = "screenshots/"
+names = "pages-and-flows"
+verify = "frontend/verify/verify.mjs"
+flows = "frontend/verify/flows"
+
+# tools/control's command reference in the verify-runway skill is exactly what its help generates (make verify-skill).
+[[tool.fleet.generated]]
+path = ".claude/skills/verify-runway/references/cli.md"
+command = "make --no-print-directory -s verify-skill-print"
+fix = "make verify-skill"

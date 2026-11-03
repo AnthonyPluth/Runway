@@ -23,7 +23,7 @@ import { auditVisit, inheritedWhere, inheritProblems, readBaseline, visitProblem
 import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
-// tools/fleet_checks.py reads to know the names of the images `make verify` writes.
+// fleet's images check (`make fleet-checks`, [tool.fleet.screenshots]) and tools/app_checks.py read to know the names of the images `make verify` writes.
 export const VIEWPORTS = { phone: { width: 440, height: 956 }, desktop: { width: 1280, height: 800 } };
 export const DEFAULT_VIEWPORTS = ["phone", "desktop"];
 // Only a flow that lists it runs here (not every page): a phone turned sideways, which app.css still counts as a phone (short, touch-driven).
@@ -103,7 +103,7 @@ export const PAGE_STYLE = "*, *::before, *::after { scroll-behavior: auto !impor
 /** The file one screenshot makes: the full page, so a change anywhere on it shows in the diff (`make screenshots`). */
 export const screenshotFile = (name, viewport) => `${name}-${viewport}.png`;
 /** Each page is also saved as its first screen, `<page>-top-<width>.png`: the window as it opens, before any scrolling, for the
- *  README and the docs site's hero images (a full page is too tall for those). tools/fleet_checks.py reads this name. */
+ *  README and the docs site's hero images (a full page is too tall for those). fleet's images check reads this name. */
 export const TOP = "top";
 
 /** page.screenshot's options for one capture: the full page, except the window as it shows when a modal is open or the

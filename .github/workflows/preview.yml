@@ -34,7 +34,7 @@ jobs:
     concurrency:
       group: preview-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true   # a new preview replaces the one that's up
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # hosted: builds the image and runs it behind a Cloudflare quick tunnel for an hour
     timeout-minutes: 135
     permissions:
       contents: read
