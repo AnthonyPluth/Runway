@@ -232,7 +232,7 @@ jobs:
   fleet-checks:
     permissions:
       contents: read
-    uses: AnthonyPluth/fleet/.github/workflows/checks.yml@281821f17c9a84d59412c33badf5cfdf9cc31d3b   # v1.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/checks.yml@acfb09312e648eb5dde4ace69e8c849c7a33e789   # v1.1.0
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and build it (reporting its bundle sizes to Codecov).
@@ -312,7 +312,8 @@ jobs:
       # fleet's `fleet next-version` (AnthonyPluth/fleet, fleet_tools/next_version.py), run at the version .fleet/version
       # names through the tools/fleet shim: the step from the highest version ever tagged by the commits since the last
       # one in this history (feat: a minor, a ! or BREAKING CHANGE: a major, else a patch), and skip when this isn't
-      # main's newest commit. Its outputs are the ones next-version.sh wrote: version, new, newest and skip.
+      # main's newest commit. Its outputs: version (the number to release), new (whether a release is needed), newest
+      # (whether this is main's newest commit) and skip (true when this run should do nothing more).
       - name: Work out the next version
         id: next
         run: tools/fleet next-version

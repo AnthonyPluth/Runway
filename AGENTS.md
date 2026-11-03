@@ -41,7 +41,7 @@ Python goes through Poetry (Python 3.14).
 
 ## Starting work
 
-<!-- fleet:begin starting-work v1.0.0 -->
+<!-- fleet:begin starting-work v1.1.0 -->
 - **One issue, one session, one pull request.** Work starts from an issue written as an agent task: its scope, acceptance criteria, dependencies and the model to use (see [CLAUDE.md](CLAUDE.md)). Start a fresh session for each one, on that model, rather than running many pieces of work through one long session.
 - **Decisions belong in the issue.** If the issue doesn't settle something a user would notice, ask instead of choosing. Otherwise keep existing behaviour exactly; a change that isn't asked for is a regression.
 - **Done means checked.** An issue says how its result is checked (`make check`, a test that fails before the change, `make verify` for anything on screen where the repository has it); the pull request shows that output, not a description of it.
@@ -53,7 +53,7 @@ Python goes through Poetry (Python 3.14).
 
 ## Working in a container
 
-<!-- fleet:begin working-in-a-container v1.0.0 -->
+<!-- fleet:begin working-in-a-container v1.1.0 -->
 - **Start the session in the repository.** The session-start hook (in `.claude/hooks/`) sets up the toolchain, Poetry's environment and the web app's packages, but only for a session whose project directory is this repository. A session started one level up has none of it: the system `python3` lacks the dependencies, and the tests fail on their imports.
 - **Run Python through `poetry run` or `make`** (`make test`, or `poetry run python -m unittest tests.test_x`), never the bare `python3`. `make setup` installs the dependencies by hand.
 - **Subagents make their own worktree** under `.claude/worktrees/` (ignored by `.gitignore`), from the session's checkout, and push from there. A session whose working directory isn't a git repository can't create one for them.
@@ -80,7 +80,7 @@ Python goes through Poetry (Python 3.14).
 
 ## Mistakes that keep coming back
 
-<!-- fleet:begin mistakes v1.0.0 -->
+<!-- fleet:begin mistakes v1.1.0 -->
 **A mistake that repeats gets a check.** When review flags the same kind of mistake on a second pull request, the fix adds a check that would have caught it: a lint rule (ESLint, or Semgrep in `.semgrep/` with a failing and a passing example), a type (strict mypy, a `NewType` or `Literal`), or a test. The item below then names that check in its parenthesis (`checked: waypoint-trip-visibility`, `checked: tests/test_offline.py`). An item stays *human-judged* only when no check can express it, and says why. Every month the "Repeated review findings" issue lists the kinds that came back; a row there is closed by a check, not by a new sentence here.
 
 Review findings on agents' pull requests fall into the same few kinds: check your change for each before you push. The independent review ("Agent review", and "Second review" on a risky pull request) reads every agent's pull request for the *human-judged* ones, and a blocking finding fails the merge gate.
@@ -103,7 +103,7 @@ Runway's own, after fleet's shared ones (a check for one of these goes in `.semg
 
 ## Before you push
 
-Each push starts CI and an independent review, so find what you can locally and push once. The cloud container is a shared machine that can't run the whole suite, so run the targeted checks:
+Each push starts CI and the reviews `.github/workflows/agent-review.yml` runs, so find what you can locally and push once. The cloud container is a shared machine that can't run the whole suite, so run the targeted checks:
 
 - The tests for what you changed, then `make pre-push`. It covers what most often fails CI because a change leaks into a shared fixture: new demo data in `runway/domain/demo.py` (`demo.seed` is read by `test_demo`, `test_api_contract`, `test_api_handlers`, `test_api_queries`, `test_api_validation`, `test_budget_*`, `test_churning_api` and `test_backup`; put data only one test needs in that test); a new route missing from `tests/test_api_contract.py`; a forecast change that moves `tests/fixtures/forecast_golden.json` (regenerate it only when the change is meant to); generated files that weren't regenerated (`make feature-map`, `make api-contract`); and a schema change's migration, its `test_<revision>_…` and the backup tests.
 - Put a test method directly under its own decorators: one added between a `@unittest.skipIf` and its test takes the skip.
@@ -115,7 +115,7 @@ Each push starts CI and an independent review, so find what you can locally and 
 - **Screenshots live in one committed directory, `screenshots/`**, not one per PR: a full-page screenshot of every page and flow at phone and desktop widths (`<name>-<width>.png`) and each page's first screen (`<page>-top-<width>.png`, which the README and the docs show); there is no tablet image. A PR that changes the UI runs `make screenshots` before its last push (`PAGES="…"` for the pages it touched while working; the full run is what catches a leak) and commits what changed, never images copied in by hand, so the UI change shows as image diffs in the PR's Files changed (GitHub's 2-up, swipe and onion-skin views). The only images a change commits are the ones `make verify` writes (`make screenshots` copies them into this directory): they are the visual regression baselines, so show a before and after through those images' diff in the PR, never a hand-made comparison file (`make fleet-checks` fails one: a raster image that is not a page or flow image `make verify` writes into `screenshots/`, or an icon or logo in `extension/icons/`, `runway/static/` or `docs/src/assets/logo.png`). Commit all of the directory's changes, including pages you didn't mean to touch: an unexpected diff is the check that the change didn't leak. The demo data's clock is frozen, so an image changes only when the UI or its data does; a diff on a page you didn't touch is a leak (or a nondeterminism bug: report it). The PR gets a comment from the Screenshot diff workflow automatically, with a link to `report.html` (an unzipped artifact: for each changed screenshot the tabs Reference, Actual and Slider, with boxes around what changed that a checkbox hides; you must be logged in to GitHub to open it) and a line of counts, so don't compare screenshots by hand. Only `make verify`'s made-up demo data is ever committed: the repository is public. `make verify` captures the dark theme only, so check the light theme yourself for a theme-sensitive change, and say so. Skip it for a PR with no UI change, and say so in the description.
 - `make pre-push` before each earlier push, `make check` before the last (below). A review thread with a P1 or P2 badge from Codex also fails the merge gate until the thread is resolved: resolve it once the finding is fixed or answered, then run the Merge gate workflow by hand or push (resolving starts no workflow).
 
-<!-- fleet:begin git-and-prs v1.0.0 -->
+<!-- fleet:begin git-and-prs v1.1.0 -->
 - Work on the branch you were given; never push to `main`.
 - Keep commits focused, with a clear message. An agent's commit ends with a `Co-Authored-By: Claude <Model> <version> <noreply@anthropic.com>` trailer naming the model that wrote it (checked on every pull request).
 - Before pushing to a pull request, run `make check`.
