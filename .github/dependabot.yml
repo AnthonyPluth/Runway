@@ -21,10 +21,10 @@ updates:
   # Actions used by the workflows (.github/workflows/) and by the composite actions they share (.github/actions/).
   # fleet's reusable workflows (AnthonyPluth/fleet, pinned by commit with the release in a comment) move in one group of
   # their own, so every fleet pin moves at once: the merge gate passes such a pull request but leaves it for the owner
-  # to merge (until the merge gate opts in to merging fleet bumps, AnthonyPluth/fleet#81), and merging it starts
-  # fleet-sync.yml, which opens the content's pull request. A dependency joins the first group whose patterns match, so
-  # fleet's comes first. This entry runs daily with a 3-day cooldown for every action, fleet's pins included (the
-  # owner's decision, #590), so a fleet release gets its bump PR 3 days after it.
+  # to merge (until the merge gate opts in to merging fleet bumps, an input AnthonyPluth/fleet#82 adds), and merging it
+  # starts fleet-sync.yml, which opens the content's pull request. A dependency joins the first group whose patterns
+  # match, so fleet's comes first. This entry runs daily with a 3-day cooldown for every action, fleet's pins included
+  # (the owner's decision, #590), so a fleet release gets its bump PR 3 days after it.
   - package-ecosystem: github-actions
     directories:
       - /
