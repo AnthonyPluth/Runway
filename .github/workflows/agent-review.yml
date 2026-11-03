@@ -15,7 +15,7 @@ name: Agent review
 #
 # The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
 # the second review of a risky pull request runs on Fable (claude-fable-5-1); the first review, off here (#579), would
-# run on Sonnet. fleet (v1.0.0 through v2.0.0) runs the second review on claude-opus-5-5 as a temporary exception while
+# run on Sonnet. fleet (v1.0.0 through v2.1.0) runs the second review on claude-opus-5-5 as a temporary exception while
 # Fable is rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG
 # entry, and moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here.
 # Both models are fixed in fleet's workflow, which no input here can change: changing one is a fleet pull request.
