@@ -23,7 +23,7 @@ on:
     types: [submitted]
   pull_request_review_comment:
     types: [created, edited, deleted]
-  issue_comment:  # zizmor: ignore[dangerous-triggers] -- only starts merge-gate.yml by number; checks out and runs nothing of the pull request
+  issue_comment:   # zizmor: ignore[dangerous-triggers] only Codex's own comment on a pull request starts a job, which checks out nothing and passes main's merge gate only the number
     types: [created, edited]
 
 permissions: {}
@@ -34,7 +34,9 @@ defaults:
 
 # The concurrency group is each job's, not the workflow's: every comment on a pull request starts this workflow, and a
 # workflow-level group would let someone's comment (whose run does nothing) cancel the run Codex's comment just started,
-# so the gate wouldn't look again. A skipped job never joins its group.
+# so the gate wouldn't look again. Each job's key is one only a run that starts the gate has (fleet's docs/adopting.md):
+# a comment's run of `decide` has no pull request number, and the `codex-comment` group names the comment's author, so a
+# newer run replaces only one that would have started the same gate.
 jobs:
   decide:
     if: github.event_name != 'issue_comment' && github.event.pull_request.head.repo.full_name == github.repository
@@ -43,16 +45,16 @@ jobs:
       cancel-in-progress: true
     permissions:
       actions: write   # start main's merge-gate.yml
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@538cdc73efd8604dc3e5e19284ae363dabf640a4   # v2.1.0
     with:
       pr: ${{ github.event.pull_request.number }}
   codex-comment:
     if: github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]'
     concurrency:
-      group: merge-gate-threads-${{ github.event.issue.number }}
+      group: merge-gate-threads-comment-${{ github.event.issue.number }}-${{ github.event.comment.user.login }}
       cancel-in-progress: true
     permissions:
       actions: write   # start main's merge-gate.yml
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@538cdc73efd8604dc3e5e19284ae363dabf640a4   # v2.1.0
     with:
       pr: ${{ github.event.issue.number }}
