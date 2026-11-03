@@ -52,6 +52,7 @@ def uses_secretbox(source: str) -> bool:
 
 # The accessors that hand back a settings row decrypted (db.get_setting, db.get_settings).
 SETTING_READERS = ("get_setting", "get_settings")
+SETTING_WRITER = "set_setting"   # encrypts a secret on the way in; what it is given is the plaintext
 SECRET_KEY_NAMES = {name: value for name, value in vars(settings_keys).items()
                     if isinstance(value, str) and value in settings_keys.SECRETS}
 
@@ -126,6 +127,16 @@ def _plain_reads(expr: ast.AST, bindings) -> bool:
     return isinstance(expr, ast.Call) and _reads_secret(expr, bindings)
 
 
+def _writes_secret(call: ast.Call, bindings) -> bool:
+    """Whether the call is db.set_setting with a secret key and a value that isn't None or a literal: a key typed into
+    Settings (from the request body), or a token a provider just got, which the module holds in the clear before it is
+    stored. (A literal is a seed, like demo.py's made-up key; None clears the setting.)"""
+    if _called_name(call) != SETTING_WRITER or len(call.args) < 3:
+        return False
+    value = call.args[2]
+    return not isinstance(value, ast.Constant) and bool(_secret_keys(call.args[1], bindings))
+
+
 def secret_returning_functions(source: str) -> set[str]:
     """Functions that hand back a secret setting they read (`return db.get_setting(conn, sk.OPENROUTER_API_KEY) or None`):
     whoever calls one gets the plaintext too."""
@@ -137,13 +148,15 @@ def secret_returning_functions(source: str) -> set[str]:
 
 
 def reads_secret_setting(source: str, wrappers: frozenset[str] = frozenset()) -> bool:
-    """Whether the module reads a secret setting: a call to get_setting or get_settings whose key is in
+    """Whether the module handles a secret setting in the clear: a call to get_setting or get_settings whose key is in
     settings_keys.SECRETS (named as `sk.X`, imported by name, written as the string, or reached through a module-level
-    tuple), or a call to one of `wrappers`, the functions that return such a setting."""
+    tuple), a call to one of `wrappers`, the functions that return such a setting, or a set_setting that stores one
+    it was given (the handlers that take a key from the request body and only write it)."""
     tree = ast.parse(source)
     bindings = _bindings(tree)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and (_reads_secret(node, bindings) or _called_name(node) in wrappers):
+        if isinstance(node, ast.Call) and (_reads_secret(node, bindings) or _writes_secret(node, bindings)
+                                           or _called_name(node) in wrappers):
             return True
     return False
 
@@ -258,6 +271,8 @@ class ReadsSecretSetting(unittest.TestCase):
             "from ..storage import settings_keys as sk\ndb.get_settings(conn, [sk.PRIMARY_ACCOUNT, sk.REALIE_API_KEY])\n",
             "from ..storage import settings_keys as sk\nKEYS = (sk.SIMPLEFIN_ACCESS_URL,)\nALL = (sk.LLM_MODEL, *KEYS)\n"
             "db.get_settings(conn, ALL)\n",   # through module-level tuples, as api_state does
+            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.REALIE_API_KEY, key)\n",   # a key from the request
+            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.LOGODEV_SECRET, body['s'].strip())\n",
             "db.get_setting(conn, 'vapid_private_key')\n",   # the string itself
             "from ..storage import settings_keys as sk\nget_setting(conn, sk.CARTA_ACCESS_TOKEN)\n",   # imported by name
         ]:
@@ -268,10 +283,12 @@ class ReadsSecretSetting(unittest.TestCase):
         for source in [
             "from ..storage import settings_keys as sk\ndb.get_setting(conn, sk.LLM_MODEL)\n",
             "from ..storage import settings_keys as sk\ndb.get_settings(conn, (sk.HORIZON_DAYS, sk.CARTA_CLIENT_ID))\n",
-            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.PLAID_SECRET, value)\n",   # a write: no plaintext read
             "from ..storage import settings_keys as sk\ndb.get_setting(conn, sk.retail_last(name))\n",
             "from ..storage import settings_keys as sk\ndb.get_setting(conn, key)\n",   # a key it can't trace
             "from ..storage import settings_keys as sk\nx = sk.PLAID_SECRET\n",   # named, never read
+            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.PLAID_SECRET, None)\n",   # clearing one
+            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.OPENROUTER_API_KEY, 'sk-demo')\n",   # a seed
+            "from ..storage import settings_keys as sk\ndb.set_setting(conn, sk.LLM_MODEL, model)\n",   # not a secret
             "db.other_setting(conn, 'plaid_secret')\n",
             "# db.get_setting(conn, sk.PLAID_SECRET) in a comment\n",
         ]:
