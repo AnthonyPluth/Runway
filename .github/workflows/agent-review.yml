@@ -77,14 +77,17 @@ jobs:
       # defaults, .github/** and .claude/**), a pull request is risky only when it changes one of these files: the code
       # that directly implements .github/agent-review/invariants.md, by number there: the encrypted store, what it
       # holds, where settings are decrypted, the one provider call that decrypts its token and the one that encrypts it
-      # on write, and backups (1); sign-in and its sessions, the app lock and the schema's foreign key that ends it with
-      # its session, what assistants can never reach, assistants' OAuth grants, the retail tokens and devices'
-      # notifications (2, 5); money (3); the forecast (4); log scrubbing (6); outbound HTTP (7); and the lint rules and
-      # the import-linter contract (pyproject.toml) that hold 3 and 7. Exact files only, never a directory: any other
-      # change gets Codex's review alone (the first review is off). Label a pull request `security` to have it reviewed
-      # by Claude anyway. tests/test_agent_review_paths.py checks that every entry is a file that exists, so a renamed
-      # module doesn't leave a dead entry behind, and that every module under runway/ that calls secretbox's encrypt or
-      # decrypt is listed.
+      # on write, and backups (1); the modules that read a secret setting (a key in settings_keys.SECRETS, which
+      # db.get_setting decrypts) or are handed one already decrypted, since they hold an access URL, client secret, token
+      # or API key in the clear and could log or return it (1, decided on #581); sign-in and its sessions, the app lock
+      # and the schema's foreign key that ends it with its session, what assistants can never reach, assistants' OAuth
+      # grants, the retail tokens and devices' notifications (2, 5); money (3); the forecast (4); log scrubbing (6);
+      # outbound HTTP (7); and the lint rules and the import-linter contract (pyproject.toml) that hold 3 and 7. Exact
+      # files only, never a directory: any other change gets Codex's review alone (the first review is off). Label a
+      # pull request `security` to have it reviewed by Claude anyway. tests/test_agent_review_paths.py checks that every
+      # entry is a file that exists, so a renamed module doesn't leave a dead entry behind, that every module under
+      # runway/ that calls secretbox's encrypt or decrypt is listed, and that so is every one that reads a secret
+      # setting (or calls a function that returns one); the few modules that are only handed a secret are named there.
       second-review-paths: |
         runway/storage/secretbox.py
         runway/storage/db.py
@@ -101,6 +104,24 @@ jobs:
         runway/server/mcp_access.py
         runway/domain/retail/token.py
         runway/domain/notify.py
+        runway/domain/categorize.py
+        runway/domain/churn_found.py
+        runway/domain/merchants.py
+        runway/domain/retail/items.py
+        runway/providers/banks.py
+        runway/providers/carta.py
+        runway/providers/carta_web.py
+        runway/providers/realie.py
+        runway/providers/webpush.py
+        runway/providers/simplefin.py
+        runway/providers/finnhub.py
+        runway/providers/prices.py
+        runway/server/sync.py
+        runway/server/api/connections.py
+        runway/server/api/equity.py
+        runway/server/api/investments.py
+        runway/server/api/state.py
+        runway/server/api/transactions.py
         runway/money.py
         runway/domain/forecast.py
         runway/monitoring.py
