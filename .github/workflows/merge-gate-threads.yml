@@ -6,18 +6,25 @@ name: Merge gate (threads)
 # main's merge-gate.yml with the pull request's number, as agent-review.yml does, and does nothing else: it checks out
 # nothing and runs nothing of the pull request's.
 #
-# Resolving a thread is not an event GitHub Actions can start a workflow on (`pull_request_review_thread` is a webhook
-# event only; a workflow that names it is invalid and never runs, which is what happened to this file until 2026-11-02),
-# so after resolving the last open P1 or P2 thread, run the gate again by hand (Actions → Merge gate → Run workflow with
-# the pull request's number) or push; the next review comment does it too.
+# Resolving a thread is not an event GitHub Actions can start a workflow on (GitHub sends a webhook for it, which Actions
+# can't subscribe to; a workflow that names it is invalid and never runs, which is what happened to this file until
+# 2026-11-02), so after resolving the last open P1 or P2 thread, run the gate again by hand (Actions → Merge gate → Run
+# workflow with the pull request's number) or push; the next review comment does it too.
 #
 # A pull request from a fork gets a read-only token here, so the request is skipped for it: its gate looks again on the
 # next push or check, or by hand.
+#
+# merge-gate.yml sets `require-codex-review: true`, so the gate waits for Codex's review of the head commit, and a Codex
+# review that finds nothing arrives as a conversation comment, which neither review trigger sees. The `codex-comment`
+# job runs the gate again on Codex's own comments on a pull request only (fleet's docs/adopting.md, "Open review
+# threads"). A comment's workflow runs with the base repository's token, so there is no fork to skip there.
 on:
   pull_request_review:
     types: [submitted]
   pull_request_review_comment:
     types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited]
 
 permissions: {}
 
@@ -26,14 +33,21 @@ defaults:
     shell: bash
 
 concurrency:
-  group: merge-gate-threads-${{ github.event.pull_request.number }}
+  group: merge-gate-threads-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   decide:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'issue_comment' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       actions: write   # start main's merge-gate.yml
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@acfb09312e648eb5dde4ace69e8c849c7a33e789   # v1.1.0
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
     with:
       pr: ${{ github.event.pull_request.number }}
+  codex-comment:
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]'
+    permissions:
+      actions: write   # start main's merge-gate.yml
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
+    with:
+      pr: ${{ github.event.issue.number }}
