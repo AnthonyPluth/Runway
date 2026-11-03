@@ -72,8 +72,8 @@ def _bindings(tree: ast.AST) -> tuple[set[str], dict[str, str], dict[str, ast.ex
                     by_name[a.asname or a.name] = SECRET_KEY_NAMES[a.name]
         elif isinstance(node, ast.Import):
             for a in node.names:
-                if a.name.split(".")[-1] == "settings_keys" and a.asname:
-                    aliases.add(a.asname)
+                if a.name.split(".")[-1] == "settings_keys":
+                    aliases.add(a.asname or a.name)   # without `as`, the full dotted name is what the module writes
     for node in tree.body if isinstance(tree, ast.Module) else []:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             consts[node.targets[0].id] = node.value
@@ -88,7 +88,7 @@ def _secret_keys(expr: ast.AST, bindings, seen: frozenset[str] = frozenset()) ->
     aliases, by_name, consts = bindings
     found: set[str] = set()
     for node in ast.walk(expr):
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in aliases:
+        if isinstance(node, ast.Attribute) and ast.unparse(node.value) in aliases:
             if node.attr in SECRET_KEY_NAMES:
                 found.add(SECRET_KEY_NAMES[node.attr])
         elif isinstance(node, ast.Name):
@@ -117,13 +117,15 @@ def _reads_secret(call: ast.Call, bindings) -> bool:
     return any(_secret_keys(arg, bindings) for arg in key_args)
 
 
-def _plain_reads(expr: ast.AST, bindings) -> bool:
+def _plain_reads(expr: ast.AST, bindings, held: frozenset[str] = frozenset()) -> bool:
     """Whether the expression is a secret read itself, or `read or default` / `a if c else read`: the setting comes back
     as it is (`bool(read)`, a comparison or `json.loads(read)` doesn't hand the secret on)."""
     if isinstance(expr, ast.BoolOp):
-        return any(_plain_reads(v, bindings) for v in expr.values)
+        return any(_plain_reads(v, bindings, held) for v in expr.values)
     if isinstance(expr, ast.IfExp):
-        return _plain_reads(expr.body, bindings) or _plain_reads(expr.orelse, bindings)
+        return _plain_reads(expr.body, bindings, held) or _plain_reads(expr.orelse, bindings, held)
+    if isinstance(expr, ast.Name):
+        return expr.id in held
     return isinstance(expr, ast.Call) and _reads_secret(expr, bindings)
 
 
@@ -138,13 +140,23 @@ def _writes_secret(call: ast.Call, bindings) -> bool:
 
 
 def secret_returning_functions(source: str) -> set[str]:
-    """Functions that hand back a secret setting they read (`return db.get_setting(conn, sk.OPENROUTER_API_KEY) or None`):
-    whoever calls one gets the plaintext too."""
+    """Functions that hand back a secret setting they read (`return db.get_setting(conn, sk.OPENROUTER_API_KEY) or None`,
+    or `key = db.get_setting(...)` and later `return key`): whoever calls one gets the plaintext too. Not followed: a
+    secret that is put in a tuple, dict or object before it is returned, passed on through another function, or handed
+    to a caller as an argument (PLAINTEXT_RECEIVERS names those by hand)."""
     tree = ast.parse(source)
     bindings = _bindings(tree)
-    return {fn.name for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and any(isinstance(node, ast.Return) and node.value is not None and _plain_reads(node.value, bindings)
-                    for node in ast.walk(fn))}
+    names = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            held = frozenset(   # `key = db.get_setting(...)`, returned further down
+                t.id for node in ast.walk(fn) if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+                and _plain_reads(node.value, bindings) for t in (node.targets if isinstance(node, ast.Assign) else [node.target])
+                if isinstance(t, ast.Name))
+            if any(isinstance(node, ast.Return) and node.value is not None and _plain_reads(node.value, bindings, held)
+                   for node in ast.walk(fn)):
+                names.add(fn.name)
+    return names
 
 
 def reads_secret_setting(source: str, wrappers: frozenset[str] = frozenset()) -> bool:
@@ -266,6 +278,7 @@ class ReadsSecretSetting(unittest.TestCase):
             "from ..storage import db, settings_keys as sk\nx = db.get_setting(conn, sk.OPENROUTER_API_KEY)\n",
             "from ..storage import settings_keys as sk\nbool(db.get_setting(conn, sk.CARTA_CLIENT_SECRET) or '')\n",
             "import runway.storage.settings_keys as keys\ndb.get_setting(conn, keys.PLAID_SECRET, 'x')\n",
+            "import runway.storage.settings_keys\ndb.get_setting(conn, runway.storage.settings_keys.PLAID_SECRET)\n",
             "from ..storage.settings_keys import FINNHUB_API_KEY\ndb.get_setting(conn, FINNHUB_API_KEY)\n",
             "from ..storage.settings_keys import LOGODEV_TOKEN as TOKEN\ndb.get_setting(conn, key=TOKEN)\n",
             "from ..storage import settings_keys as sk\ndb.get_settings(conn, [sk.PRIMARY_ACCOUNT, sk.REALIE_API_KEY])\n",
@@ -302,6 +315,10 @@ class ReadsSecretSetting(unittest.TestCase):
                    "def configured(conn):\n    return bool(db.get_setting(conn, sk.OPENROUTER_API_KEY))\n")
         names = secret_returning_functions(wrapper)
         self.assertEqual(names, {"ai_access"})
+        held = ("from ..storage import settings_keys as sk\ndef key(conn):\n    k = db.get_setting(conn, sk.REALIE_API_KEY)\n"
+                "    return k\ndef model(conn):\n    m = db.get_setting(conn, sk.LLM_MODEL)\n    return m\n"
+                "def has(conn):\n    k = db.get_setting(conn, sk.REALIE_API_KEY)\n    return bool(k)\n")
+        self.assertEqual(secret_returning_functions(held), {"key"})   # through a local variable
         self.assertTrue(reads_secret_setting("key = categorize.ai_access(conn)\n", frozenset(names)))
         self.assertTrue(reads_secret_setting("key = ai_access(conn)\n", frozenset(names)))
         self.assertFalse(reads_secret_setting("key = categorize.using_ollama(conn)\n", frozenset(names)))
