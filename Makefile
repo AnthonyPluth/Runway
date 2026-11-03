@@ -18,9 +18,10 @@ UNITTEST_PARALLEL ?= $(UNITTEST_PARALLEL_BASE) -j 4
 # plus 100 (docs/src/content/docs/contributing/development.md).
 PG_JOBS ?= $(shell tools/test_jobs.sh)
 # Runway's own Semgrep rules (.semgrep/runway.yml), at the version the Security scans workflow runs them at (fleet's
-# .github/scripts/security-semgrep.sh, AnthonyPluth/fleet; keep this pin the same as the fleet version
-# .github/workflows/security.yml pins). Semgrep isn't in the Poetry environment: it pins dependencies of its own and
-# doesn't run on Python 3.14, so it goes through pipx, on pipx's own Python.
+# .github/scripts/security-semgrep.sh, AnthonyPluth/fleet, at the commit .github/workflows/security.yml pins: 1.146.0
+# at v1.0.0). Nothing checks the two match without fetching fleet, so a Dependabot `fleet` update that moves fleet's
+# pin moves this one in the same pull request. Semgrep isn't in the Poetry environment: it pins dependencies of its own
+# and doesn't run on Python 3.14, so it goes through pipx, on pipx's own Python.
 SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg test-timings fix \

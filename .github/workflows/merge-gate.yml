@@ -63,6 +63,7 @@ jobs:
         Docker image
         Security scans
         CodeQL
+      # fleet's merge-gate.sh always ignores "Merge gate" and "Cancel runs on close" too, so they aren't listed here.
       ignored-workflows: Preview|Screenshot diff
       required-statuses: |
         Agent review
