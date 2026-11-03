@@ -49,7 +49,9 @@ jobs:
     # cancels the run of an older one. A label event never cancels: it waits for the label run still going, so the
     # review that adding `security` started always finishes and posts its verdict, and while one waits a newer label
     # event takes its place (GitHub keeps one waiting run per group), so the latest labels are what is reviewed last.
-    # Pushes and label events stay apart so neither cancels the other's review.
+    # Pushes and label events stay apart so neither cancels the other's review. The label group isn't split by label
+    # name: fleet's second-review job has one label group per pull request with cancel-in-progress, so two label runs
+    # going at once would still cancel each other there; queueing them here is what keeps a running one whole.
     concurrency:
       group: agent-review-pr-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) && 'label' || 'push' }}
       cancel-in-progress: ${{ !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) }}
@@ -74,14 +76,18 @@ jobs:
       max-turns: ${{ vars.AGENT_REVIEW_MAX_TURNS || '60' }}
       # Beyond the labels (fleet's defaults, `security` and `safety-critical`) and the paths that always count (fleet's
       # defaults, .github/** and .claude/**), a pull request is risky only when it changes one of these files: the code
-      # that directly implements .github/agent-review/invariants.md, by number there: the encrypted store, what it holds
-      # and backups (1); sign-in and its sessions, the app lock, assistants' OAuth grants, the retail tokens and devices'
-      # notifications (2, 5); money (3); the forecast (4); log scrubbing (6); outbound HTTP (7); and the lint rules that
-      # hold 3 and 7. Exact files only, never a directory: any other change gets Codex's review alone (the first
-      # review is off). Label a pull request `security` to have it reviewed by Claude anyway. tests/test_agent_review_paths.py checks that every
-      # entry is a file that exists, so a renamed module doesn't leave a dead entry behind.
+      # that directly implements .github/agent-review/invariants.md, by number there: the encrypted store, what it
+      # holds, where settings are decrypted, the one provider call that decrypts its token, and backups (1); sign-in and
+      # its sessions, the app lock, assistants' OAuth grants, the retail tokens and devices' notifications (2, 5); money
+      # (3); the forecast (4); log scrubbing (6); outbound HTTP (7); and the lint rules and the import-linter contract
+      # (pyproject.toml) that hold 3 and 7. Exact files only, never a directory: any other change gets Codex's review
+      # alone (the first review is off). Label a pull request `security` to have it reviewed by Claude anyway.
+      # tests/test_agent_review_paths.py checks that every entry is a file that exists, so a renamed module doesn't
+      # leave a dead entry behind.
       second-review-paths: |
         runway/storage/secretbox.py
+        runway/storage/db.py
+        runway/providers/plaidapi.py
         runway/storage/settings_keys.py
         runway/storage/backup.py
         runway/oidc.py
@@ -96,6 +102,7 @@ jobs:
         runway/monitoring.py
         runway/tls.py
         .semgrep/runway.yml
+        pyproject.toml
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
