@@ -6,11 +6,11 @@ name: Merge gate
 # has passed (and the required statuses are set), and no review thread with a P1 or P2 badge from Codex is still open;
 # pending while anything is still running; failing otherwise. Require it in a ruleset on main (Settings → Rules →
 # Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on. It also merges
-# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges. fleet's defaults
-# are the owner's review policy: the Claude review's first pass is off, so the gate requires the "Second review" status
-# alone (fleet's default `required-statuses`), and Codex reviews every pull request. `require-codex-review: true` below
-# also keeps the gate pending until Codex has reviewed the head commit (merge-gate-threads.yml runs the gate again when
-# Codex's comment arrives).
+# Dependabot's pull requests once it passes (one that moves a fleet pin too, from the fleet release after v2.1.0; v2.1.0
+# leaves that one for the owner). fleet's defaults are the owner's review policy: the Claude review's first pass is off,
+# so the gate requires the "Second review" status alone (fleet's default `required-statuses`), and Codex reviews every
+# pull request. `require-codex-review: true` below also keeps the gate pending until Codex has reviewed the head commit
+# (merge-gate-threads.yml runs the gate again when Codex's comment arrives).
 #
 # The triggers, the job's condition and the concurrency group stay here, because a called workflow can't declare them.
 # It runs from main's copy with a write token and never checks out or runs a pull request's code: it only reads the pull
@@ -74,3 +74,6 @@ jobs:
       # switch the first review back on, pass agent-review.yml `first-review: true` and list "Agent review" and "Second
       # review" here as `required-statuses`.
       require-codex-review: true
+      # A merge made with the gate's token starts no workflow by itself, so it starts main's release build and security
+      # scan, and fleet-sync.yml, which follows a merged fleet pin bump with the content's pull request.
+      after-merge-workflows: docker.yml security.yml fleet-sync.yml
