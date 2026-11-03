@@ -6,7 +6,9 @@ name: Merge gate
 # has passed (and the required statuses are set), and no review thread with a P1 or P2 badge from Codex is still open;
 # pending while anything is still running; failing otherwise. Require it in a ruleset on main (Settings → Rules →
 # Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on. It also merges
-# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges.
+# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges. The Claude
+# review's first pass is off (agent-review.yml, `first-review: false`), so it requires "Second review" alone: Codex
+# reviews every pull request, and the Claude review only risky ones.
 #
 # The triggers, the job's condition and the concurrency group stay here, because a called workflow can't declare them.
 # It runs from main's copy with a write token and never checks out or runs a pull request's code: it only reads the pull
@@ -65,6 +67,6 @@ jobs:
         CodeQL
       # fleet's merge-gate.sh always ignores "Merge gate" and "Cancel runs on close" too, so they aren't listed here.
       ignored-workflows: Preview|Screenshot diff
+      # To switch the first review back on, add "Agent review" here and drop agent-review.yml's `first-review: false`.
       required-statuses: |
-        Agent review
         Second review

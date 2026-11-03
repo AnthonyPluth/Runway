@@ -1,14 +1,16 @@
 name: Agent review
 
-# The independent reviews of every pull request an AI agent wrote, run by fleet's reusable workflow
-# (AnthonyPluth/fleet, .github/workflows/agent-review.yml; its docs/agent-review.md), pinned by commit below. A fresh
-# Claude Code session with no access to the one that wrote the change reads it against main's AGENTS.md and
-# .github/agent-review/context.md and posts one comment; its verdict is the "Agent review" commit status the merge gate
-# requires. A risky pull request (labelled `security` or `safety-critical`, or changing `.github/**`, `.claude/**` or one
-# of the paths listed below) is reviewed a second time, by another model and against .github/agent-review/invariants.md
-# too, as the "Second review" status; one that isn't risky gets a passing "Second review" saying so, so the merge gate
-# requires both on every pull request. A re-review reads what changed since the last one, and a push that only merges
-# main in carries a passing verdict forward (fleet's docs/agent-review.md).
+# The Claude review of risky pull requests, run by fleet's reusable workflow (AnthonyPluth/fleet,
+# .github/workflows/agent-review.yml; its docs/agent-review.md), pinned by commit below. The independent first review of
+# every agent's pull request is off (`first-review: false`): it posts no "Agent review" status or comment, and Codex
+# reviews every pull request instead (its P1 and P2 threads hold the merge gate). Only a risky pull request (labelled
+# `security` or `safety-critical`, or changing `.github/**`, `.claude/**` or one of the exact files listed below) is
+# reviewed, by a fresh Claude Code session with no access to the one that wrote the change, against main's AGENTS.md,
+# .github/agent-review/context.md and .github/agent-review/invariants.md, as the "Second review" status; one that isn't
+# risky gets a passing "Second review" saying so, so the merge gate can require it on every pull request. A re-review
+# reads what changed since the last one, and a push that only merges main in carries a passing verdict forward (fleet's
+# docs/agent-review.md). To turn the first review back on, drop `first-review: false` below and add "Agent review" back
+# to merge-gate.yml's required-statuses.
 #
 # The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
 # the first review of every agent's pull request runs on Sonnet; the second review of a risky pull request runs on Fable
@@ -31,8 +33,8 @@ permissions: {}
 
 # A newer push replaces a run still going, and a newer label event one still going for a label event (github.ref is
 # main's on pull_request_target, so the group is built from the pull request's number). Pushes and label events stay in
-# groups of their own, as fleet's own job-level groups keep them: a label event runs no first review, so letting it
-# cancel a push's run would leave that head without its "Agent review" verdict.
+# groups of their own, as fleet's own job-level groups keep them: a label event on a label that isn't a trigger posts
+# nothing, so letting it cancel a push's run would leave that head without its "Second review" verdict.
 concurrency:
   group: agent-review-pr-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) && 'label' || 'push' }}
   cancel-in-progress: true
@@ -59,6 +61,7 @@ jobs:
         docs/feature-map.json
         docs/src/content/docs/contributing/feature-map.md
         tests/fixtures/forecast_golden.json
+      first-review: false   # the owner's decision: Codex on every pull request, Claude only on risky ones (above)
       budget-usd: ${{ vars.AGENT_REVIEW_BUDGET_USD || '3' }}
       max-turns: ${{ vars.AGENT_REVIEW_MAX_TURNS || '60' }}
       # Beyond the labels (fleet's defaults, `security` and `safety-critical`) and the paths that always count (fleet's
