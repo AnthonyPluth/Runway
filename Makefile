@@ -1,5 +1,5 @@
 # The checks to run before you push: `make check` runs ruff, mypy, import-linter, Runway's own Semgrep rules, the fleet
-# checks, the feature map's and the API contract's checks, the Python tests (in parallel, as CI does), the web app's
+# checks (tools/fleet, fleet at .fleet/version), the feature map's and the API contract's checks, the Python tests (in parallel, as CI does), the web app's
 # type-check, ESLint, Vitest tests and build, and the docs site's build, each once. The other targets run one part of it. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL)
 # run only in CI, on the pull requests they can affect.
 # Python commands go through Poetry, as in docs/src/content/docs/contributing/development.md.
@@ -25,8 +25,8 @@ SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg test-timings fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify feature-map feature-map-check \
-	fleet-checks api-contract api-contract-check screenshots verify-twice pre-push setup verify-skill user-feature-map control-smoke \
-	verify-flows
+	fleet-checks fleet-sync api-contract api-contract-check screenshots verify-twice pre-push setup verify-skill verify-skill-print \
+	user-feature-map control-smoke verify-flows
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint feature-map-check api-contract-check fleet-checks test-parallel frontend-check docs-build
@@ -59,20 +59,21 @@ test-pg:
 	$(UNITTEST_PARALLEL_BASE) -j $(PG_JOBS)
 
 # The same tests (on SQLite, or on Postgres when $$DATABASE_URL is set), printing where the time goes: the slowest tests
-# and classes, and the time spent making and giving back databases (tests/timing_result.py, tools/test_timings.py).
-# Not part of `make check`. TEST_ARGS passes more arguments, e.g. TEST_ARGS="-k tests.test_backup.".
+# and classes, and the time spent making and giving back databases (tests/timing_result.py writes them; fleet's
+# `fleet test-timings` sums them up). Not part of `make check`. TEST_ARGS passes more arguments, e.g. TEST_ARGS="-k tests.test_backup.".
 test-timings:
 	rm -rf .timings
 	TIMINGS_DIR=.timings PYTHONPATH=. $(UNITTEST_PARALLEL_BASE) -j $(if $(DATABASE_URL),$(PG_JOBS),4) \
 		--result tests.timing_result.TimingResult $(TEST_ARGS) || status=$$?; \
-	$(PYTHON) tools/test_timings.py .timings || report=$$?; exit $${status:-$${report:-0}}
+	tools/fleet test-timings .timings || report=$$?; exit $${status:-$${report:-0}}
 
 # Applies ruff's safe fixes (unused imports and the like); review the diff before committing.
 fix:
 	$(RUFF) check --fix .
 
 # A fresh checkout's dependencies: Poetry's environment (Python and its dev tools) and the web app's packages. The cloud
-# container does this itself (.claude/hooks/session-start.sh); on your own machine it's the first command to run.
+# container does this itself (.claude/hooks/fleet-session-start.sh, configured by .claude/hooks/fleet.conf); on your own
+# machine it's the first command to run.
 setup:
 	poetry install --no-root --no-interaction
 	cd frontend && $(NPM) ci --no-audit --no-fund
@@ -123,9 +124,13 @@ verify-twice: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify --twice $(PAGES)
 
 # tools/control's command reference in the verify-runway skill (.claude/skills/verify-runway/references/cli.md),
-# generated from the CLI's own help: run it after changing a command. make fleet-checks fails when it's out of date.
+# generated from the CLI's own help: run it after changing a command. make fleet-checks fails when it's out of date
+# (verify-skill-print is what it compares the file with: pyproject.toml's [[tool.fleet.generated]]).
 verify-skill:
 	node frontend/verify/control.mjs help --markdown > .claude/skills/verify-runway/references/cli.md
+
+verify-skill-print:
+	@node frontend/verify/control.mjs help --markdown
 
 # The user feature map (.claude/skills/verify-runway/references/feature-map.md): what a person can do, by page and flow, from
 # the verify pages and flows plus references/feature-gotchas.md (hand-edited). make fleet-checks fails when it's out of date.
@@ -172,10 +177,21 @@ screenshots: frontend/node_modules frontend-build
 	$(PYTHON) run.py verify $(PAGES)
 	$(PYTHON) tools/sync_screenshots.py
 
-# Checks that replaced instructions (tools/fleet_checks.py): one Alembic head, a test for each new migration, the
-# workflows' conventions, and the Co-Authored-By trailer on your commits since main, as CI checks a pull request's.
+# Checks that replaced instructions, run by fleet (AnthonyPluth/fleet) at the version .fleet/version names, through the
+# tools/fleet shim (uvx), with Runway's values in pyproject.toml's [tool.fleet] and its own checks in tools/app_checks.py:
+# one Alembic head, a test for each new migration, the workflows' conventions, the skills and the generated verify-runway
+# references, the a11y baseline, and on your commits since main (as CI checks a pull request's) the Co-Authored-By
+# trailer, no test removed or skipped without a Removes-Test or Skips-Test trailer, and images only where they belong.
+# Then fleet drift: fleet's blocks in AGENTS.md and the vendored .claude/ files are byte for byte fleet's at that version.
 fleet-checks:
-	$(PYTHON) tools/fleet_checks.py --commits origin/main..HEAD
+	tools/fleet checks --commits origin/main..HEAD
+	tools/fleet drift
+
+# Brings fleet's content (the AGENTS.md blocks, the vendored .claude/ files, tools/fleet, .fleet/version) to the version
+# the workflow pins carry (`uses: AnthonyPluth/fleet/...@<sha>   # vX.Y.Z`), as .github/workflows/fleet-sync.yml does
+# after a pin bump. FLEET_VERSION=vX.Y.Z picks another version.
+fleet-sync:
+	tools/fleet sync --to $(or $(FLEET_VERSION),$(shell grep -rhoE 'AnthonyPluth/fleet/[^@]+@[0-9a-f]+ +# v[0-9.]+' .github/workflows | head -1 | sed 's/.*# //'))
 
 # The quick checks for what fails CI most often, a minute or so, to run before each push (it doesn't replace make check,
 # which you run once before the last one): the feature map, API contract and fleet checks, and the tests that read

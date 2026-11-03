@@ -1,6 +1,6 @@
 """A unittest-parallel result class (`--result tests.timing_result.TimingResult`, what `make test-timings` runs) that
 writes each test's time, and the time spent making and giving back databases (tests/shared.py's phases), as JSON into
-$TIMINGS_DIR, one file per module run. tools/test_timings.py sums them up. Not used by `make check` or CI's usual run.
+$TIMINGS_DIR, one file per module run. fleet's `fleet test-timings` (`make test-timings`) sums them up. Not used by `make check` or CI's usual run.
 The console output is unittest-parallel's usual."""
 import json
 import os
