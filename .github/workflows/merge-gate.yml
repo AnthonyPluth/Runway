@@ -6,7 +6,11 @@ name: Merge gate
 # has passed (and the required statuses are set), and no review thread with a P1 or P2 badge from Codex is still open;
 # pending while anything is still running; failing otherwise. Require it in a ruleset on main (Settings → Rules →
 # Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on. It also merges
-# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges.
+# Dependabot's pull requests once it passes, except one that moves a fleet pin, which the owner merges. fleet's defaults
+# are the owner's review policy: the Claude review's first pass is off, so the gate requires the "Second review" status
+# alone (fleet's default `required-statuses`), and Codex reviews every pull request. `require-codex-review: true` below
+# also keeps the gate pending until Codex has reviewed the head commit (merge-gate-threads.yml runs the gate again when
+# Codex's comment arrives).
 #
 # The triggers, the job's condition and the concurrency group stay here, because a called workflow can't declare them.
 # It runs from main's copy with a write token and never checks out or runs a pull request's code: it only reads the pull
@@ -52,18 +56,21 @@ jobs:
       statuses: write          # the "Merge gate" status
       actions: write           # read the pull request's workflow runs, and start main's release after a merge
       checks: read             # other apps' check runs
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate.yml@acfb09312e648eb5dde4ace69e8c849c7a33e789   # v1.1.0
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
     with:
       sha: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
       pr: ${{ inputs.pr }}
       # The workflows that must have run (CodeQL isn't asked of Dependabot's pull requests, whose default setup skips
-      # it), the ones that never count (a preview deployment runs for an hour; the screenshot diff is a comment, never a
-      # verdict) and the statuses that must be set on the head (none on Dependabot's pull requests, which no agent wrote).
+      # it) and the ones that never count (a preview deployment runs for an hour; the screenshot diff is a comment, never
+      # a verdict). The required statuses are fleet's default, "Second review" (none on Dependabot's pull requests).
       required-workflows: |
         Docker image
         Security scans
         CodeQL
+      # fleet's merge-gate.sh always ignores "Merge gate" and "Cancel runs on close" too, so they aren't listed here.
       ignored-workflows: Preview|Screenshot diff
-      required-statuses: |
-        Agent review
-        Second review
+      # A passing gate needs Codex's review of the head commit, not only no open P1 or P2 thread: without it a pull
+      # request Codex hadn't reviewed yet could pass. Dependabot's pull requests are exempt (fleet's merge-gate.sh). To
+      # switch the first review back on, pass agent-review.yml `first-review: true` and list "Agent review" and "Second
+      # review" here as `required-statuses`.
+      require-codex-review: true

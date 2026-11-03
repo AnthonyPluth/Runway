@@ -1,22 +1,24 @@
 name: Agent review
 
-# The independent reviews of every pull request an AI agent wrote, run by fleet's reusable workflow
-# (AnthonyPluth/fleet, .github/workflows/agent-review.yml; its docs/agent-review.md), pinned by commit below. A fresh
-# Claude Code session with no access to the one that wrote the change reads it against main's AGENTS.md and
-# .github/agent-review/context.md and posts one comment; its verdict is the "Agent review" commit status the merge gate
-# requires. A risky pull request (labelled `security` or `safety-critical`, or changing `.github/**`, `.claude/**` or one
-# of the paths listed below) is reviewed a second time, by another model and against .github/agent-review/invariants.md
-# too, as the "Second review" status; one that isn't risky gets a passing "Second review" saying so, so the merge gate
-# requires both on every pull request. A re-review reads what changed since the last one, and a push that only merges
-# main in carries a passing verdict forward (fleet's docs/agent-review.md).
+# The Claude review of risky pull requests, run by fleet's reusable workflow (AnthonyPluth/fleet,
+# .github/workflows/agent-review.yml; its docs/agent-review.md), pinned by commit below. The independent first review of
+# every agent's pull request is off, as fleet's default (`first-review` is `false`) has it: it posts no "Agent review"
+# status or comment, and Codex reviews every pull request instead (merge-gate.yml waits for its review of the head, and
+# its P1 and P2 threads hold the gate). Only a risky pull request (labelled `security` or `safety-critical`, or changing
+# `.github/**`, `.claude/**` or one of the exact files listed below) is reviewed, by a fresh Claude Code session with no
+# access to the one that wrote the change, against main's AGENTS.md, .github/agent-review/context.md and
+# .github/agent-review/invariants.md, as the "Second review" status; one that isn't risky gets a passing "Second review"
+# saying so, so the merge gate can require it on every pull request. A re-review reads what changed since the last one,
+# and a push that only merges main in carries a passing verdict forward (fleet's docs/agent-review.md). To turn the
+# first review back on, pass `first-review: true` below and list both "Agent review" and "Second review" in
+# merge-gate.yml's required-statuses.
 #
 # The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
-# the first review of every agent's pull request runs on Sonnet; the second review of a risky pull request runs on Fable
-# (claude-fable-5-1). fleet v1.0.0 runs the second review on claude-opus-5-5 as a temporary exception while Fable is
-# rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG entry, and
-# moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here. This
-# supersedes the earlier rule that every review uses Sonnet and never Opus. Both models are fixed in fleet's workflow,
-# which no input here can change: changing one is a fleet pull request.
+# the second review of a risky pull request runs on Fable (claude-fable-5-1); the first review, off here (#579), would
+# run on Sonnet. fleet (v1.0.0 through v2.0.0) runs the second review on claude-opus-5-5 as a temporary exception while
+# Fable is rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG
+# entry, and moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here.
+# Both models are fixed in fleet's workflow, which no input here can change: changing one is a fleet pull request.
 #
 # Why pull_request_target: it runs main's copy of this caller, and fleet's workflow at the commit pinned here, so a pull
 # request can't change how it is reviewed. The pull request's code is only read, never run (fleet's docs/agent-review.md
@@ -35,12 +37,30 @@ defaults:
 
 jobs:
   review:
+    # A label event starts a run only for a trigger label (fleet's defaults, `security` and `safety-critical`), and an
+    # unlabeled one only when the repository owner sent it: fleet's workflow skips every other label event anyway, and
+    # here one never enters the concurrency group below, so it can't take the place of a run that matters.
+    if: >-
+      !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) ||
+      (contains(fromJSON('["security", "safety-critical"]'), github.event.label.name) &&
+       (github.event.action == 'labeled' || github.event.sender.login == github.repository_owner))
+    # One group for pushes and one for label events, per pull request (github.ref is main's on pull_request_target, so
+    # the group is built from the pull request's number), as fleet's own job-level groups split them. A newer push
+    # cancels the run of an older one. A label event never cancels: it waits for the label run still going, so the
+    # review that adding `security` started always finishes and posts its verdict, and while one waits a newer label
+    # event takes its place (GitHub keeps one waiting run per group), so the latest labels are what is reviewed last.
+    # Pushes and label events stay apart so neither cancels the other's review. The label group isn't split by label
+    # name: fleet's second-review job has one label group per pull request with cancel-in-progress, so two label runs
+    # going at once would still cancel each other there; queueing them here is what keeps a running one whole.
+    concurrency:
+      group: agent-review-pr-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) && 'label' || 'push' }}
+      cancel-in-progress: ${{ !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) }}
     permissions:
       contents: read           # main's instructions and the pull request's code
       pull-requests: write     # the comments
-      statuses: write          # the "Agent review" and "Second review" statuses
+      statuses: write          # the "Second review" status (and "Agent review", when the first review is on)
       actions: write           # start the merge gate
-    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@acfb09312e648eb5dde4ace69e8c849c7a33e789   # v1.1.0
+    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@c5cafc050fda88714f1cb1fb1129487ef0f2b117   # v2.0.0
     with:
       # Left out of the diff the reviewer reads (still listed for it), because deterministic checks cover them: make
       # api-contract-check, make feature-map-check and tests/test_forecast_golden.py. The golden fixture is named here
@@ -53,31 +73,40 @@ jobs:
         tests/fixtures/forecast_golden.json
       budget-usd: ${{ vars.AGENT_REVIEW_BUDGET_USD || '3' }}
       max-turns: ${{ vars.AGENT_REVIEW_MAX_TURNS || '60' }}
-      # A change to one of these makes the pull request risky (.github/** and .claude/** always do): sign-in and the app
-      # lock, TLS, money, the encrypted store and backups, the forecast, every provider (the outside services and the
-      # credentials and keys they hold), the server, its routes and every HTTP handler, the sync, the MCP server and its
-      # OAuth, the browser extension, the web app's one place that fetches, the lint rules and the security notes.
-      # tests/test_agent_review_paths.py holds the list to the layout: every provider and handler file matches an entry,
-      # and every entry matches a file that exists.
+      # Beyond the labels (fleet's defaults, `security` and `safety-critical`) and the paths that always count (fleet's
+      # defaults, .github/** and .claude/**), a pull request is risky only when it changes one of these files: the code
+      # that directly implements .github/agent-review/invariants.md, by number there: the encrypted store, what it
+      # holds, where settings are decrypted, the one provider call that decrypts its token and the one that encrypts it
+      # on write, and backups (1); sign-in and its sessions, the app lock and the schema's foreign key that ends it with
+      # its session, what assistants can never reach, assistants' OAuth grants, the retail tokens and devices'
+      # notifications (2, 5); money (3); the forecast (4); log scrubbing (6); outbound HTTP (7); and the lint rules and
+      # the import-linter contract (pyproject.toml) that hold 3 and 7. Exact files only, never a directory: any other
+      # change gets Codex's review alone (the first review is off). Label a pull request `security` to have it reviewed
+      # by Claude anyway. tests/test_agent_review_paths.py checks that every entry is a file that exists, so a renamed
+      # module doesn't leave a dead entry behind, and that every module under runway/ that calls secretbox's encrypt or
+      # decrypt is listed.
       second-review-paths: |
+        runway/storage/secretbox.py
+        runway/storage/db.py
+        runway/providers/plaidapi.py
+        runway/providers/plaid.py
+        runway/storage/settings_keys.py
+        runway/storage/schema.py
+        runway/storage/backup.py
         runway/oidc.py
         runway/applock.py
-        runway/tls.py
-        runway/money.py
-        runway/storage/secretbox.py
-        runway/storage/backup.py
-        runway/domain/forecast.py
-        runway/providers/**
         runway/server/handler.py
-        runway/server/routes.py
-        runway/server/sync.py
-        runway/server/mcp_*.py
-        runway/server/oauth_http.py
-        runway/server/api/**
-        extension/**
-        frontend/src/lib/api.ts
-        .semgrep/**
-        SECURITY.md
+        runway/server/api/lock.py
+        runway/server/mcp_oauth.py
+        runway/server/mcp_access.py
+        runway/domain/retail/token.py
+        runway/domain/notify.py
+        runway/money.py
+        runway/domain/forecast.py
+        runway/monitoring.py
+        runway/tls.py
+        .semgrep/runway.yml
+        pyproject.toml
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
