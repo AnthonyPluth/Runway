@@ -134,7 +134,7 @@ The owner runs a deep scan with the claude-security plugin by hand; fleet owns t
 - **When:** each time the quarterly "Deep security scan due" issue opens, and before any new bank or brokerage provider ships.
 - **Model:** `claude-fable-5-1`, at high effort, as the doc says.
 - **Where findings go:** Runway is public and holds bank access, so a finding never goes into a public issue, a pull request's text or a commit message. One draft security advisory per confirmed finding; the fix goes through the advisory's private fork or, once the owner decides, a pull request with a neutral title labelled `security`.
-- **The record:** in the tracking issue, only what the doc's "The scan record" lists (the revision stamp's file name, the effort, the counts by severity and the stamp's `verification.status`); the report directory is never committed. The first scan is tracked in #567, which closes once that record is written there; later ones in the reminder issue.
+- **The record:** in the tracking issue, only what the doc's "The scan record" lists (the revision stamp's file name, the effort, the counts by severity and the stamp's `verification.status`); the report directory is never committed. The first scan is tracked in #567, which closes once that record is written there; before closing it, retitle it to exactly "Deep security scan due" so the first reminder reads its record. Later scans are recorded in the reminder issue.
 
 ## Model routing
 
