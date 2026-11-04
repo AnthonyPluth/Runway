@@ -127,6 +127,15 @@ Each push starts CI and the reviews `.github/workflows/agent-review.yml` runs, s
 - Don't hard-wrap lines in pull request descriptions, comments, issues or the body of a commit message: write each paragraph or list item as one line, and let GitHub wrap it to the screen. Only code and repo files keep their own wrapping. Keep the commit subject to one short line.
 <!-- fleet:end git-and-prs -->
 
+## Deep security scans
+
+The owner runs a deep scan with the claude-security plugin by hand; fleet owns the procedure ([fleet's `docs/deep-scan.md`](https://github.com/AnthonyPluth/fleet/blob/main/docs/deep-scan.md)) and the reminder (`.github/workflows/deep-scan-due.yml`). Runway's settings:
+
+- **When:** each time the quarterly "Deep security scan due" issue opens, and before any new bank or brokerage provider ships.
+- **Model:** `claude-fable-5-1`, at high effort, as the doc says.
+- **Where findings go:** Runway is public and holds bank access, so a finding never goes into a public issue, a pull request's text or a commit message. One draft security advisory per confirmed finding; the fix goes through the advisory's private fork or, once the owner decides, a pull request with a neutral title labelled `security`.
+- **The record:** in the tracking issue, only what the doc's "The scan record" lists (the revision stamp's file name, the effort, the counts by severity and the stamp's `verification.status`); the report directory is never committed. The first scan is tracked in #567, which closes once that record is written there; later ones in the reminder issue.
+
 ## Model routing
 
 See [CLAUDE.md](CLAUDE.md) for which model to use for which kind of task.
