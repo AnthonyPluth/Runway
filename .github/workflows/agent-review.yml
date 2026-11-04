@@ -15,7 +15,7 @@ name: Agent review
 #
 # The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
 # the second review of a risky pull request runs on Fable (claude-fable-5-1); the first review, off here (#579), would
-# run on Sonnet. fleet (v1.0.0 through v2.1.0) runs the second review on claude-opus-5-5 as a temporary exception while
+# run on Sonnet. fleet (v1.0.0 through v2.2.0) runs the second review on claude-opus-5-5 as a temporary exception while
 # Fable is rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG
 # entry, and moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here.
 # Both models are fixed in fleet's workflow, which no input here can change: changing one is a fleet pull request.
@@ -60,7 +60,7 @@ jobs:
       pull-requests: write     # the comments
       statuses: write          # the "Second review" status (and "Agent review", when the first review is on)
       actions: write           # start the merge gate
-    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@538cdc73efd8604dc3e5e19284ae363dabf640a4   # v2.1.0
+    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@b554ed883ec02bab75af3ba976743a3b4ed3ba5a   # v2.2.0
     with:
       # Left out of the diff the reviewer reads (still listed for it), because deterministic checks cover them: make
       # api-contract-check, make feature-map-check and tests/test_forecast_golden.py. The golden fixture is named here

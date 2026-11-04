@@ -1,20 +1,22 @@
 name: Sync fleet content
 
 # Keeps fleet's content in this repository (the AGENTS.md blocks between the fleet markers, the vendored .claude/ files,
-# tools/fleet and .fleet/version) at the version the workflow pins carry. Dependabot bumps the pins (the `fleet` group in
-# .github/dependabot.yml; the merge gate passes such a pull request but leaves it for the owner to merge); fleet's
-# reusable workflow (AnthonyPluth/fleet, .github/workflows/sync.yml) at the commit pinned below then reads every fleet pin
-# here (they must agree), compares with .fleet/version and, when the pins are newer in the same major, runs
-# `fleet sync --to <pin>` from fleet at that tag and opens, or updates, the pull request `chore: fleet content vX.Y.Z`
-# from the branch `fleet/sync`, with the CHANGELOG entries in between in its body. Pins at a newer major open an issue
-# instead, "fleet vN needs a migration: see CHANGELOG", for a person to do by hand.
+# tools/fleet and .fleet/version) at the version the workflow pins carry. Dependabot bumps the pins (the `fleet` group
+# in .github/dependabot.yml; the merge gate merges such a pull request once it passes, `automerge-fleet-bumps` in
+# merge-gate.yml, the owner's decision in #590, and then starts this workflow, since its merge starts no `push`
+# workflow); fleet's reusable workflow (AnthonyPluth/fleet, .github/workflows/sync.yml) at the commit pinned below then
+# reads every fleet pin here (they must agree), compares with .fleet/version and, when the pins are newer in the same
+# major, runs `fleet sync --to <pin>` from fleet at that tag and opens, or updates, the pull request `chore: fleet
+# content vX.Y.Z` from the branch `fleet/sync`, with the CHANGELOG entries in between in its body. Pins at a newer major
+# open an issue instead, "fleet vN needs a migration: see CHANGELOG", for a person to do by hand.
 #
 # A pull request opened with a workflow's own token starts no workflows, so nothing would check it: the sync pushes and
 # opens its pull request with the fleet-bot GitHub App's installation token (the FLEET_BOT_APP_ID variable and the
 # FLEET_BOT_PRIVATE_KEY secret, passed by name), minted for this repository alone, narrowed to contents and pull
 # requests, and revoked when the job ends. The App has no Workflows permission and the sync writes nothing under
-# .github/workflows/. Nothing merges by itself: the merge gate and the owner decide. It runs on a push to main that
-# touches the workflows (a merged pin bump), weekly (a bump merged by hand, or a run that failed) and by hand.
+# .github/workflows/. Its pull request doesn't merge by itself (the merge gate merges only Dependabot's): the gate
+# decides and the owner merges it by hand. It runs on a push to main that touches the workflows (a pin bump merged by
+# hand), when the merge gate starts it after merging a fleet bump, weekly (a run that failed) and by hand.
 on:
   push:
     branches: [main]
@@ -43,7 +45,7 @@ jobs:
     permissions:
       contents: read           # the checkout; the pull request is pushed with the App token
       issues: write            # the migration issue
-    uses: AnthonyPluth/fleet/.github/workflows/sync.yml@538cdc73efd8604dc3e5e19284ae363dabf640a4   # v2.1.0
+    uses: AnthonyPluth/fleet/.github/workflows/sync.yml@b554ed883ec02bab75af3ba976743a3b4ed3ba5a   # v2.2.0
     with:
       app-id: ${{ vars.FLEET_BOT_APP_ID }}
       dry-run: ${{ inputs.dry-run || false }}
