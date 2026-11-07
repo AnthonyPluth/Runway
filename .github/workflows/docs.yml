@@ -6,8 +6,11 @@ name: Docs
 # reusable workflow (AnthonyPluth/fleet, .github/workflows/docs.yml) at the commit pinned below: `make docs-build`, then
 # the Pages upload and deploy on main only. The triggers with their path filters, the name the merge gate lists and the
 # concurrency group stay here. The job grants all three permissions the called workflow's jobs need: a called workflow
-# can't be given more than its caller has (on a pull request the deploy job is skipped). The check runs are named
-# `docs / build` and `docs / deploy`.
+# can't be given more than its caller has (on a pull request the deploy job is skipped). The effective permissions are
+# the job-level ones in fleet's docs.yml at the pinned commit: `build` (line 78) `contents: read`; `deploy` (line 126)
+# `pages: write` + `id-token: write`, in the `github-pages` environment (line 129), with `if` (line 123) main and not a
+# pull request; the workflow's own top-level `permissions: {}` (line 67). A narrower grant here fails the run at startup
+# (tried: `contents: read` alone is a startup_failure). The check runs are named `docs / build` and `docs / deploy`.
 # Needs Settings → Pages → Build and deployment → Source: "GitHub Actions" once.
 on:
   push:
