@@ -27,6 +27,12 @@ concurrency:
   group: docs-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   docs:
     permissions:
