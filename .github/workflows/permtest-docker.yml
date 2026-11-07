@@ -1,0 +1,12 @@
+name: permtest-docker
+on:
+  push:
+    branches: [test/perm-validation-597]
+permissions: {}
+jobs:
+  build:
+    permissions:
+      contents: read
+    uses: AnthonyPluth/fleet/.github/workflows/docker.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764
+    with:
+      image: runway
