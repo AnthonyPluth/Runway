@@ -39,7 +39,7 @@ jobs:
       security-events: write   # the SARIF uploads
       actions: read            # Scorecard
       id-token: write          # Scorecard publishes its results
-    uses: AnthonyPluth/fleet/.github/workflows/security.yml@77f776706ed977c3e5732b036bbf6a821c62d860   # v2.2.1
+    uses: AnthonyPluth/fleet/.github/workflows/security.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0
     with:
       code-paths: ^(runway|frontend/src|extension|\.semgrep)/
       semgrep-paths: runway run.py frontend/src extension

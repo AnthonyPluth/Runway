@@ -46,13 +46,13 @@ jobs:
     if: github.event_name != 'issue_comment' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       actions: write   # start main's merge-gate.yml
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@77f776706ed977c3e5732b036bbf6a821c62d860   # v2.2.1
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0
     with:
       pr: ${{ github.event.pull_request.number }}
   codex-comment:
     if: github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]'
     permissions:
       actions: write   # start main's merge-gate.yml
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@77f776706ed977c3e5732b036bbf6a821c62d860   # v2.2.1
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate-threads.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0
     with:
       pr: ${{ github.event.issue.number }}
