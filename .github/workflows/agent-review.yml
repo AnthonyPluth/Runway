@@ -14,11 +14,9 @@ name: Agent review
 # merge-gate.yml's required-statuses.
 #
 # The models are the owner's decision, recorded in issue #564 (RW-FLEET-WORKFLOWS), here and in fleet's workflow header:
-# the second review of a risky pull request runs on Fable (claude-fable-5-1); the first review, off here (#579), would
-# run on Sonnet. fleet (v1.0.0 through v2.2.0) runs the second review on claude-opus-5-5 as a temporary exception while
-# Fable is rate-limited, recorded in fleet's CHANGELOG; the fleet release that restores Fable says so in its CHANGELOG
-# entry, and moving the pins below to it (Dependabot's `fleet` group, .github/dependabot.yml) ends the exception here.
-# Both models are fixed in fleet's workflow, which no input here can change: changing one is a fleet pull request.
+# the second review of a risky pull request runs on Opus (claude-opus-5-5), permanently as of fleet v3.0.0; the first
+# review, off here (#579), would run on Sonnet. Both models are fixed in fleet's workflow, which no input here can change:
+# changing one is a fleet pull request.
 #
 # Why pull_request_target: it runs main's copy of this caller, and fleet's workflow at the commit pinned here, so a pull
 # request can't change how it is reviewed. The pull request's code is only read, never run (fleet's docs/agent-review.md
@@ -60,7 +58,7 @@ jobs:
       pull-requests: write     # the comments
       statuses: write          # the "Second review" status (and "Agent review", when the first review is on)
       actions: write           # start the merge gate
-    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@77f776706ed977c3e5732b036bbf6a821c62d860   # v2.2.1
+    uses: AnthonyPluth/fleet/.github/workflows/agent-review.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0
     with:
       # Left out of the diff the reviewer reads (still listed for it), because deterministic checks cover them: make
       # api-contract-check, make feature-map-check and tests/test_forecast_golden.py. The golden fixture is named here

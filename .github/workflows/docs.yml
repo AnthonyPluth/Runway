@@ -2,19 +2,26 @@ name: Docs
 
 # The documentation site (docs/, built with Astro Starlight), published to GitHub Pages at
 # https://anthonypluth.github.io/Runway/. A pull request that changes it only builds it, which also checks every link
-# between pages (starlight-links-validator); a push to main builds and publishes it.
+# between pages (starlight-links-validator); a push to main builds and publishes it. The build and the deploy are fleet's
+# reusable workflow (AnthonyPluth/fleet, .github/workflows/docs.yml) at the commit pinned below: `make docs-build`, then
+# the Pages upload and deploy on main only. The triggers with their path filters, the name the merge gate lists and the
+# concurrency group stay here. The job grants all three permissions the called workflow's jobs need: a called workflow
+# can't be given more than its caller has (on a pull request the deploy job is skipped). The effective permissions are
+# the job-level ones in fleet's docs.yml at the pinned commit: `build` (line 78) `contents: read`; `deploy` (line 126)
+# `pages: write` + `id-token: write`, in the `github-pages` environment (line 129), with `if` (line 123) main and not a
+# pull request; the workflow's own top-level `permissions: {}` (line 67). A narrower grant here fails the run at startup
+# (tried: `contents: read` alone is a startup_failure). The check runs are named `docs / build` and `docs / deploy`.
 # Needs Settings → Pages → Build and deployment → Source: "GitHub Actions" once.
 on:
   push:
     branches: [main]
-    paths: [docs/**, .github/workflows/docs.yml]
+    paths: [docs/**, Makefile, .github/workflows/docs.yml]
   pull_request:
     branches: [main]
-    paths: [docs/**, .github/workflows/docs.yml]
+    paths: [docs/**, Makefile, .github/workflows/docs.yml]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: docs-${{ github.event.pull_request.number || github.ref }}
@@ -27,35 +34,9 @@ defaults:
     shell: bash
 
 jobs:
-  build:
-    runs-on: ubuntu-latest   # hosted: builds the site for GitHub Pages
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
-        with:
-          directory: docs
-      - name: Build the site
-        working-directory: docs
-        run: npm run build
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9   # v5.0.0
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        with:
-          path: docs/dist
-
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest   # hosted: deploys to GitHub Pages with its OIDC token
-    timeout-minutes: 10
+  docs:
     permissions:
+      contents: read
       pages: write      # publish the site
       id-token: write   # prove to Pages the artifact came from this workflow
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346   # v5.0.1
-        id: deploy
+    uses: AnthonyPluth/fleet/.github/workflows/docs.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0

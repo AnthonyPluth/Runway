@@ -23,6 +23,6 @@ defaults:
 
 jobs:
   cancel:
-    uses: AnthonyPluth/fleet/.github/workflows/cancel-on-close.yml@77f776706ed977c3e5732b036bbf6a821c62d860   # v2.2.1
+    uses: AnthonyPluth/fleet/.github/workflows/cancel-on-close.yml@b9f64fa5fd2859c87eabbbcda7b62e02b3dd0764   # v3.0.0
     with:
       groups: '["docker-image-refs/pull/{0}/merge", "security-refs/pull/{0}/merge", "verify-{0}"]'   # docker.yml, security.yml, verify.yml
