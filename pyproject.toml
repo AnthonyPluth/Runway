@@ -12,7 +12,7 @@ dependencies = [
     "pywebpush (>=2.0)",            # push notifications (VAPID + encrypted payloads)
     "python-dateutil (>=2.9)",      # recurring schedules and month arithmetic
     "holidays (>=0.107)",             # bank holidays, for when payments actually land
-    "amazon-orders (>=5.2.0)",        # reading Amazon order pages your browser fetched (see extension/)
+    "amazon-orders (>=5.2.2)",        # reading Amazon order pages your browser fetched (see extension/)
     "websocket-client (>=1.8)",     # live stock prices from Finnhub (only when a key is set; see runway/providers/finnhub.py)
 ]
 
@@ -23,7 +23,7 @@ package-mode = false   # an application, not a library: `poetry install` just in
 # Dependabot updates them here. `poetry install` adds them; the Docker image installs only the main dependencies.
 [tool.poetry.group.dev.dependencies]
 ruff = "0.17.3"
-mypy = "2.4.0"
+mypy = "2.4.1"
 types-python-dateutil = "2.9.0.20261021"
 coverage = "7.17.0"
 unittest-parallel = "1.8.6"
