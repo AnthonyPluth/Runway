@@ -57,7 +57,8 @@
       "tests": [
         "tests/test_api_handlers.py",
         "tests/test_http_pinned.py",
-        "tests/test_monitoring.py"
+        "tests/test_monitoring.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/settings"
@@ -84,7 +85,8 @@
       "handler": "runway/server/api/investments.py:api_investments_sync",
       "web": [],
       "tests": [
-        "tests/test_http_pinned.py"
+        "tests/test_http_pinned.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/investments"
@@ -169,7 +171,8 @@
         "tests/test_mcp.py",
         "tests/test_monitoring.py",
         "tests/test_security.py",
-        "tests/test_server.py"
+        "tests/test_server.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/overview"
@@ -209,7 +212,8 @@
         "tests/test_api_queries.py",
         "tests/test_http_pinned.py",
         "tests/test_routes.py",
-        "tests/test_statements.py"
+        "tests/test_statements.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/settings"
@@ -370,7 +374,8 @@
         "tests/test_security.py",
         "tests/test_server_errors.py",
         "tests/test_splits.py",
-        "tests/test_tx_edits.py"
+        "tests/test_tx_edits.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/transactions"
@@ -389,7 +394,8 @@
         "tests/test_mcp.py",
         "tests/test_routes.py",
         "tests/test_server_errors.py",
-        "tests/test_tx_edits.py"
+        "tests/test_tx_edits.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/transactions"
@@ -1464,7 +1470,9 @@
         "frontend/src/lib/components/settings/SimpleFinSetup.svelte"
       ],
       "tests": [
-        "tests/test_mcp.py"
+        "tests/test_mcp.py",
+        "tests/test_simplefin.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/settings"
@@ -1850,7 +1858,8 @@
         "frontend/src/lib/components/investments/live.ts"
       ],
       "tests": [
-        "tests/test_routes.py"
+        "tests/test_routes.py",
+        "tests/test_verify_fakes.py"
       ],
       "docs": [
         "using/investments"

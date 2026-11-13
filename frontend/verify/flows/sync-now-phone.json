@@ -1,0 +1,22 @@
+{
+  "name": "sync-now-phone",
+  "page": "overview",
+  "inherits_page_baseline": true,
+  "viewports": ["phone"],
+  "steps": [
+    {"goto": "#overview"},
+    {"click": "nav[aria-label=Main]:has(button[aria-haspopup=dialog]) button:has-text('More')"},
+    {"wait_for": "[role=dialog][data-state=open]"},
+    {"expect_text": {"selector": "[role=dialog] [role=status]", "text": "Not synced yet"}},
+    {"click": "[role=dialog] button[aria-label='Sync now']", "timeout": 30000},
+    {"wait_for": "[role=dialog] [role=status]:has-text('Up to date')", "timeout": 30000},
+    {"screenshot": "synced"},
+    {"click": "[role=dialog][data-state=open] button:has-text('Close')"},
+    {"goto": "#transactions"},
+    {"wait_for": "[data-tx]:has-text('Taco Place'):has-text('Pending')"},
+    {"wait_for": "[data-tx]:has-text('Green Grocer Market'):has-text('58.12')"},
+    {"wait_for": "[data-tx]:has-text('Corner Coffee'):has-text('6.75')"},
+    {"screenshot": "transactions"},
+    {"goto": "#overview"}
+  ]
+}

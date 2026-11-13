@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { captureOptions, capturing, DEVICE_CACHE, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
-  STILL, timeScale, TOP, unknownPages, unsettled, VIEWPORTS, heldByClosingModal } from "./verify.mjs";
+import { captureOptions, capturing, DEVICE_CACHE, expectedErrors, expectedResponse, findChromium, flowProblems, frozenTime, HIDE_TOASTS, holdLayout, DEFAULT_VIEWPORTS, PAGE_STYLE, PAGES, screenshotFile, selectItems,
+  STILL, timeScale, TOP, unexpectedConsole, unknownPages, unsettled, VIEWPORTS, heldByClosingModal } from "./verify.mjs";
 
 describe("flowProblems", () => {
   const ok = { name: "emoji-picker", page: "setup", steps: [{ goto: "#setup/categories" }, { click: "text=Emoji", timeout: 500 }] };
@@ -41,6 +41,20 @@ describe("flowProblems", () => {
     expect(flowProblems({ ...ok, steps: [{ authenticator: "verified" }] })).toEqual(['step 1: authenticator needs "signed_in": true']);
     expect(flowProblems({ ...ok, signed_in: true, steps: [{ authenticator: "maybe" }] })).toEqual(["step 1: authenticator is verified or unverified"]);
     expect(flowProblems({ ...ok, signed_in: "yes" })).toEqual(["signed_in is true or false"]);
+  });
+
+  it("accepts a bank step with one of the stand-in bank's modes", () => {
+    expect(flowProblems({ ...ok, steps: [{ bank: "403" }, { bank: "ok" }, { bank: "partial" }] })).toEqual([]);
+    expect(flowProblems({ ...ok, steps: [{ bank: "down" }] })).toEqual(["step 1: bank is one of ok, 401, 403, 500, slow, partial"]);
+    expect(flowProblems({ ...ok, steps: [{ bank: 403 }] })).toEqual(["step 1: bank takes a string"]);
+  });
+
+  it("accepts expected_errors as METHOD path status, the status a server error", () => {
+    expect(flowProblems({ ...ok, expected_errors: ["POST /api/sync 502"] })).toEqual([]);
+    expect(flowProblems({ ...ok, expected_errors: [] })).toEqual([]);
+    for (const bad of [["POST /api/sync 404"], ["/api/sync 502"], ["POST api/sync 502"], ["POST /api/sync?x=1 502"], ["POST /api/sync 502", 502], "POST /api/sync 502", ["post /api/sync 502"]]) {
+      expect(flowProblems({ ...ok, expected_errors: bad })).toEqual(['expected_errors is a list of "<METHOD> <path> <status>", the status 500 or more ("POST /api/sync 502")']);
+    }
   });
 
   it("accepts the keyboard steps: tab, expect_focus and expect_inert", () => {
@@ -251,5 +265,38 @@ describe("holdLayout", () => {
       delete globalThis.__verifyCapturing;
       Object.assign(globalThis, saved);
     }
+  });
+});
+
+describe("a flow's expected errors", () => {
+  const expected = expectedErrors({ expected_errors: ["POST /api/sync 502"] });
+
+  it("are parsed into the method, path and status", () => {
+    expect(expected).toEqual([{ method: "POST", path: "/api/sync", status: 502, text: "POST /api/sync 502" }]);
+    expect(expectedErrors({})).toEqual([]);
+    expect(expectedErrors({ expected_errors: "POST /api/sync 502" })).toEqual([]);
+  });
+
+  it("excuse exactly that response, and no other", () => {
+    expect(expectedResponse(expected, "POST", "/api/sync", 502)).toBe(expected[0]);
+    expect(expectedResponse(expected, "POST", "/api/sync", 500)).toBeUndefined();
+    expect(expectedResponse(expected, "GET", "/api/sync", 502)).toBeUndefined();
+    expect(expectedResponse(expected, "POST", "/api/sync/auto", 502)).toBeUndefined();
+    expect(expectedResponse([], "POST", "/api/sync", 502)).toBeUndefined();
+  });
+
+  it("excuse the browser's console line about that response, and no other console error", () => {
+    const line = "Failed to load resource: the server responded with a status of 502 (Bad Gateway)";
+    const about = (path, text = line) => ({ text, path });
+    expect(unexpectedConsole([about("/api/sync")], expected)).toEqual([]);
+    expect(unexpectedConsole([about("/api/state")], expected)).toEqual([about("/api/state")]);
+    const other = about("/api/sync", "Failed to load resource: the server responded with a status of 500 (Internal Server Error)");
+    expect(unexpectedConsole([other], expected)).toEqual([other]);
+    const thrown = about("/api/sync", "TypeError: x is not a function");
+    expect(unexpectedConsole([thrown, about("/api/sync")], expected)).toEqual([thrown]);
+    // One line for each response that came: none came, or a second line with one response, and the line stands.
+    expect(unexpectedConsole([about("/api/sync")], [])).toEqual([about("/api/sync")]);
+    expect(unexpectedConsole([about("/api/sync"), about("/api/sync")], expected)).toEqual([about("/api/sync")]);
+    expect(unexpectedConsole([about("/api/sync"), about("/api/sync")], [...expected, ...expected])).toEqual([]);
   });
 });

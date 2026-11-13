@@ -1,0 +1,15 @@
+{
+  "name": "sync-now",
+  "page": "transactions",
+  "inherits_page_baseline": true,
+  "viewports": ["desktop"],
+  "steps": [
+    {"goto": "#transactions"},
+    {"expect_text": {"selector": "aside [role=status]", "text": "Not synced yet"}},
+    {"click": "aside button[aria-label='Sync now']", "timeout": 30000},
+    {"wait_for": "aside [role=status]:has-text('Up to date')", "timeout": 30000},
+    {"wait_for": "[data-tx]:has-text('Taco Place'):has-text('Pending')"},
+    {"wait_for": "[data-tx]:has-text('Green Grocer Market'):has-text('58.12')"},
+    {"wait_for": "[data-tx]:has-text('Corner Coffee'):has-text('6.75')"}
+  ]
+}
