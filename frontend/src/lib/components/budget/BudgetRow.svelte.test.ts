@@ -397,7 +397,7 @@ describe("BudgetRow", () => {
       expect(posts()).toEqual([{ category: "Groceries", amount: "650" }]);
       expect(toast.success).toHaveBeenCalledWith("Groceries: usual amount $650 a month");
       expect(onchanged).toHaveBeenCalledTimes(1);
-      expect(editor()).toBeNull();
+      await vi.waitFor(() => expect(editor()).toBeNull());
     });
 
     it.each(["25", "123.45"])("saves %s from Enter: the 10 step is only the arrow keys' increment, not a rule", async (v) => {
@@ -449,7 +449,7 @@ describe("BudgetRow", () => {
         await userEvent.click(radio("Usual monthly amount"));
         await retype("1");
         await close();
-        expect(editor()).toBeNull();
+        await vi.waitFor(() => expect(editor()).toBeNull());
         expect(posts()).toEqual([]);
         expect(onchanged).not.toHaveBeenCalled();
         // Opened again, it starts from what's saved, not what was typed.
@@ -478,7 +478,7 @@ describe("BudgetRow", () => {
       expect(screen.getByText("No amount takes March 2026 back to the usual $500.")).toBeInTheDocument();
       await userEvent.click(button("Save"));
       expect(toast).toHaveBeenCalledWith("Groceries is back to $500 in Mar 2026", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
-      expect(editor()).toBeNull();
+      await vi.waitFor(() => expect(editor()).toBeNull());
       await undoAction().onClick();
       expect(posts()).toEqual([
         { category: "Groceries", month: "2026-03", amount: "" },
@@ -542,7 +542,7 @@ describe("BudgetRow", () => {
       expect(onchanged).not.toHaveBeenCalled();
       await userEvent.click(button("Save"));
       expect(posts()).toEqual([{ category: "Groceries", amount: "650" }, { category: "Groceries", amount: "650" }]);
-      expect(editor()).toBeNull();
+      await vi.waitFor(() => expect(editor()).toBeNull());
       expect(onchanged).toHaveBeenCalledTimes(1);
     });
 
@@ -550,7 +550,7 @@ describe("BudgetRow", () => {
       setup(own(1234567.89), { budgets: true });
       await open();
       await userEvent.click(button(/^Reset this month to usual/));
-      expect(editor()).toBeNull();
+      await vi.waitFor(() => expect(editor()).toBeNull());
       await undoAction().onClick();
       expect(posts()).toEqual([
         { category: "Groceries", month: "2026-03", amount: "" },
@@ -592,7 +592,7 @@ describe("BudgetRow", () => {
         await userEvent.click(radio("This month only"));
         await retype("800");
         await rerender({ ...props, month: "2026-04" });
-        expect(editor()).toBeNull();
+        await vi.waitFor(() => expect(editor()).toBeNull());
         expect(posts()).toEqual([]);
       });
 
@@ -635,7 +635,7 @@ describe("BudgetRow", () => {
       expect(amount()).toHaveClass("text-base", "h-11");
       expect(radio("This month only")).toHaveAttribute("aria-checked", "true");
       await userEvent.click(button("Cancel"));
-      expect(editor()).toBeNull();
+      await vi.waitFor(() => expect(editor()).toBeNull());
       expect(posts()).toEqual([]);
     });
   });
