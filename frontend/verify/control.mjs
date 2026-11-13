@@ -18,6 +18,7 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BANK_MODES } from "./fakes.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(HERE, "../..");
@@ -35,6 +36,8 @@ export const VIEWPORT_NAMES = ["phone", "desktop"];
 /** What make verify seeds besides the plain demo data (runway/verify.py's SEED_OPTIONS, less the signed-in session). */
 export const SEED_FLAGS = ["ai-buttons", "investments", "receipt", "subcategories"];
 export const DEFAULT_IDLE_MINUTES = 30;
+/** runway/verify.py's FAKES_ENV: with it, each demo server it serves gets its stand-in bank and price service. */
+export const FAKES_ENV = "RUNWAY_VERIFY_FAKES";
 
 /** A failure the agent can act on: a code to branch on, what went wrong and what to do instead. `exit` 2 is a usage error. */
 export class ControlError extends Error {
@@ -97,7 +100,8 @@ export const COMMANDS = {
       "The server and the seed run under libfaketime at make verify's frozen day, and the browser's clock is fixed at noon that day.",
       "One session per checkout, on ports and data of its own: it never takes make verify's machine lock, and a running make verify is left alone.",
       "Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first.",
-      "Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them."],
+      "Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them.",
+      "The demo server has two stand-ins beside it, on loopback ports of their own, as in make verify: a SimpleFIN bridge (see `bank`) and the price service. Every other outbound request it makes still goes nowhere."],
     examples: ["start", "start --viewport desktop", "start --plain --signed-in"],
   },
   stop: {
@@ -118,6 +122,15 @@ export const COMMANDS = {
     args: [], options: { "dry-run": DRY_RUN },
     details: ["What you changed (deleted a transaction, edited a budget) is gone. The browser, viewport and route stay; the port changes."],
     examples: ["reset --dry-run", "reset"],
+  },
+  bank: {
+    group: "session", summary: "How the session's stand-in bank answers a sync: ok, or failing a chosen way.",
+    args: [{ name: "mode", values: BANK_MODES }], options: {},
+    details: ["A session's demo server has a stand-in SimpleFIN bridge beside it (tests/fakes/simplefin_server.py), on the loopback address, with made-up accounts that match the demo's: Sync now and Settings → Connections talk to it, and nothing else does.",
+      "ok answers as a bank that works (the first sync brings a few new purchases). 401, 403 and 500 fail every request that way (403 is what a bridge answers once access is revoked: the app then says to reconnect). slow answers after two seconds. partial leaves one institution out and says it needs attention.",
+      "Without a mode it says the current one. The mode stays until you change it; `reset` starts a new bank at ok.",
+      "The setup token to paste in Settings → Connections is the same every time: aHR0cHM6Ly9zYW1wbGUtYmFuay5pbnZhbGlkL2NsYWltL2RlbW8tc2V0dXAtdG9rZW4= (it brings one more account than the demo has)."],
+    examples: ["bank", "bank 403", "bank ok"],
   },
   goto: {
     group: "navigate", summary: "Open a route of the app.",
@@ -230,7 +243,7 @@ const GROUPS = [
   ["session", "Session"], ["navigate", "Navigate"], ["inspect", "Inspect"], ["interact", "Interact"], ["observe", "Observe"], ["flows", "Flows"], ["help", "Help"],
 ];
 /** The commands that run in the session (sent to control-daemon.mjs); the others run here. */
-export const SESSION_COMMANDS = ["goto", "viewport", "info", "snapshot", "screenshot", "wait-settle", "click", "type", "press", "scroll", "eval", "console", "network", "flow", "reset"];
+export const SESSION_COMMANDS = ["goto", "viewport", "info", "snapshot", "screenshot", "wait-settle", "click", "type", "press", "scroll", "eval", "console", "network", "flow", "reset", "bank"];
 
 // --- Help -----------------------------------------------------------------------------------------------------------
 
@@ -820,7 +833,7 @@ async function startLocked(options) {
   if (status.busy) notes.push(`the machine is busy (${status.busy_per_cpu} per CPU): waits are stretched`);
   if (status.verify_running) notes.push(`make verify is running (${status.verify_running}); this session doesn't touch it`);
   const seed = seedOptions(options);
-  const env = sessionEnv(python);
+  const env = { ...sessionEnv(python), [FAKES_ENV]: "1" };   // each demo server gets its stand-in bank and price service
   const log = openSync(join(CONTROL_DIR, "daemon.log"), "w", 0o600);
   const child = spawn(process.execPath, [DAEMON, "--dir", CONTROL_DIR, "--python", python, "--day", status.frozen_day, "--viewport", options.viewport,
     "--idle-minutes", String(options["idle-minutes"]), "--seed", seed.join(","), ...(options["signed-in"] ? ["--signed-in"] : [])],

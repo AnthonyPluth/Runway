@@ -43,6 +43,35 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 - **Touches:** `Dismiss `, `Show dismissed`, `Show again `.
 - **Drive it:** `tools/control flow overview-dismiss`; or `make verify PAGES="overview-dismiss"`.
 
+#### `simplefin-connect-phone`
+
+- **Starts at:** `#overview`; goes to: `#setup/connections`, `#setup/accounts`.
+- **Widths:** phone.
+- **Touches:** `SimpleFIN`, `Replace the setup token`, `SimpleFIN setup token`, `Connect and sync`.
+- **Drive it:** `tools/control flow simplefin-connect-phone`; or `make verify PAGES="simplefin-connect-phone"`.
+- **What usually breaks:**
+  - The same steps as simplefin-connect, at phone width, on data of its own.
+
+#### `simplefin-connect`
+
+- **Starts at:** `#overview`; goes to: `#setup/connections`, `#setup/accounts`.
+- **Widths:** desktop.
+- **Touches:** `SimpleFIN`, `Replace the setup token`, `SimpleFIN setup token`, `Connect and sync`.
+- **Drive it:** `tools/control flow simplefin-connect`; or `make verify PAGES="simplefin-connect"`.
+- **What usually breaks:**
+  - The setup token is the same every time (it's in the flow's file); claiming it gives a connection with one more account, Vacation Savings. The demo is already connected, so the flow goes through "Replace the setup token".
+  - After connecting, the page reloads and the SimpleFIN row closes: open it again before reading it.
+
+#### `sync-now-phone`
+
+- **Starts at:** `#overview`; goes to: `#transactions`.
+- **Widths:** phone.
+- **Touches:** `More`, `Sync now`, `Close`.
+- **Expects to see:** `Not synced yet`.
+- **Drive it:** `tools/control flow sync-now-phone`; or `make verify PAGES="sync-now-phone"`.
+- **What usually breaks:**
+  - Open More first: the Sync button and the sync status are in that sheet. Close it before looking at Transactions.
+
 ## Transactions (`transactions`)
 
 - **What exists:** The transaction list, review, categories, rules, splits and receipts. Docs: [Transactions](../../../../docs/src/content/docs/using/transactions.md).
@@ -75,6 +104,17 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 - **Touches:** `/^Show all \d+/`.
 - **Expects to see:** `Charged so far`.
 - **Drive it:** `tools/control flow card-projection-open`; or `make verify PAGES="card-projection-open"`.
+
+#### `sync-now`
+
+- **Starts at:** `#transactions`.
+- **Widths:** desktop.
+- **Touches:** `Sync now`.
+- **Expects to see:** `Not synced yet`.
+- **Drive it:** `tools/control flow sync-now`; or `make verify PAGES="sync-now"`.
+- **What usually breaks:**
+  - The first sync brings three card purchases (one pending) and splits the demo's Target purchase into its receipt's parts; a second sync brings only the pending one again.
+  - The Sync button is in the sidebar at desktop width; on a phone it is in the More sheet (sync-now-phone).
 
 #### `transactions-bulk-delete-phone`
 
@@ -296,6 +336,7 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 - **Drive it:** `tools/control goto setup`, `tools/control snapshot --text`, then `click`/`type`/`press`; `tools/control viewport phone|desktop`; batch check `make verify PAGES="setup"`.
 - **What usually breaks:**
   - Settings has tabs that are routes of their own (`#setup/categories`, `#setup/data`); `goto` the tab, not just `setup`.
+  - Connections: only SimpleFIN and the price service have a stand-in beside the demo server (`tools/control bank`, journeys.md's recipe 6). Plaid (its Link widget loads from Plaid), Carta, Realie, Finnhub's live stream, Logo.dev and the AI provider have none: their requests go nowhere, so check those with their unit tests.
 
 ### Flows on Settings
 
@@ -337,3 +378,25 @@ What a person can do in the web app, by page: what is there, how to reach it, ho
 - **Touches:** `Everyday Checking`, `Delete account…`.
 - **Expects to see:** `Depends on it, and needs a place to go:`, `Move these to…`, `Delete them with the account instead`.
 - **Drive it:** `tools/control flow setup-account-delete`; or `make verify PAGES="setup-account-delete"`.
+
+#### `sync-reconnect-phone`
+
+- **Starts at:** `#setup`; goes to: `#setup/connections`, `#setup/accounts`.
+- **Widths:** phone.
+- **Touches:** `More`, `Sync now`, `Close`, `Details`.
+- **Expects to see:** `The last sync didn’t finish. Runway tries again with the next one.`, `SimpleFIN rejected the access credentials`, `Reconnect in Settings.`.
+- **Drive it:** `tools/control flow sync-reconnect-phone`; or `make verify PAGES="sync-reconnect-phone"`.
+- **What usually breaks:**
+  - The same as sync-reconnect, with the Sync button reached through More.
+
+#### `sync-reconnect`
+
+- **Starts at:** `#setup`; goes to: `#setup/connections`, `#setup/accounts`.
+- **Widths:** desktop.
+- **Touches:** `Sync now`, `Details`.
+- **Expects to see:** `The last sync didn’t finish. Runway tries again with the next one.`, `SimpleFIN rejected the access credentials`, `Reconnect in Settings.`.
+- **Drive it:** `tools/control flow sync-reconnect`; or `make verify PAGES="sync-reconnect"`.
+- **What usually breaks:**
+  - `tools/control bank 403` (a flow's `{"bank": "403"}`) makes the stand-in bank refuse; the app's 502 from `/api/sync` is expected then, and the reconnect message is under Details in Settings → Connections → SimpleFIN.
+  - Only a 403 gets "Reconnect in Settings": a 401 or a 500 fails the sync with the bridge's status in the message instead.
+  - Set the bank back (`bank ok`) afterwards, or every later sync in the session fails too.

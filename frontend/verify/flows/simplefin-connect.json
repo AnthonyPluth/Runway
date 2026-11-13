@@ -1,0 +1,23 @@
+{
+  "name": "simplefin-connect",
+  "page": "overview",
+  "inherits_page_baseline": true,
+  "viewports": ["desktop"],
+  "steps": [
+    {"goto": "#setup/connections"},
+    {"click": "details[data-group=banks] summary:has-text('SimpleFIN')"},
+    {"click": "button:has-text('Replace the setup token')"},
+    {"fill": {"selector": "textarea[aria-label='SimpleFIN setup token']", "text": "aHR0cHM6Ly9zYW1wbGUtYmFuay5pbnZhbGlkL2NsYWltL2RlbW8tc2V0dXAtdG9rZW4="}},
+    {"screenshot": "token"},
+    {"click": "button:has-text('Connect and sync')", "timeout": 30000},
+    {"wait_for": "details[data-group=banks]:not([open]):has(button[aria-expanded=false]):has-text('6 accounts from')", "timeout": 30000},
+    {"click": "details[data-group=banks]:not([open]) summary:has-text('SimpleFIN')"},
+    {"wait_for": "text=6 accounts from Sample Bank, Sample Card Co, Sample Credit Union, Sample Lending"},
+    {"screenshot": "connected"},
+    {"goto": "#setup/accounts"},
+    {"wait_for": "summary:has-text('Vacation Savings')"},
+    {"scroll_to": "summary:has-text('Vacation Savings')"},
+    {"screenshot": "accounts"},
+    {"goto": "#overview"}
+  ]
+}

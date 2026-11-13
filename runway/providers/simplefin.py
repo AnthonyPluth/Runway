@@ -5,6 +5,7 @@ import base64
 import http.client
 import ipaddress
 import json
+import os
 import re
 import socket
 import time
@@ -43,17 +44,56 @@ def _public_ip(address: str) -> bool:
     return ipaddress.ip_address(address.split("%")[0]).is_global
 
 
+# The stand-in bridge that `make verify` and tools/control run beside each demo server (tests/fakes/simplefin_server.py),
+# as "<name>=<loopback address>:<port>": runway/verify.py sets it in that demo server's environment and nothing else
+# does. A SimpleFIN address at exactly that name is opened at that port of this machine instead of being looked up.
+# Narrow on purpose. The name must end in ".invalid", which is reserved (RFC 6761) and never resolves, so no real
+# bridge's address is ever sent anywhere else; the address must be a loopback one, so nothing else on the machine's
+# network is reachable through it; anything else in the variable is ignored. https, the certificate check (against the
+# name) and no redirects apply to it as to any bridge.
+STAND_IN_ENV = "RUNWAY_SIMPLEFIN_STAND_IN"
+# Letters, digits and hyphens in dot-separated labels: nothing a URL could read as a port, a path or credentials.
+_HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
+
+
+def stand_in(value: str | None = None) -> tuple[str, str, int] | None:
+    """(name, loopback address, port) from STAND_IN_ENV (or `value`), or None when it's unset or isn't a .invalid name
+    at a port of a loopback address."""
+    name, _, where = (os.environ.get(STAND_IN_ENV, "") if value is None else value).strip().partition("=")
+    address, _, port = where.rpartition(":")
+    name = name.lower()
+    try:
+        ok = (name.endswith(".invalid") and _HOST_NAME.fullmatch(name) is not None and ipaddress.ip_address(address).is_loopback
+              and port.isascii() and port.isdigit() and 0 < int(port) < 65536)
+    except ValueError:   # not an address
+        return None
+    return (name, address, int(port)) if ok else None
+
+
+def _stand_in_for(host: str | None, port: int | None) -> tuple[str, int] | None:
+    """Where the stand-in bridge listens, when `host` (at the https port) is its name; None for every other address."""
+    found = stand_in()
+    if found and host and host.lower() == found[0] and port in (None, 443):
+        return found[1], found[2]
+    return None
+
+
 class _PublicHTTPSConnection(http.client.HTTPSConnection):
     """An https connection that hangs up before saying anything if the address it reached isn't on the internet: the
     name may have been checked a moment ago (check_address) and point somewhere else now (DNS rebinding), or the
     address may come from a restored backup, which was never checked."""
     def connect(self):
-        http.client.HTTPConnection.connect(self)   # just the TCP connection (and a proxy's tunnel, if one is set)
         # _tunnel_host and _context are http.client/urllib internals (not in their type stubs).
-        if not self._tunnel_host and not _public_ip(self.sock.getpeername()[0]):  # type: ignore[attr-defined]  # through a proxy, it decides
-            self.sock.close()
-            raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
-        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)  # type: ignore[attr-defined]
+        tunnel = self._tunnel_host  # type: ignore[attr-defined]
+        fake = None if tunnel else _stand_in_for(self.host, self.port)
+        if fake:   # make verify's stand-in bridge (STAND_IN_ENV): opened where it listens, its certificate checked as any other's
+            self.sock = socket.create_connection(fake, self.timeout)
+        else:
+            http.client.HTTPConnection.connect(self)   # just the TCP connection (and a proxy's tunnel, if one is set)
+            if not tunnel and not _public_ip(self.sock.getpeername()[0]):   # through a proxy, it decides
+                self.sock.close()
+                raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=tunnel or self.host)  # type: ignore[attr-defined]
 
 
 class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
@@ -106,8 +146,11 @@ def check_address(url: str) -> None:
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "https" or not parts.hostname:
         raise SimpleFinError("That doesn't look like a SimpleFIN address.")
+    port = parts.port
+    if _stand_in_for(parts.hostname, port):
+        return   # make verify's stand-in bridge, on this machine (STAND_IN_ENV)
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(parts.hostname, port or 443, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError) as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: can't find {parts.hostname}.") from e
     for info in infos:

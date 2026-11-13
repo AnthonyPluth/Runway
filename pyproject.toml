@@ -92,8 +92,9 @@ allowed_importers = ["runway.tls"]
 ignore_imports = [
     "runway.server.handler -> socket",                 # the web server itself: it accepts connections, it doesn't open them
     "runway.server.handler -> http",
-    "runway.providers.simplefin -> socket",            # hangs up on an address that isn't public (DNS rebinding),
-    "runway.providers.simplefin -> http",              # inside tls.opener() and its certificate checks
+    "runway.providers.simplefin -> socket",            # hangs up on an address that isn't public (DNS rebinding), and
+    "runway.providers.simplefin -> http",              # opens make verify's stand-in bridge at its loopback port
+                                                       # (STAND_IN_ENV); both inside tls.opener() and its certificate checks
     "runway.providers.plaidapi -> http",               # http.client.HTTPException: a reply cut off mid-read
     "runway.providers.prices -> http",
     "runway.providers.finnhub -> websocket",           # Finnhub's live prices come over a websocket, with tls's context

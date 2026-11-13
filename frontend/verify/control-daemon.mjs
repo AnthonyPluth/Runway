@@ -15,8 +15,9 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARTIFACTS, ControlError, PROG, READ_ONLY_EVAL, ROOT, UNREACHABLE_ARGS, actingRequest, allowedRequest, closest, errorResult, isGuardedPath, jsExpression, lastShotNumber, pageGuard, parseTarget, readOnlyExpression, readState, rel, removeState, routeUrl, sameServer, scrubText, scrubUrl, shotName, socketPath, writeState } from "./control.mjs";
+import { BANK_MODES, bankMode, readFakes, setBankMode } from "./fakes.mjs";
 import { startServer } from "./jobs.mjs";
-import { VIEWPORTS, captureOptions, capturing, launchOptions, prepareContext, readFlows, recheck, runStep, screenshotFile, settle, signIn, timeScale, unsettled, waitSettled } from "./verify.mjs";
+import { VIEWPORTS, captureOptions, capturing, expectedErrors, expectedResponse, launchOptions, prepareContext, readFlows, recheck, runStep, screenshotFile, settle, signIn, timeScale, unexpectedConsole, unsettled, waitSettled } from "./verify.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MODAL = "[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, [data-review-bar]:visible";
@@ -129,6 +130,7 @@ async function main() {
       command: (port, folder) => [opt.python, "-m", "runway.verify", "serve", "--parent", String(process.pid), "--seed", seedDir, "--data", folder, "--port", String(port), ...(opt.signedIn ? ["--signed-in"] : [])],
       folder: join(sessionDir, `data-${++servers}`), timeout: 60000 * scale, cwd: ROOT,
     });
+    server.fakes = readFakes(server.dir);   // the stand-in bank and price service beside it (runway/verify.py's start_fakes)
     // The signed-in server is reached at localhost (its sign-in's public address), the other at the loopback address, as in make verify.
     base = `http://${opt.signedIn ? "localhost" : "127.0.0.1"}:${server.port}`;
     if (ctx && opt.signedIn) await ctx.addCookies([{ name: "runway_session", value: sessionToken, url: base }]);
@@ -158,7 +160,8 @@ async function main() {
     if (opt.signedIn) await signIn(ctx, page, base, sessionToken);
     // What console and network report (scrubbed: no query strings, amounts or ids).
     const keep = (list, entry) => { list.push(entry); if (list.length > BUFFER) list.shift(); };
-    page.on("console", (m) => keep(consoleBuffer, { type: m.type(), text: scrubText(m.text()).slice(0, 300), route: route() }));
+    // (`from`: the path of the address a line is about, on the session's own server: a failed request's line names it.)
+    page.on("console", (m) => keep(consoleBuffer, { type: m.type(), text: scrubText(m.text()).slice(0, 300), route: route(), ...(sameServerPath(m.location().url) ? { from: sameServerPath(m.location().url) } : {}) }));
     page.on("pageerror", (e) => keep(consoleBuffer, { type: "pageerror", text: scrubText(firstLine(e)).slice(0, 300), route: route() }));
     page.on("response", (r) => { const path = scrubUrl(r.url(), base); if (path) keep(requests, { method: r.request().method(), path, status: r.status(), type: r.request().resourceType() }); });
     // net::ERR_ABORTED is a request the page dropped itself (it moved on, or a 304 it had already answered from its cache):
@@ -192,6 +195,24 @@ async function main() {
 
   function route() {
     try { const u = new URL(page.url()); return `${u.pathname}${u.hash}`; } catch { return page.url(); }
+  }
+
+  /** The path of an address on the session's own server (as reported: ids taken out), or "" for any other. */
+  function sameServerPath(url) {
+    try { return sameServer(new URL(url), base) ? scrubUrl(url, base) ?? "" : ""; } catch { return ""; /* a console line that names no address */ }
+  }
+
+  /** The session's stand-in bank (a SimpleFIN bridge beside the demo server): its mode, set first when one is given. */
+  async function bank({ args }) {
+    if (!server.fakes?.simplefin) throw new ControlError("no_bank", "this session's demo server has no stand-in bank", `\`${PROG} stop\`, then \`${PROG} start\` (a session starts one beside its server)`);
+    try {
+      const before = (await bankMode(server.fakes)).mode;
+      const now = args[0] ? (await setBankMode(server.fakes, args[0])).mode : before;
+      return { bank: server.fakes.simplefin.name, mode: now, ...(args[0] ? { was: before } : {}), modes: BANK_MODES,
+        next: args[0] ? [`${PROG} click button 'Sync now'`, `${PROG} bank ok`] : [`${PROG} bank 403`] };
+    } catch (e) {
+      throw new ControlError("bank_failed", `the stand-in bank didn't take it: ${firstLine(e)}`, `\`${PROG} reset\` starts a new one with the demo data`);
+    }
   }
 
   /** The page's target, one match: { loc, label }. Errors say how to name it instead. */
@@ -295,6 +316,7 @@ async function main() {
       return { viewport: { name: args[0], ...VIEWPORTS[args[0]] }, route: route(), ...(await settledNow(5000)) };
     },
     info,
+    bank,
     async snapshot({ options: o }) {
       const root = o.root ? page.locator(o.root).first() : page.locator("body");
       if (o.root && !(await root.count())) throw new ControlError("no_match", `nothing matches ${o.root}`, `try \`${PROG} snapshot\` without --root`);
@@ -430,6 +452,8 @@ async function main() {
     const shotAs = async (file) => { files.push((await capture(join(out, screenshotFile(file, vp)), { keepScroll: !!page.scrolledByFlow, checks: true })).path); };
     page.checks = [];
     page.scrolledByFlow = false;
+    page.fakes = server.fakes;   // for a `bank` step
+    const bankBefore = flow.steps.some((s) => "bank" in s) && server.fakes?.simplefin ? (await bankMode(server.fakes).catch(() => null))?.mode ?? null : null;
     await page.goto(`${base}/#${flow.page ?? "overview"}`, { waitUntil: "networkidle" });
     await waitSettled(page, page.t(15000));
     for (const [i, step] of flow.steps.entries()) {
@@ -448,8 +472,19 @@ async function main() {
     if (!problems.length) {
       try { await shotAs(`flow-${flow.name}`); } catch (e) { problems.push(`the last screenshot: ${firstLine(e)}`); }
     }
-    for (const m of consoleBuffer) if (m.type === "error" || m.type === "pageerror") problems.push(`console ${m.type}: ${m.text}`);
-    for (const r of requests) if (r.status >= 500) problems.push(`${r.status} from ${r.method} ${r.path}`);
+    // The server errors the flow sets off on purpose (its expected_errors) aren't problems, nor the browser's line about each.
+    const expected = expectedErrors(flow);
+    const tolerated = requests.map((r) => expectedResponse(expected, r.method, r.path, r.status)).filter(Boolean);   // one for each such response
+    const errors = consoleBuffer.filter((m) => m.type === "error" || m.type === "pageerror").map((m) => ({ ...m, path: m.type === "error" ? m.from ?? "" : "" }));
+    for (const m of unexpectedConsole(errors, tolerated)) problems.push(`console ${m.type}: ${m.text}`);
+    for (const r of requests) if (r.status >= 500 && !expectedResponse(expected, r.method, r.path, r.status)) problems.push(`${r.status} from ${r.method} ${r.path}`);
+    if (!problems.length) for (const e of expected) if (!tolerated.includes(e)) problems.push(`expected_errors lists ${e.text}, which never came`);
+    // A flow leaves the session's stand-in bank as it found it, even one that stopped at a failed step after a `bank` step.
+    if (bankBefore !== null) {
+      try {
+        if ((await bankMode(server.fakes)).mode !== bankBefore) { await setBankMode(server.fakes, bankBefore); notes.push(`the stand-in bank was put back to ${bankBefore}`); }
+      } catch (e) { notes.push(`the stand-in bank couldn't be put back to ${bankBefore} (${firstLine(e)}): \`${PROG} bank ${bankBefore}\`, or \`${PROG} reset\``); }
+    }
     const result = { flow: name, viewport: vp, steps, files, notes };
     if (problems.length) throw Object.assign(new ControlError("flow_failed", `${name} failed: ${problems.join("; ")}`, "the -FAILED- image and `console` show what the page did; make verify would fail the same way"), { data: result });
     return result;

@@ -61,7 +61,8 @@ async function stopServer(proc, folder, grace = 10000) {
  *  gives the program and its arguments (runway/verify.py's `serve`, which copies the data, writes the server's output to
  *  `<folder>/server.log` and runs it under the frozen clock). Waits up to `timeout` ms for it to answer. A server that
  *  exits before it answers (another process took the port) is tried again on another port, `tries` times in all; one
- *  that never answers is stopped and fails at once. Returns { port, stop() }, or throws with the end of its log. */
+ *  that never answers is stopped and fails at once. Returns { port, dir (its folder), stop() }, or throws with the end of
+ *  its log. */
 export async function startServer({ command, folder, timeout = 60000, tries = 3, cwd, poll = 200, port: pick = freePort }) {
   let why = "";
   for (let attempt = 1; attempt <= tries; attempt++) {
@@ -75,7 +76,7 @@ export async function startServer({ command, folder, timeout = 60000, tries = 3,
     for (;;) {
       if (failed || proc.exitCode !== null || proc.signalCode !== null) break;
       // Answering, from this process (not another that had the port first: its server would hold another item's data).
-      if (await answers(port) && listensOn(proc.pid, port) !== false) return { port, stop: () => stopServer(proc, dir) };
+      if (await answers(port) && listensOn(proc.pid, port) !== false) return { port, dir, stop: () => stopServer(proc, dir) };
       if (Date.now() > end) {
         const log = tail(`${dir}/server.log`);
         await stopServer(proc, dir);

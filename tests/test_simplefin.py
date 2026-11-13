@@ -1,7 +1,11 @@
 """SimpleFIN: storing what the bridge sends, syncing, and its HTTP client."""
 import itertools
 import json
+import os
+import socket
+import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -11,9 +15,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from sqlalchemy import select, update
 
+from runway import tls
 from runway.providers import simplefin
 from runway.domain import splits
 from runway.storage.models import Account, Transaction
+from tests.fakes import certs, simplefin_server
 from tests.shared import TODAY, LedgerCase, ts
 
 
@@ -232,6 +238,172 @@ class SimpleFinHttpTests(unittest.TestCase):
     def test_bad_setup_token(self):
         with self.assertRaises(simplefin.SimpleFinError):
             simplefin.claim_setup_token("not a token!!")
+
+
+class StandInBridgeTests(LedgerCase):
+    """End to end against the stand-in bridge (tests/fakes/simplefin_server.py) over real TLS, as a demo server under
+    make verify reaches it: its made-up name opened at its loopback port (simplefin.STAND_IN_ENV), reached directly, and
+    its throwaway authority trusted. Nothing in the client is patched but which certificates it trusts."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.fake = simplefin_server.start(tmp.name, TODAY)
+        self.addCleanup(self.fake.stop)
+        self.trusted = certs.trusting(self.fake.ca)
+        reached = f"127.0.0.1,localhost,{simplefin_server.NAME}"   # directly, as a demo server reaches them (verify.fakes_env)
+        for patch in (mock.patch.dict(os.environ, {simplefin.STAND_IN_ENV: self.fake.stand_in, "NO_PROXY": reached, "no_proxy": reached}),
+                      mock.patch.object(tls, "ssl_context", lambda: self.trusted),
+                      mock.patch.object(simplefin, "time", mock.Mock(sleep=lambda _s: None))):   # the pause between a backfill's windows
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def sync(self, url):
+        return simplefin.sync(self.conn, url, today=TODAY)
+
+    def no_such_name(self):
+        """Looking up a .invalid name finds nothing, as it must anywhere (without asking this machine's resolver)."""
+        real = socket.getaddrinfo
+
+        def lookup(host, *args, **kw):
+            if str(host).endswith(".invalid"):
+                raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+            return real(host, *args, **kw)
+        patch = mock.patch.object(socket, "getaddrinfo", lookup)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_claim_sync_and_a_401_over_real_tls(self):
+        url = simplefin.claim_setup_token(simplefin_server.setup_token())
+        self.assertEqual(url, simplefin_server.access_url(simplefin_server.CLAIMED_LOGIN))
+        simplefin.check_address(url)   # as api_connect checks it before saving
+        first = self.sync(url)
+        self.assertTrue(first["backfill"])
+        self.assertEqual(sorted(first["new"]), ["demo-card|fake-coffee", "demo-card|fake-groceries", "demo-card|fake-tacos",
+                                                "demo-vacation|fake-transfer"])
+        accounts = {r["id"]: (r["name"], r["org"], r["balance"]) for r in self.conn.execute(select(Account))}
+        self.assertEqual(accounts["demo-card"], ("Rewards Visa", "Sample Card Co", -1342.18))
+        self.assertEqual(accounts["demo-vacation"], ("Vacation Savings", "Sample Credit Union", 2310.40))
+        self.assertEqual(len(accounts), 6)
+        held = self.conn.execute(select(Transaction.pending, Transaction.amount, Transaction.posted)
+                                 .where(Transaction.id == "demo-card|fake-tacos")).fetchone()
+        self.assertEqual(tuple(held), (1, -31.40, TODAY.isoformat()))
+        self.assertEqual(self.sync(url)["new"], ["demo-card|fake-tacos"])   # the hold comes again; the rest is here already
+        asked = [r for r in self.fake.bridge.requests if r["path"].startswith("/simplefin/accounts")]
+        self.assertTrue(asked)
+        self.assertEqual({(r["login"], r["status"]) for r in asked}, {("claimed", 200)})   # the claimed login's basic auth, every time
+        self.conn.commit()
+
+        self.fake.bridge.set_mode("401")
+        before = self.conn.execute(select(Transaction.id).order_by(Transaction.id)).fetchall()
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            self.sync(url)
+        self.assertEqual(str(cm.exception), 'SimpleFIN request failed (HTTP 401; server said: "Unauthorized").')
+        self.conn.rollback()
+        self.assertEqual(self.conn.execute(select(Transaction.id).order_by(Transaction.id)).fetchall(), before)
+        with self.assertRaises(simplefin.SimpleFinError) as cm:   # a token can't be claimed from a bridge that refuses either
+            simplefin.claim_setup_token(simplefin_server.setup_token())
+        self.assertIn("HTTP 401", str(cm.exception))
+
+    def test_the_other_ways_the_bridge_fails_or_falls_short(self):
+        url = simplefin_server.access_url()   # the demo's own login: its five accounts
+        self.fake.bridge.set_mode("403")
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            self.sync(url)
+        self.assertIn("rejected the access credentials (HTTP 403", str(cm.exception))
+        self.assertIn("Reconnect in Settings.", str(cm.exception))
+        self.conn.rollback()
+        self.fake.bridge.set_mode("500")
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            self.sync(url)
+        self.assertIn("HTTP 500", str(cm.exception))
+        self.conn.rollback()
+        self.fake.bridge.set_mode("partial")
+        got = self.sync(url)
+        self.assertEqual(set(got["errors"]), {"Connection to Sample Card Co may need attention"})
+        self.assertEqual(sorted(r[0] for r in self.conn.execute(select(Account.id))), ["demo-checking", "demo-mortgage", "demo-savings"])
+        self.fake.bridge.set_mode("ok")
+        self.assertEqual(sorted(self.sync(url)["new"]), ["demo-card|fake-coffee", "demo-card|fake-groceries", "demo-card|fake-tacos"])
+        with self.assertRaises(simplefin.SimpleFinError) as cm:   # a login the bridge doesn't know, and a token it doesn't
+            simplefin.fetch_accounts(f"https://demo:wrong@{simplefin_server.NAME}/simplefin", TODAY)
+        self.assertIn("Forbidden: bad credentials", str(cm.exception))
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            simplefin.claim_setup_token(simplefin_server.setup_token("another-token"))
+        self.assertIn("A setup token works only once", str(cm.exception))
+
+    def test_the_slow_mode_answers_after_its_wait(self):
+        self.fake.bridge.slow = 0.3
+        self.fake.bridge.set_mode("slow")
+        started = time.monotonic()
+        simplefin.fetch_accounts(simplefin_server.access_url(), TODAY)
+        self.assertGreaterEqual(time.monotonic() - started, 0.3)
+
+    def test_its_certificate_is_checked_like_any_bridges(self):
+        url = simplefin_server.access_url()
+        with mock.patch.object(tls, "ssl_context", certs.trusting), self.assertRaises(simplefin.SimpleFinError) as cm:
+            simplefin.fetch_accounts(url, TODAY)   # the system's certificates don't include the throwaway authority
+        self.assertIn("CERTIFICATE_VERIFY_FAILED", str(cm.exception))
+        self.assertEqual([r for r in self.fake.bridge.requests if r["path"].startswith("/simplefin")], [])   # nothing was sent
+
+    def test_only_its_own_name_is_opened_on_this_machine(self):
+        """The stand-in opens one made-up name at one loopback port: this machine's address, another made-up name and
+        plain http are refused as they always are."""
+        self.no_such_name()
+        port = self.fake.port
+        for url in (f"https://demo:demo@127.0.0.1:{port}/simplefin", f"https://demo:demo@localhost:{port}/simplefin"):
+            with self.subTest(url=url):
+                with self.assertRaises(simplefin.SimpleFinError) as cm:
+                    simplefin.check_address(url)
+                self.assertIn("private network address", str(cm.exception))
+                with self.assertRaises(simplefin.SimpleFinError) as cm:
+                    simplefin.fetch_accounts(url, TODAY)
+                self.assertIn("private network address", str(cm.exception))
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            simplefin.check_address("https://demo:demo@another-bank.invalid/simplefin")
+        self.assertIn("can't find another-bank.invalid", str(cm.exception))
+        with self.assertRaises(simplefin.SimpleFinError) as cm:   # the name at another port is not the stand-in
+            simplefin.check_address(f"https://demo:demo@{simplefin_server.NAME}:{port}/simplefin")
+        self.assertIn("can't find", str(cm.exception))
+        with self.assertRaises(simplefin.SimpleFinError) as cm:
+            simplefin.fetch_accounts(f"http://demo:demo@{simplefin_server.NAME}/simplefin", TODAY)
+        self.assertIn("must start with https://", str(cm.exception))
+        self.assertEqual(self.fake.bridge.requests, [])
+
+    def test_without_the_stand_in_its_name_goes_nowhere(self):
+        self.no_such_name()
+        with mock.patch.dict(os.environ):
+            del os.environ[simplefin.STAND_IN_ENV]
+            with self.assertRaises(simplefin.SimpleFinError) as cm:
+                simplefin.check_address(simplefin_server.access_url())
+            self.assertIn(f"can't find {simplefin_server.NAME}", str(cm.exception))
+            with self.assertRaises(simplefin.SimpleFinError):
+                simplefin.fetch_accounts(simplefin_server.access_url(), TODAY)
+        self.assertEqual(self.fake.bridge.requests, [])
+
+
+class StandInSettingTests(unittest.TestCase):
+    def test_it_is_a_reserved_name_at_a_port_of_a_loopback_address_or_nothing(self):
+        self.assertEqual(simplefin.stand_in("sample-bank.invalid=127.0.0.1:8443"), ("sample-bank.invalid", "127.0.0.1", 8443))
+        self.assertEqual(simplefin.stand_in(" Sample-Bank.INVALID=::1:8443 "), ("sample-bank.invalid", "::1", 8443))
+        for refused in ("", "sample-bank.invalid", "bridge.simplefin.org=127.0.0.1:8443", "simplefin.org.invalid.com=127.0.0.1:8443",
+                        "invalid=127.0.0.1:8443", ".invalid=127.0.0.1:8443", "sample-bank.invalid=10.0.0.5:8443",
+                        "sample-bank.invalid=192.168.1.1:443", "sample-bank.invalid=203.0.113.9:443", "sample-bank.invalid=localhost:8443",
+                        "sample-bank.invalid=127.0.0.1", "sample-bank.invalid=127.0.0.1:0", "sample-bank.invalid=127.0.0.1:65536",
+                        "sample-bank.invalid=127.0.0.1:-1", "sample-bank.invalid=127.0.0.1:port", "a@b.invalid=127.0.0.1:8443",
+                        "a/b.invalid=127.0.0.1:8443", "a:1.invalid=127.0.0.1:8443", "*.invalid=127.0.0.1:8443"):
+            with self.subTest(value=refused):
+                self.assertIsNone(simplefin.stand_in(refused))
+
+    def test_a_real_bridges_address_is_never_the_stand_in(self):
+        with mock.patch.dict(os.environ, {simplefin.STAND_IN_ENV: "sample-bank.invalid=127.0.0.1:8443"}):
+            self.assertEqual(simplefin._stand_in_for("sample-bank.invalid", None), ("127.0.0.1", 8443))
+            self.assertEqual(simplefin._stand_in_for("SAMPLE-BANK.invalid", 443), ("127.0.0.1", 8443))
+            for host, port in (("beta-bridge.simplefin.org", None), ("sample-bank.invalid.example.com", None), ("x.sample-bank.invalid", None),
+                               ("sample-bank.invalid", 8443), ("127.0.0.1", 8443), (None, None)):
+                self.assertIsNone(simplefin._stand_in_for(host, port))
+        with mock.patch.dict(os.environ, {simplefin.STAND_IN_ENV: "beta-bridge.simplefin.org=127.0.0.1:8443"}):
+            self.assertIsNone(simplefin._stand_in_for("beta-bridge.simplefin.org", None))   # not a reserved name: ignored
 
 
 if __name__ == "__main__":

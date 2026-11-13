@@ -6,7 +6,8 @@ name: Verify flows
 # instead of leaving a flow broken on main (the budget-rollover-menu flow did), then tools/control end to end
 # (frontend/verify/control-smoke.mjs). fleet's workflow sets up Python 3.14 with Poetry (the main dependencies only),
 # Node from .nvmrc with the web app's packages, Chromium and libfaketime (the frozen clock), then runs the one target.
-# Only a change that can reach a flow runs it: the web app, the demo data, the verify runner or this file. A pull
+# Only a change that can reach a flow runs it: the web app, the demo data, the verify runner, the stand-in services
+# it starts beside each demo server (tests/fakes/) or this file. A pull
 # request without one has no run at all, which the merge gate treats as nothing to wait for. A push to main runs it too,
 # for two pull requests that each pass alone and break a flow together.
 # It sends nothing out and needs no secret: the demo server is made-up data on the loopback address.
@@ -19,6 +20,7 @@ on:
       - frontend/**
       - runway/domain/demo.py
       - runway/verify.py
+      - tests/fakes/**
       - .github/workflows/verify.yml
   pull_request:
     branches: [main]
@@ -26,6 +28,7 @@ on:
       - frontend/**
       - runway/domain/demo.py
       - runway/verify.py
+      - tests/fakes/**
       - .github/workflows/verify.yml
   workflow_dispatch:
 

@@ -1,0 +1,21 @@
+{
+  "name": "sync-reconnect",
+  "page": "setup",
+  "inherits_page_baseline": true,
+  "viewports": ["desktop"],
+  "expected_errors": ["POST /api/sync 502"],
+  "steps": [
+    {"bank": "403"},
+    {"goto": "#setup/connections"},
+    {"click": "aside button[aria-label='Sync now']", "timeout": 30000},
+    {"wait_for": "aside [role=status]:has-text('Last sync failed')", "timeout": 30000},
+    {"wait_for": "details[data-group=banks] [data-status=warn]:has-text('Needs attention')"},
+    {"expect_text": {"selector": "details[data-group=banks][open]", "text": "The last sync didn’t finish. Runway tries again with the next one."}},
+    {"click": "details[data-group=banks][open] details summary:has-text('Details')"},
+    {"expect_text": {"selector": "details[data-group=banks][open] details[open]", "text": "SimpleFIN rejected the access credentials"}},
+    {"expect_text": {"selector": "details[data-group=banks][open] details[open]", "text": "Reconnect in Settings."}},
+    {"screenshot": "reconnect"},
+    {"bank": "ok"},
+    {"goto": "#setup/accounts"}
+  ]
+}

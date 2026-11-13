@@ -28,9 +28,11 @@ Each `*.json` file here is a flow that `make verify` runs besides visiting the p
   - `{"expect_above": {"selector": …, "above": …}}` fails unless the first match is whole inside the window and ends above the first match of `above` (the floating navigation, say): that is, it is on the first screen.
   - `{"reload": true}` opens the app again (a launch), not just another route.
   - `{"authenticator": "verified"}` or `"unverified"` (signed-in flows only): the virtual authenticator's Face ID works, or fails.
+  - `{"bank": "403"}` sets how the stand-in bank answers from then on (see "The stand-in bank" below): `ok`, `401`, `403`, `500`, `slow` or `partial`. It changes nothing on the page.
   - Keyboard: `{"tab": {"count": 16, "shift": false, "stay_in": "[role=dialog]"}}` presses Tab (Shift+Tab with `shift`) `count` times and fails if focus ever leaves `stay_in`; `{"expect_focus": selector}` fails unless the focused element matches it; `{"expect_inert": selector}` fails unless it is inert (itself or an ancestor).
   - `{"screenshot": "name"}` saves the full page (the window, when a dialog, a sheet or the To review bar is showing) as `flow-<flow name>-<name>-<viewport>.png`.
 - A flow also ends with a screenshot, and fails the run on a failed step, a console error or a 5xx response.
+- `"expected_errors": ["POST /api/sync 502"]` lists the server errors a flow sets off on purpose (a sync the stand-in bank refuses answers 502), each as `<METHOD> <path> <status>` with a status of 500 or more. Exactly those responses, and the browser's own console line about each, don't fail the flow; any other 5xx still does, and so does a listed one that never comes.
 - A flow is also audited for accessibility where it ends (axe, focus rings, and tap targets at phone width: `frontend/verify/a11y.mjs`), at each width it lists, so a sheet or dialog the flow leaves open is checked too. A finding not in `frontend/verify/a11y-baseline.txt` (under the flow's name, or, with `inherits_page_baseline`, its page's at that width) fails the flow.
 - A screenshot waits until nothing on the page is still loading (no skeleton, nothing `aria-busy`, no transition moving), and is retaken until two captures in a row match; one that never settles fails the flow. The `expect_text` and `expect_focus` steps since the last action are checked again after it, so a panel that closes while it's captured fails instead of being kept.
 - A step's `timeout` is for an idle machine: on a busy one every limit stretches with the load. A flow that fails is run again on fresh demo data (three tries in all).
@@ -38,3 +40,13 @@ Each `*.json` file here is a flow that `make verify` runs besides visiting the p
 - A flow's name (its file's) picks it alone: `make verify PAGES="categories-emoji"`. It can't be a page's name.
 
 Flows run against the demo data only.
+
+## The stand-in bank
+
+Each demo server has two stand-ins beside it, on loopback ports of their own (`runway/verify.py`'s `start_fakes`, which runs `tests/fakes/`): a SimpleFIN bridge and the price service. Only that demo server talks to them; every other outbound request it makes still goes nowhere. Plaid, Carta, Realie, Finnhub's stream, Logo.dev and the AI provider have no stand-in.
+
+- The bridge has the demo's five accounts under the demo's own connection, plus three purchases the demo doesn't have yet (one still pending), so **Sync now** brings in new transactions (`sync-now.json`).
+- The setup token to paste in Settings → Connections is always `aHR0cHM6Ly9zYW1wbGUtYmFuay5pbnZhbGlkL2NsYWltL2RlbW8tc2V0dXAtdG9rZW4=`. Claiming it gives a connection with one more account, Vacation Savings (`simplefin-connect.json`). Unlike a real bridge, it can be claimed again.
+- A `bank` step makes it fail: `401`, `403` and `500` answer every request with that status (`403` is what a bridge answers once access is revoked, and the one the app answers with "Reconnect in Settings": `sync-reconnect.json`), `slow` answers after two seconds, `partial` leaves Sample Card Co's accounts out and says that bank needs attention. A flow that makes a sync fail lists the app's 502 under `expected_errors`.
+- A sync also matches store orders to the new card transactions, as it does for real, so the demo's Target purchase is split into its receipt's parts afterwards.
+- The price service answers for the demo's three holdings with the prices the demo already shows, so a price refresh changes nothing on screen; it has no quote for the S&P 500 fund, so the market reads as closed.
