@@ -122,6 +122,8 @@ jobs:
         runway/server/api/investments.py
         runway/server/api/merchants.py
         runway/server/api/networth.py
+        runway/server/api/notifications.py
+        runway/server/api/retail.py
         runway/server/api/state.py
         runway/server/api/transactions.py
         runway/money.py
