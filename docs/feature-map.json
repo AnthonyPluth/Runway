@@ -609,6 +609,7 @@
         "frontend/src/lib/components/settings/NotificationsSection.svelte"
       ],
       "tests": [
+        "tests/test_agent_review_paths.py",
         "tests/test_api_handlers.py",
         "tests/test_mcp.py",
         "tests/test_notify.py"
@@ -2604,6 +2605,7 @@
         "frontend/src/lib/components/settings/RetailCard.svelte"
       ],
       "tests": [
+        "tests/test_agent_review_paths.py",
         "tests/test_mcp.py",
         "tests/test_retail_tokens.py"
       ],
