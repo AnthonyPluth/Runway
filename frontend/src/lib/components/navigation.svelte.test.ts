@@ -329,7 +329,8 @@ describe("MobileNav", () => {
     expect(sheet).toHaveTextContent("Runway 1.4.0");
     expect(within(sheet).getByRole("link", { name: /Sign out ann@x\.com/ })).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The sheet unmounts once its exit transition ends (a frame later since bits-ui 2.20), so wait for it.
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("closes the sheet when you go to a page", async () => {

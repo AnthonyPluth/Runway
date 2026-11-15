@@ -29,6 +29,7 @@ import json
 import math
 import os
 import secrets
+import select
 import shutil
 import signal
 import stat
@@ -182,12 +183,100 @@ def server_env(data: str, port: int, lib: str, signed_in: bool, base: Mapping[st
     return signed_in_env(env, f"http://localhost:{port}") if signed_in else env
 
 
+# The stand-in services. With FAKES_ENV=1 (run.py verify and tools/control start set it), `serve` starts two beside each
+# demo server, on loopback ports of their own (tests/fakes/): a SimpleFIN bridge over real TLS, so connecting it, Sync
+# now and a sync that fails can be driven in the app, and the price service, so a price refresh brings back the demo's
+# prices. That demo server alone is told about them (fakes_env); every other outbound request still goes to the dead
+# proxy. They hold made-up data only, end with the demo server (die_with_parent) and leave nothing outside its folder.
+FAKES_ENV = "RUNWAY_VERIFY_FAKES"
+FAKES_DIR = "fakes"         # in the demo server's data folder: the bridge's throwaway authority and the bundle with it
+FAKES_FILE = "fakes.json"   # there too: where the stand-ins listen, for verify.mjs and tools/control (a flow's `bank` step)
+FAKE_START_WAIT = 30.0      # seconds a stand-in gets to say it is listening
+STAND_IN_ENV = "RUNWAY_SIMPLEFIN_STAND_IN"   # runway/providers/simplefin.py's STAND_IN_ENV (tests/test_verify_fakes.py checks)
+
+
+class FakesFailed(Exception):
+    """A stand-in service didn't start."""
+
+
+FAKE_PROCESSES: list[subprocess.Popen[bytes]] = []   # the stand-ins this process started (a test stops them through it)
+
+
+def _start_fake(module: str, args: list[str], parent: int, wait: float) -> dict[str, Any]:
+    """Starts tests/fakes/<module>.py and returns the line of JSON it prints once it is listening, with its pid. It gets
+    kept_env (no credential, the dead proxy) and the real clock, and ends when `parent` does. Its errors go where this
+    process's do."""
+    if not os.path.isfile(os.path.join(ROOT, "tests", "fakes", f"{module}.py")):
+        raise FakesFailed(f"verify: tests/fakes/{module}.py isn't here: {FAKES_ENV}=1 needs the repository's tests/ folder")
+    proc = subprocess.Popen([sys.executable, "-m", f"tests.fakes.{module}", *args], cwd=ROOT, env=kept_env(),
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            preexec_fn=lambda: die_with_parent(parent))   # (single-threaded here; a prctl call and a check)
+    assert proc.stdout is not None
+    fd, line, end = proc.stdout.fileno(), b"", time.monotonic() + wait
+    try:
+        while not line.endswith(b"\n"):
+            left = end - time.monotonic()
+            if left <= 0 or not select.select([fd], [], [], left)[0]:
+                proc.kill()
+                raise FakesFailed(f"verify: the stand-in {module} wasn't listening after {wait:.0f} seconds")
+            chunk = os.read(fd, 4096)
+            if not chunk:   # it ended (its error is in this process's stderr)
+                raise FakesFailed(f"verify: the stand-in {module} ended before it was listening (exit {proc.wait()})")
+            line += chunk
+        ready = json.loads(line)
+    except ValueError:
+        proc.kill()
+        raise FakesFailed(f"verify: the stand-in {module} said {line[:200]!r}, not where it listens") from None
+    finally:
+        proc.stdout.close()   # it prints nothing more
+    if not isinstance(ready, dict):
+        proc.kill()
+        raise FakesFailed(f"verify: the stand-in {module} said {line[:200]!r}, not where it listens")
+    FAKE_PROCESSES.append(proc)
+    return {**ready, "pid": proc.pid}
+
+
+def start_fakes(data: str, parent: int, wait: float = FAKE_START_WAIT) -> dict[str, Any]:
+    """Starts the stand-ins for the demo server on `data`, and returns where they are:
+    {"simplefin": {name, address, port, ca, bundle, pid}, "prices": {address, port, url, pid}}, also written to
+    <data>/FAKES_FILE. Everything they leave on disk is under <data>/FAKES_DIR: the bridge's throwaway authority (its
+    certificate only: it may sign for the bridge's made-up name alone, tests/fakes/certs.py) and the bundle the demo
+    server trusts, the system's certificates plus that authority. They end when `parent` does. FakesFailed when one
+    doesn't start."""
+    folder = os.path.join(data, FAKES_DIR)
+    os.mkdir(folder, 0o700)
+    bridge = _start_fake("simplefin_server", ["--dir", folder, "--today", FROZEN_DAY], parent, wait)
+    prices = _start_fake("prices_server", ["--today", FROZEN_DAY], parent, wait)
+    for key in ("name", "address", "port", "ca", "bundle"):
+        if key not in bridge:
+            raise FakesFailed(f"verify: the stand-in simplefin_server didn't say its {key}")
+    if "url" not in prices:
+        raise FakesFailed("verify: the stand-in prices_server didn't say its url")
+    fakes = {"simplefin": bridge, "prices": prices}
+    fd = os.open(os.path.join(data, FAKES_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(fakes, f)
+    return fakes
+
+
+def fakes_env(env: Mapping[str, str], fakes: Mapping[str, Any]) -> dict[str, str]:
+    """A demo server's environment with its stand-ins (start_fakes): the bridge's made-up name opened at its loopback
+    port (simplefin.py's stand-in), reached directly (the one addition to NO_PROXY; everything else still goes to the
+    dead proxy) and trusted through a bundle of the system's certificates plus its throwaway authority; and the price
+    service at the stand-in's address."""
+    bridge = fakes["simplefin"]
+    direct = f"{env.get('NO_PROXY', NO_PROXY_FOR)},{bridge['name']}"
+    return {**env, "SSL_CERT_FILE": bridge["bundle"], "NO_PROXY": direct, "no_proxy": direct,
+            STAND_IN_ENV: f"{bridge['name']}={bridge['address']}:{bridge['port']}", "RUNWAY_PRICES_URL": fakes["prices"]["url"]}
+
+
 def serve(argv: list[str]) -> int:
     """`python -m runway.verify serve --parent PID --seed S --data D --port P [--signed-in]`: what verify.mjs (PID) runs for
     each page, flow and check. Copies the seeded data S into D, a new folder (one that exists is refused: no item shares
-    another's data), and becomes the demo server on it (exec), on port P, its output in D/server.log. It ends when
-    verify.mjs does (die_with_parent, asked for before anything else, so even one killed while this copies); ended
-    before the exec, it removes the copy it made."""
+    another's data), and becomes the demo server on it (exec), on port P, its output in D/server.log. With FAKES_ENV=1 it
+    first starts the stand-in services beside it (start_fakes). It ends when verify.mjs does (die_with_parent, asked for
+    before anything else, so even one killed while this copies), and the stand-ins with it; ended before the exec, it
+    removes the copy it made."""
     p = argparse.ArgumentParser(prog="python -m runway.verify serve")
     p.add_argument("--parent", type=int, required=True)
     p.add_argument("--seed", required=True)
@@ -221,7 +310,14 @@ def serve(argv: list[str]) -> int:
     os.close(log)
     os.chdir(ROOT)
     command = server_command(a.port)
-    os.execve(command[0], command, server_env(a.data, a.port, lib, a.signed_in))
+    env = server_env(a.data, a.port, lib, a.signed_in)
+    if os.environ.get(FAKES_ENV) == "1":
+        try:
+            env = fakes_env(env, start_fakes(a.data, os.getpid()))
+        except (FakesFailed, OSError) as e:   # said in server.log, whose end verify.mjs prints before it removes the folder
+            print(str(e) if isinstance(e, FakesFailed) else f"verify: couldn't start the stand-in services: {e.strerror or e}", file=sys.stderr)
+            return 2
+    os.execve(command[0], command, env)
     return 1   # (execve doesn't return)
 
 
@@ -757,7 +853,7 @@ def _round(folder: str, seed: str, pages: list[str], only: list[str] | None, sca
     # The browser run ends with this one (die_with_parent), and its servers with it, should this process be killed.
     me = os.getpid()
     browser = subprocess.Popen(round_command(node, seed, servers, out, pages, only, scale, attempt, workers, reverse),
-                               cwd=os.path.join(ROOT, "frontend"), env={**clean_env(seed), SESSION_ENV: token},
+                               cwd=os.path.join(ROOT, "frontend"), env={**clean_env(seed), SESSION_ENV: token, FAKES_ENV: "1"},
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                                preexec_fn=lambda: die_with_parent(me))   # (single-threaded here; a prctl call and a check)
     try:

@@ -20,6 +20,7 @@ import { cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { auditVisit, inheritedWhere, inheritProblems, readBaseline, visitProblems } from "./a11y.mjs";
+import { BANK_MODES, readFakes, setBankMode } from "./fakes.mjs";
 import { runPool, startServer } from "./jobs.mjs";
 
 // The phone is an iPhone 17 Pro Max (440×956 CSS pixels). A page or flow is shot at phone and desktop only, which is what
@@ -211,13 +212,40 @@ export const signedInItem = (item) => (item.flow ? !!item.flow.signed_in : !item
 const CHECKS = ["expect_text", "expect_focus"];
 const ACTS = ["goto", "click", "fill", "press", "tab", "reload", "scroll_to", "authenticator"];
 
-/** A flow is { name, page?, inherits_page_baseline?, viewports?, signed_in?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator } ] }:
+/** A flow is { name, page?, inherits_page_baseline?, viewports?, signed_in?, expected_errors?, steps: [ { goto | click | fill | press | wait_for | scroll_to | expect_text | expect_above | tab | expect_focus | expect_inert | screenshot | reload | authenticator | bank } ] }:
  *  see frontend/verify/flows/README.md. Returns the problems with it, [] when it's well formed. */
 const ACTIONS = { goto: "string", click: "string", fill: "object", press: "object", wait_for: "string", scroll_to: "string", expect_text: "object", expect_above: "object", screenshot: "string", tab: "object", expect_focus: "string", expect_inert: "string",
-  reload: "boolean", authenticator: "string" };
+  reload: "boolean", authenticator: "string", bank: "string" };
 // The virtual authenticator's states an `authenticator` step sets (a signed_in flow's): Face ID that works, or that fails.
 const AUTHENTICATOR = ["verified", "unverified"];
 export const unknownPages = (names) => names.filter((n) => !PAGES.includes(n));
+
+// A flow's "expected_errors": the server errors it sets off on purpose (a sync the stand-in bank fails answers 502), each
+// "<METHOD> <path> <status>" with a status of 500 or more. Exactly those responses, and the browser's own console line
+// about each one that came, don't fail the flow; one of them that never comes does (the list says what happens, no more).
+const EXPECTED_ERROR = /^([A-Z]+) (\/[^\s?#]*) (5\d\d)$/;
+/** A flow's expected_errors, parsed: [{ method, path, status, text }] (the malformed ones left out: flowProblems names them). */
+export const expectedErrors = (flow) => (Array.isArray(flow?.expected_errors) ? flow.expected_errors : [])
+  .map((text) => (typeof text === "string" ? EXPECTED_ERROR.exec(text) : null)).filter(Boolean)
+  .map(([text, method, path, status]) => ({ method, path, status: Number(status), text }));
+/** The expected error a response is (its method, its address's path and its status), or undefined. */
+export const expectedResponse = (expected, method, path, status) => expected.find((e) => e.method === method && e.path === path && e.status === status);
+/** The console errors that stand: `errors` ([{ text, path }], `path` the path of the address a line is about) less the
+ *  browser's own line about each response that was tolerated ("Failed to load resource: the server responded with a
+ *  status of 502 (Bad Gateway)"). `tolerated` has an entry (of expectedErrors) for every such response that came, and each
+ *  excuses one line: a second line about the same address with no second tolerated response stands. */
+export function unexpectedConsole(errors, tolerated) {
+  const left = [...tolerated];
+  return errors.filter(({ text, path }) => {
+    if (!text.startsWith("Failed to load resource")) return true;
+    const i = left.findIndex((e) => e.path === path && text.includes(`status of ${e.status}`));
+    if (i < 0) return true;
+    left.splice(i, 1);
+    return false;
+  });
+}
+/** The path of an address, or "" when it isn't one. */
+const pathOf = (url) => { try { return new URL(url).pathname; } catch { return ""; /* a console line that names no address */ } };
 
 export function flowProblems(flow) {
   const out = [];
@@ -229,6 +257,11 @@ export function flowProblems(flow) {
     else if (typeof s[keys[0]] !== ACTIONS[keys[0]]) out.push(`step ${i + 1}: ${keys[0]} takes a ${ACTIONS[keys[0]]}`);
     else if (keys[0] === "authenticator" && !flow.signed_in) out.push(`step ${i + 1}: authenticator needs "signed_in": true`);
     else if (keys[0] === "authenticator" && !AUTHENTICATOR.includes(s.authenticator)) out.push(`step ${i + 1}: authenticator is ${AUTHENTICATOR.join(" or ")}`);
+    else if (keys[0] === "bank" && !BANK_MODES.includes(s.bank)) out.push(`step ${i + 1}: bank is one of ${BANK_MODES.join(", ")}`);
+  }
+  if (flow?.expected_errors !== undefined) {
+    const listed = Array.isArray(flow.expected_errors) ? flow.expected_errors : [null];
+    if (listed.length !== expectedErrors(flow).length) out.push('expected_errors is a list of "<METHOD> <path> <status>", the status 500 or more ("POST /api/sync 502")');
   }
   if (flow?.signed_in !== undefined && typeof flow.signed_in !== "boolean") out.push("signed_in is true or false");
   if (flow?.page !== undefined && !PAGES.includes(flow.page)) out.push(`unknown page ${flow.page}`);
@@ -307,6 +340,8 @@ async function doStep(page, step, shot, timeout) {
     await page.locator(step.fill.selector).first().fill(step.fill.text, { timeout });
   } else if ("press" in step) {
     await page.locator(step.press.selector).first().press(step.press.key, { timeout });
+  } else if ("bank" in step) {   // how the stand-in bank beside this demo server answers from now on (fakes.mjs)
+    await setBankMode(page.fakes, step.bank, { timeout });
   } else if ("wait_for" in step) {
     await page.locator(step.wait_for).first().waitFor({ timeout });
   } else if ("scroll_to" in step) {   // so a screenshot of the viewport shows it
@@ -547,7 +582,7 @@ async function main() {
   const save = () => writeFileSync(join(out, "report.json"), JSON.stringify(report, null, 2));
   save();
 
-  async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}, inheritFrom = undefined) {
+  async function visit(browser, urls, result, label, viewport, work, signedIn = false, authenticator = {}, inheritFrom = undefined, expected = []) {
     const ctx = await browser.newContext(viewport in LANDSCAPE ? { viewport: LANDSCAPE[viewport], hasTouch: true } : { viewport: VIEWPORTS[viewport] });
     const moves = label === DEVICE_CACHE;
     await prepareContext(ctx, { day, moves });
@@ -558,12 +593,19 @@ async function main() {
     page.setDefaultTimeout(page.t(30000));
     page.setDefaultNavigationTimeout(page.t(30000));
     page.frozen = !!day && moves;
+    page.fakes = urls.fakes ?? null;   // the stand-ins beside this item's server, for a flow's `bank` step
     if (signedIn) await signIn(ctx, page, urls.signedIn, session, authenticator);
     const where = `${label} @ ${viewport}`;
     const consoleErrors = [];
-    page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
-    page.on("pageerror", (e) => consoleErrors.push(`uncaught: ${e.message}`));
-    page.on("response", (r) => { if (r.status() >= 500) result.problems.push(`${where}: ${r.status()} from ${r.request().method()} ${new URL(r.url()).pathname}`); });
+    const tolerated = [];   // the flow's expected_errors that did come, one entry for each response
+    page.on("console", (m) => { if (m.type() === "error") consoleErrors.push({ text: m.text(), path: pathOf(m.location().url) }); });
+    page.on("pageerror", (e) => consoleErrors.push({ text: `uncaught: ${e.message}`, path: "" }));
+    page.on("response", (r) => {
+      if (r.status() < 500) return;
+      const method = r.request().method(), path = new URL(r.url()).pathname;
+      const known = expectedResponse(expected, method, path, r.status());
+      if (known) tolerated.push(known); else result.problems.push(`${where}: ${r.status()} from ${method} ${path}`);
+    });
     page.on("requestfailed", (r) => { if (r.failure()?.errorText !== "net::ERR_ABORTED") result.notes.push(`${where}: request failed (${r.failure()?.errorText}) ${new URL(r.url()).pathname}`); });
     // A screenshot is taken only once the page has loaded (unsettled() finds nothing) and stopped changing (settle()), then
     // taken again at once: kept when the two are byte for byte the same and nothing started loading meanwhile, retaken
@@ -613,7 +655,8 @@ async function main() {
       await page.screenshot({ path: join(out, failed), fullPage: true, timeout: page.t(30000) }).then(() => result.failed_files.push(failed))
         .catch(() => { /* best effort: the step's own error is already recorded above */ });
     }
-    for (const c of consoleErrors) result.problems.push(`${where}: console error: ${c.slice(0, 300)}`);
+    for (const c of unexpectedConsole(consoleErrors, tolerated)) result.problems.push(`${where}: console error: ${c.text.slice(0, 300)}`);
+    for (const e of expected) if (!tolerated.includes(e)) result.problems.push(`${where}: expected_errors lists ${e.text}, which never came`);
     await ctx.close();
   }
 
@@ -636,7 +679,7 @@ async function main() {
           page.checks = [];
           for (const step of flow.steps) await runStep(page, step, (n) => shot(`flow-${flow.name}-${n}`));
           await shot(`flow-${flow.name}`);
-        }, !!flow.signed_in, {}, inheritedWhere(flow, viewport, PAGES, DEFAULT_VIEWPORTS));
+        }, !!flow.signed_in, {}, inheritedWhere(flow, viewport, PAGES, DEFAULT_VIEWPORTS), expectedErrors(flow));
       }
     } else {
       await visit(browser, urls, result, DEVICE_CACHE, "desktop", (page) => cacheCheck(page, urls.signedIn), true, { prf: true });
@@ -670,7 +713,7 @@ async function main() {
         // The signed-in server is reached at localhost (its sign-in's public address), the other at the loopback address.
         const url = `http://${signedIn ? "localhost" : "127.0.0.1"}:${server.port}`;
         try {
-          await runItem(browser, signedIn ? { signedIn: url } : { base: url }, item, result);
+          await runItem(browser, { ...(signedIn ? { signedIn: url } : { base: url }), fakes: readFakes(server.dir) }, item, result);
         } finally {
           await server.stop();
         }

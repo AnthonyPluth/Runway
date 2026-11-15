@@ -89,7 +89,8 @@ describe.each([false, true])("deleting the selected (phone: %s)", (phone) => {
     expect(p.onchanged).toHaveBeenCalledOnce();
     expect(refreshState).toHaveBeenCalledOnce();
     expect(screen.queryByRole("region", { name: "Change the selected transactions" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The confirm dialog unmounts after its exit transition, a frame later in bits-ui 2.20.
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(tick("Alpha")).not.toBeChecked();
   });
 

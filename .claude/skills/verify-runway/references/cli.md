@@ -16,6 +16,7 @@ Session:
   stop         Stop the session: its browser, its demo server and its copy of the data.
   cleanup      Remove what a crashed session left: its state file, data folders and processes.
   reset        Fresh demo data: a new copy of the seed on a new demo server, and the page opened again.
+  bank         How the session's stand-in bank answers a sync: ok, or failing a chosen way.
 
 Navigate:
   goto         Open a route of the app.
@@ -77,6 +78,7 @@ The server and the seed run under libfaketime at make verify's frozen day, and t
 One session per checkout, on ports and data of its own: it never takes make verify's machine lock, and a running make verify is left alone.
 Refuses when the machine is busy (make verify's load check) unless --anyway. A stale session (its process gone) is cleaned up first.
 Isolated: the browser reaches only its own demo server (a request anywhere else, another port on this machine included, is blocked before it's sent), and the session's processes get only what runway/verify.py's KEPT_ENV lists of your environment, so no API key or token in your shell reaches them.
+The demo server has two stand-ins beside it, on loopback ports of their own, as in make verify: a SimpleFIN bridge (see `bank`) and the price service. Every other outbound request it makes still goes nowhere.
 
 Options:
   --ai-buttons  seed what the AI buttons need
@@ -146,6 +148,24 @@ Options:
 Examples:
   tools/control reset --dry-run
   tools/control reset
+```
+
+### bank
+
+```text
+tools/control bank [ok|401|403|500|slow|partial]
+
+How the session's stand-in bank answers a sync: ok, or failing a chosen way.
+
+A session's demo server has a stand-in SimpleFIN bridge beside it (tests/fakes/simplefin_server.py), on the loopback address, with made-up accounts that match the demo's: Sync now and Settings → Connections talk to it, and nothing else does.
+ok answers as a bank that works (the first sync brings a few new purchases). 401, 403 and 500 fail every request that way (403 is what a bridge answers once access is revoked: the app then says to reconnect). slow answers after two seconds. partial leaves one institution out and says it needs attention.
+Without a mode it says the current one. The mode stays until you change it; `reset` starts a new bank at ok.
+The setup token to paste in Settings → Connections is the same every time: aHR0cHM6Ly9zYW1wbGUtYmFuay5pbnZhbGlkL2NsYWltL2RlbW8tc2V0dXAtdG9rZW4= (it brings one more account than the demo has).
+
+Examples:
+  tools/control bank
+  tools/control bank 403
+  tools/control bank ok
 ```
 
 ## Navigate

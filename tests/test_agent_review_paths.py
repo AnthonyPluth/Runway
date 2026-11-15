@@ -13,7 +13,8 @@ tuple, or the whole of `settings_keys.SECRETS`; arguments by position or keyword
 or built by a function, a secret put in a tuple, dict or object before it is returned or passed on, a secret handed
 to another module as an argument (PLAINTEXT_RECEIVERS names those by hand), a class's attributes, `getattr` or
 `from module import *`, or a read that goes around the accessors (reads_settings_rows catches a select of the
-settings table)."""
+settings table). It also misses an accessor imported under another name (`from ..storage.db import get_setting as
+gs`): the check matches the accessors by their names, and no module does this today, so the gap is accepted."""
 import ast
 import re
 import unittest
@@ -273,6 +274,8 @@ PLAINTEXT_RECEIVERS = {
     "runway/providers/simplefin.py": "sync.py reads the access URL and passes it to simplefin.sync",
     "runway/providers/finnhub.py": "investments.py reads the API key and passes it to the shared live connection",
     "runway/providers/prices.py": "the live quote stream takes the Finnhub key (live_key) and hands it to finnhub's feed",
+    "runway/server/api/notifications.py": "api_push calls webpush.vapid_keys, which returns the decrypted VAPID private key",
+    "runway/server/api/retail.py": "api_retail_token returns the freshly generated browser-extension token",
 }
 
 # Modules that select settings rows themselves but never a secret one, and why.

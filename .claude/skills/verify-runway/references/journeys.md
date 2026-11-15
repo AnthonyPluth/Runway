@@ -74,3 +74,36 @@ tools/control flow transactions-delete --viewport desktop
 ```
 
 A failed step stops the flow, saves `artifacts/control/flows/flow-<name>-FAILED-<width>.png`, and exits 1. On data the flow didn't change, its images match `screenshots/` byte for byte. Run `reset` before a second run.
+
+## 6. Drive a bank sync against the stand-in bank
+
+A session's demo server has a stand-in SimpleFIN bridge beside it (`tests/fakes/simplefin_server.py`), with the demo's accounts and a few purchases the demo doesn't have yet. Sync now, a sync that fails and connecting with a setup token all run against it; nothing leaves the machine.
+
+```sh
+tools/control start --viewport desktop
+tools/control bank --text                          # mode: ok
+tools/control click button 'Sync now'              # the sidebar's button (on a phone: click More first)
+tools/control goto transactions --reload
+tools/control snapshot --root '[data-tx-list]' --text --max-lines 40   # Taco Place (pending), Corner Coffee, Green Grocer Market
+tools/control bank 403                             # the bridge now refuses: access revoked
+tools/control click button 'Sync now'
+tools/control network --text | grep 502            # POST /api/sync 502: expected here, a bug anywhere else
+tools/control goto '#setup/connections'
+tools/control snapshot --text | grep -A3 'Needs attention'   # "The last sync didn’t finish…"; Details has "Reconnect in Settings."
+tools/control screenshot
+tools/control bank ok                              # put it back before anything else
+```
+
+To connect with a setup token, open SimpleFIN under Settings → Connections, choose "Replace the setup token" and paste this one (it is the same every time, and brings one more account, Vacation Savings):
+
+```sh
+tools/control goto '#setup/connections'
+tools/control click 'details[data-group=banks] summary:has-text("SimpleFIN")'
+tools/control click button 'Replace the setup token'
+tools/control type textbox 'SimpleFIN setup token' 'aHR0cHM6Ly9zYW1wbGUtYmFuay5pbnZhbGlkL2NsYWltL2RlbW8tc2V0dXAtdG9rZW4='
+tools/control click button 'Connect and sync'
+tools/control goto '#setup/accounts' --reload
+tools/control snapshot --text | grep 'Vacation Savings'
+```
+
+`bank 401` and `bank 500` fail the sync with the bridge's status in the message, `bank slow` makes each answer take two seconds (the Sync button spins), and `bank partial` leaves one institution out: the sync works and the sidebar says a bank needs attention. `reset` starts a new bank at `ok`. The flows `sync-now`, `sync-reconnect` and `simplefin-connect` (and their `-phone` versions) run the same steps in make verify. Plaid, Carta, Realie and Finnhub's live stream have no stand-in: test those with their unit tests.
