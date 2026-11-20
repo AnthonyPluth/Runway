@@ -470,6 +470,31 @@ class ForecastEdgeTests(LedgerCase):
             Transaction.id == select(func.max(Transaction.id)).where(Transaction.account_id == "cc").scalar_subquery()))
         self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
 
+    def test_a_payment_matching_the_statement_counts_when_the_payer_pays_other_cards(self):
+        # the card's own sync is behind, so it shows no credit; the paying account pays a second card too
+        self.acct("cc2", "credit", -50.0, pay_from="chk")
+        self.stmt("cc2", 300.0, "2026-09-10", "2026-10-05")
+        self.tx("chk", "2026-09-22", -800.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
+        # card_setup's card already shows a 200 payment, so the 800 on top is the whole statement and then some
+        self.assertEqual((self.cycle("cc")["paid_since_close"], self.cycle("cc")["remaining"]), (1000.0, 0.0))
+        self.assertEqual(self.cycle("cc2")["paid_since_close"], 0.0)
+        self.tx("cc", "2026-09-23", 800.0, "PAYMENT THANK YOU", "Credit Card Payment")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 1000.0)
+
+    def test_a_payment_that_is_not_the_statement_is_not_guessed_for_a_shared_payer(self):
+        self.acct("cc2", "credit", -50.0, pay_from="chk")
+        self.stmt("cc2", 300.0, "2026-09-10", "2026-10-05")
+        self.tx("chk", "2026-09-22", -750.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
+        self.assertEqual(self.cycle("cc2")["paid_since_close"], 0.0)
+
+    def test_a_payment_matching_two_cards_statements_is_not_guessed(self):
+        self.acct("cc2", "credit", -50.0, pay_from="chk")
+        self.stmt("cc2", 800.0, "2026-09-10", "2026-10-05")
+        self.tx("chk", "2026-09-22", -800.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
+        self.assertEqual(self.cycle("cc2")["paid_since_close"], 0.0)
+
     def test_recurring_charges_on_cards_are_listed_apart(self):
         self.conn.execute(update(Account).where(Account.id == "cc").values(display_name="Travel Card"))
         before = forecast.build(self.conn, TODAY, 60)["events"]
