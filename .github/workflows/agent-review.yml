@@ -37,9 +37,15 @@ jobs:
   review:
     # A label event starts a run only for a trigger label (fleet's defaults, `security` and `safety-critical`), and an
     # unlabeled one only when the repository owner sent it: fleet's workflow skips every other label event anyway, and
-    # here one never enters the concurrency group below, so it can't take the place of a run that matters.
+    # here one never enters the concurrency group below, so it can't take the place of a run that matters. The one
+    # other label event let through is removing `keep-draft` (by anyone who may remove a label; GitHub compares label
+    # names ignoring case): fleet's `keep-draft-removed` job (fleet v4.0.0) then starts merge-gate.yml with the pull
+    # request's number, so a draft held for the owner is marked ready once the gate passes (AGENTS.md's "Git and PRs").
+    # That job checks out nothing and runs nothing of the pull request's; fleet's second review skips a label that isn't
+    # a trigger label and leaves the "Second review" status as it is.
     if: >-
       !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'keep-draft') ||
       (contains(fromJSON('["security", "safety-critical"]'), github.event.label.name) &&
        (github.event.action == 'labeled' || github.event.sender.login == github.repository_owner))
     # One group for pushes and one for label events, per pull request (github.ref is main's on pull_request_target, so
@@ -49,9 +55,10 @@ jobs:
     # event takes its place (GitHub keeps one waiting run per group), so the latest labels are what is reviewed last.
     # Pushes and label events stay apart so neither cancels the other's review. The label group isn't split by label
     # name: fleet's second-review job has one label group per pull request with cancel-in-progress, so two label runs
-    # going at once would still cancel each other there; queueing them here is what keeps a running one whole.
+    # going at once would still cancel each other there; queueing them here is what keeps a running one whole. Removing
+    # `keep-draft` has a group of its own, so it never takes the place of a waiting trigger-label run.
     concurrency:
-      group: agent-review-pr-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) && 'label' || 'push' }}
+      group: agent-review-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'unlabeled' && github.event.label.name == 'keep-draft' && 'keep-draft' || contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) && 'label' || 'push' }}
       cancel-in-progress: ${{ !contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) }}
     permissions:
       contents: read           # main's instructions and the pull request's code
