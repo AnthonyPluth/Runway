@@ -248,17 +248,32 @@ def bank_statement(conn, card: dict, today: date) -> dict | None:
             "due_day": (due if due and due > close else close + timedelta(days=NO_STATEMENT_DUE_DAYS)).day}
 
 
-def in_transit(conn, card: dict, last_close: date) -> float:
-    """Card payments that have left the paying account since the close but haven't reached the card yet. Only
-    counted when that account pays no other card, so a payment can't be mistaken for another card's (a card that
-    hasn't been given a paying account yet could be paid from it too)."""
+def in_transit(conn, card: dict, last_close: date, statement: float = 0.0, today: date | None = None) -> float:
+    """Card payments that have left the paying account since the close but haven't reached the card yet (a card whose
+    own sync is behind shows no credit for them). When the paying account pays only this card, every such payment
+    counts, so one can't be mistaken for another card's. When it pays others too (or a card has no paying account
+    yet), only a payment for exactly this card's `statement` counts, and only if no other card it could be paying has
+    that same statement balance."""
     payer = card.get("pay_from")
-    if not payer or not pays_only(conn, payer, card["id"]):
+    if not payer:
         return 0.0
+    sole = pays_only(conn, payer, card["id"])
+    if not sole and (statement <= CENT or today is None):
+        return 0.0
+    shared_on = today if not sole else None
     T = Transaction
-    sent = conn.execute(select(T.posted, T.amount)
-                        .where(T.account_id == payer, T.category == "Credit Card Payment", T.amount < 0,
-                               T.posted > last_close.isoformat()).order_by(T.posted)).fetchall()
+    sent = db.rows(conn.execute(select(T.posted, T.amount)
+                                .where(T.account_id == payer, T.category == "Credit Card Payment", T.amount < 0,
+                                       T.posted > last_close.isoformat()).order_by(T.posted)))
+    if shared_on is not None:
+        sent = [s for s in sent if abs(-s["amount"] - statement) <= CENT]
+        rivals = db.rows(conn.execute(
+            select(Account).where(Account.kind == "credit", Account.hidden == 0, Account.id != card["id"],
+                                  or_(Account.pay_from == payer, Account.pay_from.is_(None)))))
+        for r in rivals:
+            other = bank_statement(conn, r, shared_on)
+            if other and abs((other["last_statement_balance"] or 0.0) - statement) <= CENT:
+                return 0.0
     if not sent:
         return 0.0
     unclaimed = db.rows(conn.execute(
@@ -429,7 +444,7 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     known = statement_override(conn, card["id"], last_close)
     statement = known if known is not None else reported
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
-    paid += in_transit(conn, card, last_close)
+    paid += in_transit(conn, card, last_close, statement, today)
     charges = [t for t in txs if t["category"] not in transfers]
     credits = sum((t["amount"] for t in charges if t["amount"] > 0 and not t["pending"]), 0.0)
     over = max(0.0, paid + credits - statement)
