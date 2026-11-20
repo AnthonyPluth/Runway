@@ -189,10 +189,31 @@ fleet-checks:
 	tools/fleet drift
 
 # Brings fleet's content (the AGENTS.md blocks, the vendored .claude/ files, tools/fleet, .fleet/version) to the version
-# the workflow pins carry (`uses: AnthonyPluth/fleet/...@<sha>   # vX.Y.Z`), as .github/workflows/fleet-sync.yml does
-# after a pin bump. FLEET_VERSION=vX.Y.Z picks another version.
+# the workflow pins carry (`uses: AnthonyPluth/fleet/.github/workflows/<name>.yml@<sha>   # vX.Y.Z`), as
+# .github/workflows/fleet-sync.yml does after a pin bump (fleet's docs/adopting.md, step 4). It doesn't go through
+# tools/fleet: that runs fleet at .fleet/version's commit, the content's current one, and `fleet sync --to vX.Y.Z`
+# refuses unless the running fleet is the commit the workflow pins carry at that version. So this runs fleet at the
+# pins' commit, and there is no version override: another version has no commit to name here. It fails when the pins
+# don't all carry the same commit and version. uv is installed the way tools/fleet does when it's missing.
 fleet-sync:
-	tools/fleet sync --to $(or $(FLEET_VERSION),$(shell grep -rhoE 'AnthonyPluth/fleet/[^@]+@[0-9a-f]+ +# v[0-9.]+' .github/workflows | head -1 | sed 's/.*# //'))
+	@set -eu; \
+	pins=$$(grep -rhoE 'AnthonyPluth/fleet/\.github/workflows/[A-Za-z0-9_.-]+\.yml@[0-9a-f]{40} +# v[0-9]+\.[0-9]+\.[0-9]+' .github/workflows \
+		| sed -E 's/.*@([0-9a-f]{40}) +# (v[0-9.]+)$$/\1 \2/' | sort -u); \
+	if [ -z "$$pins" ]; then \
+		echo "fleet-sync: no 'uses: AnthonyPluth/fleet/.github/workflows/<name>.yml@<40-hex sha>   # vX.Y.Z' pins in .github/workflows" >&2; exit 1; \
+	fi; \
+	if [ "$$(printf '%s\n' "$$pins" | wc -l)" -ne 1 ]; then \
+		echo "fleet-sync: the workflow pins disagree on the fleet commit or version (sha version):" >&2; \
+		printf '%s\n' "$$pins" | sed 's/^/  /' >&2; \
+		echo "Make every pin the same release (a Dependabot fleet update moves them together), then run it again." >&2; exit 1; \
+	fi; \
+	set -- $$pins; sha=$$1; version=$$2; \
+	export PATH="$$HOME/.local/bin:$$PATH"; \
+	if ! command -v uvx >/dev/null 2>&1; then \
+		python3 -m pip install --quiet --user "$$(grep -oE 'uv==[0-9][0-9.]*' tools/fleet | head -1)"; \
+	fi; \
+	echo "fleet-sync: fleet $$version at $$sha"; \
+	uvx --from "git+https://github.com/AnthonyPluth/fleet@$$sha" fleet sync --to "$$version"
 
 # The quick checks for what fails CI most often, a minute or so, to run before each push (it doesn't replace make check,
 # which you run once before the last one): the feature map, API contract and fleet checks, and the tests that read
