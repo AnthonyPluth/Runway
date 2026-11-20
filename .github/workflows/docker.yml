@@ -232,7 +232,7 @@ jobs:
   fleet-checks:
     permissions:
       contents: read
-    uses: AnthonyPluth/fleet/.github/workflows/checks.yml@cde1e44cc7eff96647c5a8d26d3172763f2f0a6d   # v6.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/checks.yml@bf386593387dcbb56303dcb11f16c93dcc59a5d9   # v7.1.0
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and build it (reporting its bundle sizes to Codecov).
@@ -312,7 +312,7 @@ jobs:
     permissions:
       contents: write          # the ceiling every job of the called workflow is checked against; fleet's build job takes contents: read (docker.yml:117)
       packages: write
-    uses: AnthonyPluth/fleet/.github/workflows/docker.yml@cde1e44cc7eff96647c5a8d26d3172763f2f0a6d   # v6.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/docker.yml@bf386593387dcbb56303dcb11f16c93dcc59a5d9   # v7.1.0
     with:
       image: runway
       smoke-env: |
@@ -327,7 +327,7 @@ jobs:
     permissions:
       contents: write          # create the tag and the release
       packages: write          # publish to ghcr.io, and delete the untagged leftovers
-    uses: AnthonyPluth/fleet/.github/workflows/docker.yml@cde1e44cc7eff96647c5a8d26d3172763f2f0a6d   # v6.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/docker.yml@bf386593387dcbb56303dcb11f16c93dcc59a5d9   # v7.1.0
     with:
       image: runway
       publish: true

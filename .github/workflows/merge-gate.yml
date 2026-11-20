@@ -12,6 +12,11 @@ name: Merge gate
 # requires the "Second review" status alone (fleet's default `required-statuses`), and Codex reviews every pull request.
 # `require-codex-review: true` below also keeps the gate pending until Codex has reviewed the head commit
 # (merge-gate-threads.yml runs the gate again when Codex's comment arrives).
+# Once the gate passes on a draft's head it marks the draft ready for review (fleet's `auto-ready`, on by default since
+# fleet v4.0.0), except a pull request from a fork or Dependabot's, one labelled `keep-draft` (an agent waiting on the
+# owner; removing the label starts the gate again through agent-review.yml) and one someone converted to draft by hand.
+# The flip starts no workflow, which is fine here: no workflow in this repository skips its jobs on a draft, so a draft
+# has already run every check a ready pull request gets, and `auto-ready` stays at fleet's default.
 #
 # The triggers, the job's condition and the concurrency group stay here, because a called workflow can't declare them.
 # It runs from main's copy with a write token and never checks out or runs a pull request's code: it only reads the pull
@@ -53,11 +58,11 @@ jobs:
       (github.event_name == 'check_suite' && github.event.check_suite.app.slug != 'github-actions')
     permissions:
       contents: write          # merge Dependabot's pull requests
-      pull-requests: write     # merge them, and read their commits, files and review threads
+      pull-requests: write     # merge them, mark a draft ready, and read their commits, files and review threads
       statuses: write          # the "Merge gate" status
       actions: write           # read the pull request's workflow runs, and start main's release after a merge
       checks: read             # other apps' check runs
-    uses: AnthonyPluth/fleet/.github/workflows/merge-gate.yml@cde1e44cc7eff96647c5a8d26d3172763f2f0a6d   # v6.0.0
+    uses: AnthonyPluth/fleet/.github/workflows/merge-gate.yml@bf386593387dcbb56303dcb11f16c93dcc59a5d9   # v7.1.0
     with:
       sha: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
       pr: ${{ inputs.pr }}
