@@ -231,18 +231,49 @@ typing-extensions = ">=4.12"
 tz = ["tzdata"]
 
 [[package]]
+name = "amazon-auth"
+version = "1.1.0"
+description = "Sign in to Amazon's consumer website and reuse the session from Python."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "amazon_auth-1.1.0-py3-none-any.whl", hash = "sha256:fecf10d4f523ad051c55c7c4445f0ac5800fa0e4e67d0415a70889ea3738e234"},
+    {file = "amazon_auth-1.1.0.tar.gz", hash = "sha256:d2bc77702b1e4f6a6cc5f6a2a14b2e84cd7ecba48737c1f9de50ee6c087e7c8b"},
+]
+
+[package.dependencies]
+beautifulsoup4 = ">=4.14"
+click = ">=7.1"
+Pillow = ">=9.0.1"
+pyotp = ">=2.9"
+PyYAML = ">=6.0.3"
+requests = ">=2.23"
+
+[package.extras]
+2captcha = ["2captcha-python"]
+anticaptcha = ["anticaptchaofficial"]
+browser = ["playwright (>=1.47.0)"]
+capsolver = ["capsolver"]
+dev = ["coverage[toml]", "flake8", "flake8-pyproject", "mypy", "pep8-naming", "pytest", "responses", "types-Pillow", "types-PyYAML", "types-requests"]
+docs = ["Sphinx", "furo", "mypy", "sphinx-notfound-page", "sphinx-sitemap", "sphinx_autodoc_typehints", "sphinxext-opengraph", "types-Pillow", "types-PyYAML", "types-requests"]
+integration = ["parameterized", "pytest-rerunfailures"]
+lxml = ["lxml"]
+
+[[package]]
 name = "amazon-orders"
-version = "5.2.2"
+version = "6.0.0"
 description = "A Python library (and CLI) for Amazon order history, line items, and transactions"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "amazon_orders-5.2.2-py3-none-any.whl", hash = "sha256:15cca18d2c911c16a7846b06fbbf61262ef82197b0198e0acc659e999fcd600e"},
-    {file = "amazon_orders-5.2.2.tar.gz", hash = "sha256:2b36cf89ebd8c44311eff48e5ecda3f2c34975c8c80d882f39b4f47215d9e3ef"},
+    {file = "amazon_orders-6.0.0-py3-none-any.whl", hash = "sha256:7fcf60b46d4165c4c2833264112677e65ff0bd2bf66e10cd5da2b6da50a2a2d8"},
+    {file = "amazon_orders-6.0.0.tar.gz", hash = "sha256:0dec98713bbd013cb00ff3054201acfbf84bdfe0706169efb21f17c198ed5260"},
 ]
 
 [package.dependencies]
+amazon-auth = ">=1.0.0,<2"
 beautifulsoup4 = ">=4.14"
 click = ">=7.1"
 Pillow = ">=9.0.1"
@@ -252,11 +283,10 @@ PyYAML = ">=6.0.3"
 requests = ">=2.23"
 
 [package.extras]
-2captcha = ["2captcha-python"]
-anticaptcha = ["anticaptchaofficial"]
-browser = ["playwright (>=1.47.0)"]
-capsolver = ["capsolver"]
-captcha = ["amazoncaptcha (>=0.4)"]
+2captcha = ["amazon-auth[2captcha]"]
+anticaptcha = ["amazon-auth[anticaptcha]"]
+browser = ["amazon-auth[browser]"]
+capsolver = ["amazon-auth[capsolver]"]
 dev = ["coverage[toml]", "flake8", "flake8-pyproject", "lxml", "pep8-naming", "pytest", "responses"]
 docs = ["Sphinx", "furo", "mypy", "sphinx-notfound-page", "sphinx-sitemap", "sphinx_autodoc_typehints", "sphinxext-opengraph", "types-Pillow", "types-PyYAML", "types-python-dateutil", "types-requests"]
 integration = ["parameterized", "pytest-rerunfailures"]
@@ -3230,4 +3260,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<4.0"
-content-hash = "bc57541283be0414eef785606de45b518974a2250fa235e9157f78cd68797f0d"
+content-hash = "ad5f919b9294bfbe422f0d48801fe378449ce1d778b3ef8026f8423fff0fa11b"
